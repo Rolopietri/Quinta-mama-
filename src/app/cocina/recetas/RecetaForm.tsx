@@ -1,0 +1,1177 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import {
+  CATEGORIAS_RECETA,
+  SECCIONES,
+  precioConIva,
+  precioSinIva,
+  categoriaInsumoLabel,
+  type CategoriaReceta,
+  type Insumo,
+  type Receta,
+  type RecetaIngrediente,
+  type Seccion,
+} from "@/lib/types";
+import { createReceta, updateReceta, listRecetas } from "@/lib/data/recetas";
+import { listInsumos } from "@/lib/data/cocina";
+import { getCocinaConfig } from "@/lib/data/cocinaConfig";
+import { extractError } from "@/lib/data/error";
+import { UnitCalculator } from "@/components/UnitCalculator";
+import { UnidadInput } from "@/components/UnidadInput";
+import {
+  convertirParaCosto,
+  areCompatible,
+  dimension,
+} from "@/lib/units";
+
+type LineForm = {
+  key: string;
+  insumoId?: string;
+  subrecetaId?: string;
+  nombre: string;
+  cantidad: string;
+  unidad: string;
+  observaciones: string;
+  costoManual: string; // precio manual por unidad para ad-hoc
+};
+
+function uid() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+}
+
+function lineFromIng(i: RecetaIngrediente): LineForm {
+  return {
+    key: uid(),
+    insumoId: i.insumoId,
+    subrecetaId: i.subrecetaId,
+    nombre: i.nombre,
+    cantidad: String(i.cantidad),
+    unidad: i.unidad,
+    observaciones: i.observaciones ?? "",
+    costoManual:
+      i.costoManualUsd !== undefined ? String(i.costoManualUsd) : "",
+  };
+}
+
+export function RecetaForm({
+  existing,
+  onSaved,
+}: {
+  existing?: Receta;
+  onSaved?: (r: Receta) => void;
+}) {
+  const router = useRouter();
+  const [insumos, setInsumos] = useState<Insumo[]>([]);
+  const [recetasContexto, setRecetasContexto] = useState<Receta[]>([]);
+  const [loadingIns, setLoadingIns] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
+  /** Quick search dentro del catálogo de insumos. */
+  const [insumoSearch, setInsumoSearch] = useState("");
+
+  const [nombre, setNombre] = useState(existing?.nombre ?? "");
+  const [seccion, setSeccion] = useState<Seccion>(existing?.seccion ?? "cafetin");
+  const [categoria, setCategoria] = useState<CategoriaReceta | "">(
+    existing?.categoria ?? "",
+  );
+  const [perfil, setPerfil] = useState(existing?.perfil ?? "");
+  const [porciones, setPorciones] = useState(
+    String(existing?.porciones ?? 1),
+  );
+  const [tiempoPrep, setTiempoPrep] = useState(
+    existing?.tiempoPrepMin ? String(existing.tiempoPrepMin) : "",
+  );
+  const [tiempoCoc, setTiempoCoc] = useState(
+    existing?.tiempoCoccionMin ? String(existing.tiempoCoccionMin) : "",
+  );
+  const [temperatura, setTemperatura] = useState(existing?.temperatura ?? "");
+  const [procedimiento, setProcedimiento] = useState(
+    existing?.procedimiento ?? "",
+  );
+  const [presentacion, setPresentacion] = useState(existing?.presentacion ?? "");
+  const [notasChef, setNotasChef] = useState(existing?.notasChef ?? "");
+  const [variaciones, setVariaciones] = useState(existing?.variaciones ?? "");
+  // Precio sugerido SIN IVA (es el canónico que se guarda en DB).
+  const [precioSugerido, setPrecioSugerido] = useState(
+    existing?.precioSugeridoUsd ? String(existing.precioSugeridoUsd) : "",
+  );
+  // % IVA cargado desde cocina_config (default 16). Lo usamos para sincronizar
+  // sin↔con IVA en el input.
+  const [ivaPorc, setIvaPorc] = useState(16);
+  // Sub-receta flags
+  const [esSubreceta, setEsSubreceta] = useState<boolean>(
+    existing?.esSubreceta ?? false,
+  );
+  const [rendimiento, setRendimiento] = useState(
+    existing?.rendimiento ? String(existing.rendimiento) : "",
+  );
+  const [rendimientoUnidad, setRendimientoUnidad] = useState(
+    existing?.rendimientoUnidad ?? "g",
+  );
+
+  const [lineas, setLineas] = useState<LineForm[]>(
+    existing?.ingredientes.map(lineFromIng) ?? [],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [ins, recs, cfg] = await Promise.all([
+          listInsumos(),
+          listRecetas(),
+          getCocinaConfig(),
+        ]);
+        if (!cancelled) {
+          setInsumos(ins);
+          setRecetasContexto(recs);
+          setIvaPorc(cfg.ivaPorc);
+        }
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : "Error");
+      } finally {
+        if (!cancelled) setLoadingIns(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Subrecetas disponibles (excluyendo la actual si estás editándola)
+  const subrecetasDisponibles = useMemo(() => {
+    return recetasContexto
+      .filter((r) => r.esSubreceta && r.activo && r.id !== existing?.id)
+      .sort((a, b) => a.nombre.localeCompare(b.nombre));
+  }, [recetasContexto, existing?.id]);
+
+  const subrecetasMap = useMemo(
+    () => new Map(subrecetasDisponibles.map((r) => [r.id, r])),
+    [subrecetasDisponibles],
+  );
+
+  const insumosMap = useMemo(
+    () => new Map(insumos.map((i) => [i.id, i])),
+    [insumos],
+  );
+
+  // Agrupar insumos por categoría, ordenados según CATEGORIAS_INSUMO
+  const insumosPorCategoria = useMemo(() => {
+    // Quick search: match por nombre del insumo o por label de su categoría.
+    // Normalizamos (lowercase + sin acentos) para que "cafe" matchee "Café".
+    const q = insumoSearch
+      .trim()
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "");
+    const normalize = (s: string) =>
+      s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+
+    const map = new Map<string, Insumo[]>();
+    for (const ins of insumos) {
+      if (!ins.activo) continue;
+      if (q) {
+        const catLabel = categoriaInsumoLabel(ins.categoria);
+        const haystack = `${normalize(ins.nombre)} ${normalize(catLabel)}`;
+        if (!haystack.includes(q)) continue;
+      }
+      if (!map.has(ins.categoria)) map.set(ins.categoria, []);
+      map.get(ins.categoria)!.push(ins);
+    }
+    // Ordenar cada grupo alfabéticamente
+    for (const arr of map.values()) {
+      arr.sort((a, b) => a.nombre.localeCompare(b.nombre));
+    }
+    // Devolver agrupado por categoría (cualquiera, incluidas las nuevas),
+    // ordenado por etiqueta de categoría.
+    return Array.from(map.entries())
+      .map(([categoria, items]) => ({ categoria, items }))
+      .filter((g) => g.items.length > 0)
+      .sort((a, b) =>
+        categoriaInsumoLabel(a.categoria).localeCompare(
+          categoriaInsumoLabel(b.categoria),
+        ),
+      );
+  }, [insumos, insumoSearch]);
+
+  /** Clave de la última línea agregada — se usa para hacer scroll + focus
+   *  automático al input de cantidad. Así el usuario no tiene que bajar a
+   *  ver si se agregó el ingrediente: el sistema lo lleva. */
+  const [lastAddedKey, setLastAddedKey] = useState<string | null>(null);
+
+  function addLineFromSubreceta(sub: Receta) {
+    const key = uid();
+    setLineas((prev) => [
+      ...prev,
+      {
+        key,
+        subrecetaId: sub.id,
+        nombre: sub.nombre,
+        cantidad: "1",
+        unidad: "", // El usuario elige la unidad explícitamente del datalist
+        observaciones: "",
+        costoManual: "",
+      },
+    ]);
+    setLastAddedKey(key);
+  }
+
+  function addLineFromInsumo(insumo: Insumo) {
+    const key = uid();
+    setLineas((prev) => [
+      ...prev,
+      {
+        key,
+        insumoId: insumo.id,
+        nombre: insumo.nombre,
+        cantidad: "1",
+        // La unidad queda en blanco: el usuario la elige explícitamente del
+        // datalist (kg, g, ml, L, unidad...). Así evitamos el bug donde el
+        // sistema asume una unidad y el costo sale mal por la conversión.
+        unidad: "",
+        observaciones: "",
+        costoManual: "",
+      },
+    ]);
+    setLastAddedKey(key);
+  }
+
+  function addLineAdHoc() {
+    const key = uid();
+    setLineas((prev) => [
+      ...prev,
+      {
+        key,
+        nombre: "",
+        cantidad: "1",
+        unidad: "g",
+        observaciones: "",
+        costoManual: "",
+      },
+    ]);
+    setLastAddedKey(key);
+  }
+
+  // Cuando agregamos una línea: scroll suave hacia ella + focus + select del
+  // input de cantidad para que el usuario escriba directo (sobrescribe el "1").
+  useEffect(() => {
+    if (!lastAddedKey) return;
+    requestAnimationFrame(() => {
+      const wrapper = document.querySelector<HTMLElement>(
+        `[data-linea-key="${lastAddedKey}"]`,
+      );
+      if (!wrapper) return;
+      wrapper.scrollIntoView({ behavior: "smooth", block: "center" });
+      // Highlight breve para confirmación visual
+      wrapper.classList.add("ring-2", "ring-terracotta");
+      setTimeout(() => {
+        wrapper.classList.remove("ring-2", "ring-terracotta");
+      }, 1500);
+      // Focus + select del primer input de cantidad
+      const cantInput = wrapper.querySelector<HTMLInputElement>(
+        'input[type="number"]',
+      );
+      if (cantInput) {
+        cantInput.focus({ preventScroll: true });
+        cantInput.select();
+      }
+      setLastAddedKey(null);
+    });
+  }, [lastAddedKey]);
+
+  function updateLine(key: string, patch: Partial<LineForm>) {
+    setLineas((prev) =>
+      prev.map((l) => {
+        if (l.key !== key) return l;
+        const next = { ...l, ...patch };
+        // Si cambia insumoId, autorrellenar unidad
+        if (patch.insumoId !== undefined) {
+          const ins = insumosMap.get(patch.insumoId);
+          if (ins) {
+            next.unidad = ins.unidadBase;
+            if (!l.nombre.trim()) next.nombre = ins.nombre;
+          }
+        }
+        return next;
+      }),
+    );
+  }
+
+  function removeLine(key: string) {
+    setLineas((prev) => prev.filter((l) => l.key !== key));
+  }
+
+  // Cálculo en vivo (insumo del catálogo + subreceta + ad-hoc)
+  // Para subrecetas usamos su costo por unidad base (costo_porPorcion / rendimiento)
+  const costo = useMemo(() => {
+    // Costo por unidad base por subreceta, calculado una vez. Aplicamos
+    // conversión de unidades para que el costo refleje el precio real
+    // incluso si la subreceta declara sus ingredientes en kg y el insumo
+    // está en g (o L↔ml, etc.) — misma lógica que el backend
+    // (recetas.ts → calcularCostoRecetaInterno).
+    const costoUnidadSub = new Map<string, number>();
+    for (const sub of subrecetasDisponibles) {
+      // Rendimiento se interpreta como el TOTAL del batch (ej: 500g = el batch
+      // entero produce 500g). Si no está definido, asumimos 1.
+      const rendEfectivo =
+        sub.rendimiento && sub.rendimiento > 0 ? sub.rendimiento : 1;
+      let totalSub = 0;
+      for (const ing of sub.ingredientes) {
+        if (ing.insumoId) {
+          const ins = insumosMap.get(ing.insumoId);
+          if (ins && ins.precioBaseUsd !== null) {
+            const conv = convertirParaCosto(
+              ing.cantidad,
+              ing.unidad,
+              ins.unidadBase,
+            );
+            const cantBase = conv?.resultado ?? ing.cantidad;
+            totalSub += cantBase * ins.precioBaseUsd;
+          }
+        } else if (ing.costoManualUsd) {
+          totalSub += ing.cantidad * ing.costoManualUsd;
+        }
+      }
+      // costo por unidad = costo total del batch ÷ rendimiento total
+      costoUnidadSub.set(sub.id, totalSub / rendEfectivo);
+    }
+
+    let total = 0;
+    lineas.forEach((l) => {
+      const cant = Number(l.cantidad) || 0;
+      if (l.insumoId) {
+        const ins = insumosMap.get(l.insumoId);
+        if (ins && ins.precioBaseUsd !== null) {
+          // Convertimos la cantidad declarada en la receta a la unidad base
+          // del insumo antes de multiplicar por el precio.
+          const conv = convertirParaCosto(cant, l.unidad, ins.unidadBase);
+          const cantBase = conv?.resultado ?? cant;
+          total += cantBase * ins.precioBaseUsd;
+          return;
+        }
+      }
+      if (l.subrecetaId) {
+        const u = costoUnidadSub.get(l.subrecetaId);
+        if (u && u > 0) {
+          // Si la receta padre pide la subreceta en L y la subreceta rinde en ml,
+          // convertimos antes de multiplicar.
+          const subR = subrecetasMap.get(l.subrecetaId);
+          const unidadDest = subR?.rendimientoUnidad ?? l.unidad;
+          const conv = convertirParaCosto(cant, l.unidad, unidadDest);
+          const cantBase = conv?.resultado ?? cant;
+          total += cantBase * u;
+          return;
+        }
+      }
+      const manual = Number(l.costoManual) || 0;
+      if (manual > 0) total += cant * manual;
+    });
+    const porc = Number(porciones) || 1;
+    return { total, porPorcion: total / porc };
+  }, [lineas, insumosMap, porciones, subrecetasDisponibles, subrecetasMap]);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!nombre.trim()) {
+      setError("La receta necesita un nombre.");
+      return;
+    }
+    // Validaciones específicas para sub-receta
+    if (esSubreceta) {
+      const rendNum = Number(rendimiento);
+      if (!rendimiento || !Number.isFinite(rendNum) || rendNum <= 0) {
+        setError(
+          "Las sub-recetas requieren un rendimiento mayor a 0 (ej: 200 g, 500 ml). Llénalo en la sección de Tipo de receta.",
+        );
+        return;
+      }
+      if (!rendimientoUnidad || !rendimientoUnidad.trim()) {
+        setError(
+          "Las sub-recetas requieren una unidad de rendimiento (ej: g, ml, unidad).",
+        );
+        return;
+      }
+    }
+    setError(null);
+    setSaving(true);
+    try {
+      const rendNum = Number(rendimiento);
+      const input = {
+        nombre: nombre.trim(),
+        seccion,
+        categoria: (categoria || undefined) as CategoriaReceta | undefined,
+        perfil: perfil.trim() || undefined,
+        porciones: Number(porciones) || 1,
+        tiempoPrepMin: tiempoPrep ? Number(tiempoPrep) : undefined,
+        tiempoCoccionMin: tiempoCoc ? Number(tiempoCoc) : undefined,
+        temperatura: temperatura.trim() || undefined,
+        procedimiento: procedimiento.trim() || undefined,
+        presentacion: presentacion.trim() || undefined,
+        notasChef: notasChef.trim() || undefined,
+        variaciones: variaciones.trim() || undefined,
+        precioSugeridoUsd: precioSugerido
+          ? Number(precioSugerido)
+          : undefined,
+        esSubreceta,
+        rendimiento:
+          esSubreceta && Number.isFinite(rendNum) && rendNum > 0
+            ? rendNum
+            : undefined,
+        rendimientoUnidad:
+          esSubreceta && rendimientoUnidad.trim()
+            ? rendimientoUnidad.trim()
+            : undefined,
+        ingredientes: lineas
+          .filter((l) => l.nombre.trim().length > 0)
+          .map((l, i) => ({
+            insumoId: l.insumoId,
+            subrecetaId: l.subrecetaId,
+            nombre: l.nombre.trim(),
+            cantidad: Number(l.cantidad) || 0,
+            unidad: l.unidad,
+            observaciones: l.observaciones.trim() || undefined,
+            costoManualUsd:
+              !l.insumoId && !l.subrecetaId && l.costoManual.trim() !== ""
+                ? Number(l.costoManual)
+                : undefined,
+            orden: i,
+          })),
+      };
+      if (existing) {
+        const upd = await updateReceta(existing.id, input);
+        if (onSaved) {
+          onSaved(upd);
+        } else {
+          // Quedarse en el form de edición con banner de éxito en vez de
+          // navegar al detalle — así el usuario no pierde su scroll/posición.
+          setInfo(
+            `Receta guardada (${upd.ingredientes.length} ingredientes).`,
+          );
+          // Auto-cerrar el banner en 4s
+          setTimeout(() => setInfo(null), 4000);
+        }
+        setSaving(false);
+      } else {
+        const created = await createReceta(input);
+        // Redirigir a la lista con highlight para que la página haga scroll
+        // automático a la receta recién creada (mismo patrón que insumos).
+        router.push(`/cocina/recetas?highlight=${created.id}`);
+        // No reseteamos saving — navegamos away
+      }
+    } catch (e) {
+      // Log completo en consola para diagnóstico
+      console.error("Error guardando receta:", e);
+      setError(extractError(e, "Error guardando receta"));
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-6">
+      {error && (
+        <div className="sticky top-4 z-30 rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419] shadow-sm">
+          {error}
+        </div>
+      )}
+      {info && (
+        <div className="sticky top-4 z-30 rounded-lg bg-[#F1F4ED] ring-1 ring-[#C9D6BC] p-3 text-sm text-[#2F4A1F] shadow-sm">
+          ✓ {info}
+        </div>
+      )}
+
+      <UnitCalculator />
+
+      {/* Tipo de receta — toggle entre normal y subreceta */}
+      <section className="rounded-2xl bg-white ring-1 ring-marfil p-5">
+        <h2 className="font-display text-xs tracking-[0.3em] uppercase text-cacao-mute mb-3">
+          Tipo de receta
+        </h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <button
+            type="button"
+            onClick={() => setEsSubreceta(false)}
+            className={`text-left p-4 rounded-xl ring-1 transition-colors ${
+              !esSubreceta
+                ? "bg-marfil-soft ring-cacao"
+                : "bg-white ring-marfil hover:bg-marfil-soft"
+            }`}
+          >
+            <div className="font-medium text-cacao">Receta normal</div>
+            <div className="text-xs text-cacao-soft mt-1">
+              Plato, bebida o snack que se vende directamente al cliente.
+            </div>
+          </button>
+          <button
+            type="button"
+            onClick={() => setEsSubreceta(true)}
+            className={`text-left p-4 rounded-xl ring-1 transition-colors ${
+              esSubreceta
+                ? "bg-marfil-soft ring-cacao"
+                : "bg-white ring-marfil hover:bg-marfil-soft"
+            }`}
+          >
+            <div className="font-medium text-cacao">Sub-receta</div>
+            <div className="text-xs text-cacao-soft mt-1">
+              Preparación (salsa, mezcla, masa) que se usa como ingrediente de
+              otras recetas. No se vende sola.
+            </div>
+          </button>
+        </div>
+        {esSubreceta && (
+          <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <label className="text-sm text-cacao">
+              Rendimiento (cuánto produce 1 batch)
+              <input
+                type="number"
+                step="0.0001"
+                min="0"
+                placeholder="200"
+                value={rendimiento}
+                onChange={(e) => setRendimiento(e.target.value)}
+                className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2"
+              />
+            </label>
+            <label className="text-sm text-cacao">
+              Unidad del rendimiento
+              <UnidadInput
+                placeholder="g, ml, unidad..."
+                value={rendimientoUnidad}
+                onChange={(v) => setRendimientoUnidad(v)}
+                className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2"
+              />
+            </label>
+            <p className="sm:col-span-2 text-xs text-cacao-soft italic font-serif">
+              Ej: la salsa pesto rinde <strong>200 g</strong> por batch. Cuando
+              la uses en otra receta, podrás decir &ldquo;30 g de pesto&rdquo; y
+              el sistema sabrá qué fracción de los ingredientes consumir.
+            </p>
+          </div>
+        )}
+      </section>
+
+      {/* Datos básicos */}
+      <section className="rounded-2xl bg-white ring-1 ring-marfil p-5 space-y-3">
+        <h2 className="font-display text-xs tracking-[0.3em] uppercase text-cacao-mute">
+          Datos
+        </h2>
+        <input
+          type="text"
+          placeholder="Nombre de la receta"
+          required
+          value={nombre}
+          onChange={(e) => setNombre(e.target.value)}
+          className="w-full rounded-lg ring-1 ring-marfil px-3 py-2"
+        />
+        <input
+          type="text"
+          placeholder="Perfil (ej: tropical · cremoso · refrescante)"
+          value={perfil}
+          onChange={(e) => setPerfil(e.target.value)}
+          className="w-full rounded-lg ring-1 ring-marfil px-3 py-2"
+        />
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <label className="text-sm text-cacao">
+            Sección
+            <select
+              value={seccion}
+              onChange={(e) => setSeccion(e.target.value as Seccion)}
+              className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2 bg-white"
+            >
+              {SECCIONES.map((s) => (
+                <option key={s.value} value={s.value}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="text-sm text-cacao">
+            Categoría
+            <select
+              value={categoria}
+              onChange={(e) =>
+                setCategoria(e.target.value as CategoriaReceta | "")
+              }
+              className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2 bg-white"
+            >
+              <option value="">— Sin categoría —</option>
+              {CATEGORIAS_RECETA.map((c) => (
+                <option key={c.value} value={c.value}>
+                  {c.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="text-sm text-cacao">
+            Porciones
+            <input
+              type="number"
+              min="1"
+              value={porciones}
+              onChange={(e) => setPorciones(e.target.value)}
+              className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2"
+            />
+          </label>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+          <label className="text-sm text-cacao">
+            Tiempo prep (min)
+            <input
+              type="number"
+              min="0"
+              value={tiempoPrep}
+              onChange={(e) => setTiempoPrep(e.target.value)}
+              className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2"
+            />
+          </label>
+          <label className="text-sm text-cacao">
+            Tiempo cocción (min)
+            <input
+              type="number"
+              min="0"
+              value={tiempoCoc}
+              onChange={(e) => setTiempoCoc(e.target.value)}
+              className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2"
+            />
+          </label>
+          <label className="text-sm text-cacao">
+            Temperatura
+            <input
+              type="text"
+              placeholder="180°C"
+              value={temperatura}
+              onChange={(e) => setTemperatura(e.target.value)}
+              className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2"
+            />
+          </label>
+          {!esSubreceta && (
+            <div className="sm:col-span-2 text-sm text-cacao space-y-1">
+              <div className="text-sm">Precio sugerido (USD)</div>
+              <div className="grid grid-cols-2 gap-2">
+                <label className="block">
+                  <span className="text-[10px] uppercase tracking-widest text-cacao-mute">
+                    Sin IVA
+                  </span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    placeholder="Ej: 8.62"
+                    value={precioSugerido}
+                    onChange={(e) => setPrecioSugerido(e.target.value)}
+                    className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2"
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-[10px] uppercase tracking-widest text-cacao-mute">
+                    Con IVA {ivaPorc}% (carta)
+                  </span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    placeholder="Ej: 10.00"
+                    value={
+                      precioSugerido
+                        ? precioConIva(
+                            Number(precioSugerido),
+                            ivaPorc,
+                          ).toFixed(2)
+                        : ""
+                    }
+                    onChange={(e) => {
+                      const conIva = Number(e.target.value);
+                      if (!Number.isFinite(conIva) || conIva <= 0) {
+                        setPrecioSugerido("");
+                        return;
+                      }
+                      // Derivamos el sin IVA y lo guardamos (es lo canónico).
+                      setPrecioSugerido(
+                        precioSinIva(conIva, ivaPorc).toFixed(4),
+                      );
+                    }}
+                    className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2"
+                  />
+                </label>
+              </div>
+              <span className="text-[10px] text-cacao-mute block">
+                Edita cualquiera de los dos — el otro se calcula. El sistema
+                guarda el precio sin IVA; el IVA se aplica solo en carta.
+              </span>
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* Selector de sub-recetas (separado del catálogo de insumos) */}
+      {subrecetasDisponibles.length > 0 && (
+        <section className="rounded-2xl bg-white ring-1 ring-marfil p-5">
+          <h2 className="font-display text-xs tracking-[0.3em] uppercase text-cacao-mute mb-1">
+            Agregar sub-receta como ingrediente
+          </h2>
+          <p className="text-xs text-cacao-soft italic font-serif mb-3">
+            Preparaciones (salsas, mezclas) que se usan dentro de esta receta.
+          </p>
+          <div className="max-h-64 overflow-y-auto border border-marfil rounded-lg divide-y divide-marfil">
+            {subrecetasDisponibles.map((sub) => {
+              // Costo aproximado por unidad (con conversión de unidades para
+              // ingredientes que están en distinta unidad que su insumo)
+              let tot = 0;
+              for (const ing of sub.ingredientes) {
+                if (ing.insumoId) {
+                  const ins = insumosMap.get(ing.insumoId);
+                  if (ins && ins.precioBaseUsd !== null) {
+                    const c = convertirParaCosto(
+                      ing.cantidad,
+                      ing.unidad,
+                      ins.unidadBase,
+                    );
+                    const cBase = c?.resultado ?? ing.cantidad;
+                    tot += cBase * ins.precioBaseUsd;
+                  }
+                } else if (ing.costoManualUsd) {
+                  tot += ing.cantidad * ing.costoManualUsd;
+                }
+              }
+              const rendEfectivo =
+                sub.rendimiento && sub.rendimiento > 0 ? sub.rendimiento : 1;
+              // costo por unidad = total del batch ÷ rendimiento total
+              const costoUnit = tot / rendEfectivo;
+              const unidadDisplay = sub.rendimientoUnidad ?? "porción";
+              return (
+                <button
+                  key={sub.id}
+                  type="button"
+                  onClick={() => addLineFromSubreceta(sub)}
+                  className="w-full text-left px-3 py-2 hover:bg-marfil-soft transition-colors flex items-baseline justify-between gap-3"
+                >
+                  <span className="text-sm text-cacao">{sub.nombre}</span>
+                  <span className="text-xs text-cacao-mute shrink-0">
+                    {costoUnit > 0
+                      ? `$${costoUnit.toFixed(5)}/${unidadDisplay}`
+                      : "sin costo (revisar ingredientes)"}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {/* Selector de insumos */}
+      <section className="rounded-2xl bg-white ring-1 ring-marfil p-5">
+        <h2 className="font-display text-xs tracking-[0.3em] uppercase text-cacao-mute mb-3">
+          Agregar ingredientes del catálogo
+        </h2>
+        {/* Quick search */}
+        {!loadingIns && insumos.some((i) => i.activo) && (
+          <div className="relative mb-2">
+            <input
+              type="text"
+              placeholder="Buscar insumo por nombre o categoría…"
+              value={insumoSearch}
+              onChange={(e) => setInsumoSearch(e.target.value)}
+              className="w-full rounded-lg ring-1 ring-marfil pl-9 pr-9 py-2 text-sm bg-marfil-soft focus:bg-white focus:ring-cacao focus:outline-none transition-colors"
+            />
+            <span
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-cacao-mute text-sm pointer-events-none"
+              aria-hidden
+            >
+              ⌕
+            </span>
+            {insumoSearch && (
+              <button
+                type="button"
+                onClick={() => setInsumoSearch("")}
+                aria-label="Limpiar búsqueda"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-cacao-mute hover:text-cacao text-lg leading-none px-1"
+              >
+                ×
+              </button>
+            )}
+          </div>
+        )}
+        {loadingIns ? (
+          <div className="text-sm text-cacao-soft">Cargando catálogo...</div>
+        ) : insumosPorCategoria.length === 0 ? (
+          <div className="text-sm text-cacao-soft italic font-serif">
+            {insumoSearch
+              ? `Sin resultados para "${insumoSearch}".`
+              : "No hay insumos activos en el catálogo."}
+          </div>
+        ) : (
+          <div className="max-h-80 overflow-y-auto border border-marfil rounded-lg divide-y divide-marfil">
+            {insumosPorCategoria.map(({ categoria, items }) => (
+              <div key={categoria}>
+                <div className="sticky top-0 z-10 px-3 py-2 bg-marfil-light border-b border-marfil">
+                  <span className="font-display text-[10px] tracking-[0.3em] uppercase text-cacao-mute">
+                    {categoriaInsumoLabel(categoria)}
+                  </span>
+                  <span className="ml-2 text-[10px] text-cacao-mute">
+                    ({items.length})
+                  </span>
+                </div>
+                <ul className="divide-y divide-marfil/70">
+                  {items.map((ins) => (
+                    <li key={ins.id}>
+                      <button
+                        type="button"
+                        onClick={() => addLineFromInsumo(ins)}
+                        className="w-full text-left px-3 py-2 hover:bg-marfil-soft transition-colors flex items-baseline justify-between gap-3"
+                      >
+                        <span className="text-sm text-cacao">{ins.nombre}</span>
+                        <span className="text-xs text-cacao-mute shrink-0">
+                          {ins.precioBaseUsd !== null
+                            ? `$${ins.precioBaseUsd.toFixed(5)}/${ins.unidadBase}`
+                            : "sin precio"}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={addLineAdHoc}
+          className="mt-3 text-xs uppercase tracking-widest text-cacao-soft hover:text-cacao"
+        >
+          + Agregar ingrediente libre (fuera del catálogo)
+        </button>
+      </section>
+
+      {/* Líneas de la receta */}
+      <section className="rounded-2xl bg-white ring-1 ring-marfil p-5">
+        <h2 className="font-display text-xs tracking-[0.3em] uppercase text-cacao-mute mb-3">
+          Ingredientes de la receta
+        </h2>
+        {lineas.length === 0 ? (
+          <p className="text-sm text-cacao-soft italic font-serif">
+            Selecciona ingredientes del catálogo arriba.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {lineas.map((l) => {
+              const ins = l.insumoId ? insumosMap.get(l.insumoId) : null;
+              const subR = l.subrecetaId
+                ? subrecetasMap.get(l.subrecetaId)
+                : null;
+              const cant = Number(l.cantidad) || 0;
+              const manual = Number(l.costoManual) || 0;
+              // Calcular precio por unidad de la subreceta.
+              // FÓRMULA: costo total del batch ÷ rendimiento total del batch.
+              // Ej: aderezo cesar cuesta $6.34 y rinde 500g → $0.01269/g.
+              // Si rendimiento no está definido, asumimos 1 (1 unidad = 1 batch).
+              let subUnitPrice = 0;
+              if (subR) {
+                let tot = 0;
+                for (const sIng of subR.ingredientes) {
+                  if (sIng.insumoId) {
+                    const sIns = insumosMap.get(sIng.insumoId);
+                    if (sIns && sIns.precioBaseUsd !== null) {
+                      const c = convertirParaCosto(
+                        sIng.cantidad,
+                        sIng.unidad,
+                        sIns.unidadBase,
+                      );
+                      const cBase = c?.resultado ?? sIng.cantidad;
+                      tot += cBase * sIns.precioBaseUsd;
+                    }
+                  } else if (sIng.costoManualUsd) {
+                    tot += sIng.cantidad * sIng.costoManualUsd;
+                  }
+                }
+                const rendEfectivo =
+                  subR.rendimiento && subR.rendimiento > 0
+                    ? subR.rendimiento
+                    : 1;
+                subUnitPrice = tot / rendEfectivo;
+              }
+              // Calculamos el subtotal usando la misma lógica de conversión
+              // que el backend (recetas.ts → calcularCostoRecetaInterno). Si la
+              // unidad del ingrediente difiere de la del insumo (o de la
+              // unidad de rendimiento de la subreceta), se convierte.
+              let sub = 0;
+              let conversionInfo: {
+                cantidadConvertida: number;
+                unidadDestino: string;
+                compatibles: boolean;
+              } | null = null;
+
+              if (ins && ins.precioBaseUsd !== null) {
+                const conv = convertirParaCosto(
+                  cant,
+                  l.unidad,
+                  ins.unidadBase,
+                );
+                const cantBase = conv?.resultado ?? cant;
+                sub = cantBase * ins.precioBaseUsd;
+                conversionInfo = {
+                  cantidadConvertida: cantBase,
+                  unidadDestino: ins.unidadBase,
+                  compatibles:
+                    l.unidad === ins.unidadBase ||
+                    areCompatible(l.unidad, ins.unidadBase) ||
+                    !conv?.usoFallback, // misma unidad textual cae acá
+                };
+              } else if (subR && subUnitPrice > 0) {
+                const unidadDest = subR.rendimientoUnidad ?? l.unidad;
+                const conv = convertirParaCosto(cant, l.unidad, unidadDest);
+                const cantBase = conv?.resultado ?? cant;
+                sub = cantBase * subUnitPrice;
+                conversionInfo = {
+                  cantidadConvertida: cantBase,
+                  unidadDestino: unidadDest,
+                  compatibles:
+                    l.unidad === unidadDest ||
+                    areCompatible(l.unidad, unidadDest) ||
+                    !conv?.usoFallback,
+                };
+              } else if (manual > 0) {
+                sub = cant * manual;
+              }
+
+              // Mostramos hint solo cuando hubo conversión real (diferente unidad)
+              const mostrarEquivalencia =
+                conversionInfo !== null &&
+                cant > 0 &&
+                l.unidad &&
+                l.unidad.trim() !== conversionInfo.unidadDestino.trim() &&
+                conversionInfo.compatibles;
+              const mostrarWarning =
+                conversionInfo !== null &&
+                cant > 0 &&
+                l.unidad &&
+                l.unidad.trim() !== conversionInfo.unidadDestino.trim() &&
+                !conversionInfo.compatibles &&
+                dimension(l.unidad) !== "desconocida" &&
+                dimension(conversionInfo.unidadDestino) !== "desconocida";
+              return (
+                <div
+                  key={l.key}
+                  data-linea-key={l.key}
+                  className="rounded-lg ring-1 ring-marfil p-3 space-y-2 transition-all"
+                >
+                  {/* Fila 1: nombre + badge + remover */}
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      placeholder="Nombre del ingrediente"
+                      value={l.nombre}
+                      onChange={(e) =>
+                        updateLine(l.key, { nombre: e.target.value })
+                      }
+                      className="flex-1 rounded ring-1 ring-marfil px-2 py-1.5 text-sm"
+                    />
+                    {l.subrecetaId && (
+                      <span className="text-[10px] uppercase tracking-widest px-2 py-1 rounded-full bg-marfil-light text-cacao-soft ring-1 ring-marfil shrink-0">
+                        Sub-receta
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => removeLine(l.key)}
+                      className="text-cacao-soft hover:text-terracotta text-xl px-1"
+                      aria-label="Quitar"
+                    >
+                      ×
+                    </button>
+                  </div>
+                  {/* Fila 2: cantidad / unidad / precio / observación / subtotal */}
+                  <div className="grid grid-cols-12 gap-2 items-center">
+                    <input
+                      type="number"
+                      step="0.0001"
+                      min="0"
+                      placeholder="Cant."
+                      value={l.cantidad}
+                      onChange={(e) =>
+                        updateLine(l.key, { cantidad: e.target.value })
+                      }
+                      className="col-span-3 sm:col-span-2 rounded ring-1 ring-marfil px-2 py-1.5 text-sm"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Unidad"
+                      autoCapitalize="off"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      value={l.unidad}
+                      onChange={(e) =>
+                        updateLine(l.key, { unidad: e.target.value })
+                      }
+                      className="col-span-3 sm:col-span-1 rounded ring-1 ring-marfil px-2 py-1.5 text-sm"
+                    />
+                    {/* Precio: editable solo si ad-hoc; viene del catálogo o de la subreceta si aplica */}
+                    <div className="col-span-6 sm:col-span-3">
+                      {l.insumoId ? (
+                        <div
+                          className="rounded ring-1 ring-marfil bg-marfil-soft px-2 py-1.5 text-xs text-cacao-soft"
+                          title="Precio viene del catálogo"
+                        >
+                          {ins && ins.precioBaseUsd !== null
+                            ? `$${ins.precioBaseUsd.toFixed(5)} / ${ins.unidadBase}`
+                            : "—"}
+                        </div>
+                      ) : l.subrecetaId ? (
+                        <div
+                          className="rounded ring-1 ring-marfil bg-marfil-soft px-2 py-1.5 text-xs text-cacao-soft"
+                          title="Precio calculado desde los ingredientes de la sub-receta"
+                        >
+                          {subUnitPrice > 0
+                            ? `$${subUnitPrice.toFixed(5)} / ${l.unidad}`
+                            : "—"}
+                        </div>
+                      ) : (
+                        <input
+                          type="number"
+                          step="0.000001"
+                          min="0"
+                          placeholder={`$ / ${l.unidad}`}
+                          value={l.costoManual}
+                          onChange={(e) =>
+                            updateLine(l.key, { costoManual: e.target.value })
+                          }
+                          className="w-full rounded ring-1 ring-marfil px-2 py-1.5 text-sm"
+                          title="Precio por unidad (ad-hoc)"
+                        />
+                      )}
+                    </div>
+                    <input
+                      type="text"
+                      placeholder="Observación"
+                      value={l.observaciones}
+                      onChange={(e) =>
+                        updateLine(l.key, { observaciones: e.target.value })
+                      }
+                      className="col-span-12 sm:col-span-4 rounded ring-1 ring-marfil px-2 py-1.5 text-sm"
+                    />
+                    <div className="col-span-12 sm:col-span-2 text-right text-sm text-cacao font-medium">
+                      {sub > 0 ? `$${sub.toFixed(3)}` : "—"}
+                    </div>
+                  </div>
+                  {/* Feedback de conversión: equivalencia o warning */}
+                  {mostrarEquivalencia && conversionInfo && (
+                    <div className="text-[11px] text-cacao-soft italic font-serif pl-1">
+                      ≈ {formatCantConv(conversionInfo.cantidadConvertida)}{" "}
+                      {conversionInfo.unidadDestino} (convertido para el costo)
+                    </div>
+                  )}
+                  {mostrarWarning && conversionInfo && (
+                    <div className="text-[11px] text-terracotta pl-1">
+                      ⚠ &ldquo;{l.unidad}&rdquo; y &ldquo;
+                      {conversionInfo.unidadDestino}&rdquo; no son convertibles.
+                      El costo asume misma unidad — revisa para evitar errores.
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        <div className="mt-4 border-t border-marfil pt-3 text-right space-y-1">
+          <div className="text-sm text-cacao-soft">
+            Costo total:{" "}
+            <span className="text-cacao">${costo.total.toFixed(3)}</span>
+          </div>
+          <div className="text-lg font-cinzel tracking-wide text-cacao">
+            Costo por porción: ${costo.porPorcion.toFixed(2)}
+          </div>
+          {precioSugerido && Number(precioSugerido) > 0 && (
+            <div className="text-sm">
+              Margen sobre precio sugerido:{" "}
+              <span className="text-cacao font-medium">
+                {(
+                  ((Number(precioSugerido) - costo.porPorcion) /
+                    Number(precioSugerido)) *
+                  100
+                ).toFixed(1)}
+                %
+              </span>
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* Procedimiento, presentación, notas */}
+      <section className="rounded-2xl bg-white ring-1 ring-marfil p-5 space-y-3">
+        <h2 className="font-display text-xs tracking-[0.3em] uppercase text-cacao-mute">
+          Preparación
+        </h2>
+        <label className="block text-sm text-cacao">
+          Procedimiento
+          <textarea
+            value={procedimiento}
+            onChange={(e) => setProcedimiento(e.target.value)}
+            rows={6}
+            placeholder="1. Paso uno...&#10;2. Paso dos..."
+            className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2 font-serif"
+          />
+        </label>
+        <label className="block text-sm text-cacao">
+          Presentación / emplatado
+          <textarea
+            value={presentacion}
+            onChange={(e) => setPresentacion(e.target.value)}
+            rows={3}
+            className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2"
+          />
+        </label>
+        <label className="block text-sm text-cacao">
+          Notas del chef
+          <textarea
+            value={notasChef}
+            onChange={(e) => setNotasChef(e.target.value)}
+            rows={2}
+            className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2"
+          />
+        </label>
+        <label className="block text-sm text-cacao">
+          Variaciones
+          <textarea
+            value={variaciones}
+            onChange={(e) => setVariaciones(e.target.value)}
+            rows={2}
+            className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2"
+          />
+        </label>
+      </section>
+
+      {/* Actions */}
+      <div className="flex flex-wrap gap-3 justify-end">
+        <button
+          type="button"
+          onClick={() => router.back()}
+          className="rounded-xl ring-1 ring-marfil px-5 py-2.5 text-cacao hover:bg-marfil-soft"
+        >
+          Cancelar
+        </button>
+        <button
+          type="submit"
+          disabled={saving}
+          className="rounded-xl bg-cacao text-white px-5 py-2.5 font-medium hover:bg-terracotta disabled:opacity-50"
+        >
+          {saving
+            ? "Guardando..."
+            : existing
+              ? "Guardar cambios"
+              : "Crear receta"}
+        </button>
+      </div>
+
+    </form>
+  );
+}
+
+// Formato compacto para mostrar la cantidad convertida (sin ceros sobrantes).
+function formatCantConv(n: number): string {
+  if (!Number.isFinite(n)) return "—";
+  const abs = Math.abs(n);
+  const dec = abs >= 100 ? 1 : abs >= 1 ? 2 : abs >= 0.01 ? 3 : 5;
+  return n.toFixed(dec).replace(/\.?0+$/, "");
+}
