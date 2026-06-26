@@ -1,0 +1,625 @@
+/* ============================================================
+   Quinta Mamá · Calculadora financiera — estilos
+   Paleta: negro + dorado + crema. Tipografía: Futura.
+   ============================================================ */
+:root {
+  --black: #000000;
+  --gold: #b8923b;
+  --gold-soft: #d8c081;
+  --cream: #f6f2e7;
+  --card: #fcfaf3;
+  --border: #ded7c4;
+  --muted: #7c7a6e;
+  --red: #b23a2e;
+
+  --font: 'Futura', 'Futura PT', 'Century Gothic', 'Avenir Next', 'Avenir', system-ui, sans-serif;
+  --mono: 'DM Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font);
+  background: var(--cream);
+  color: var(--black);
+  -webkit-font-smoothing: antialiased;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* Cifras numéricas en monoespaciada */
+.kpi-value,
+.d-num,
+.p-cost,
+.field-input input,
+.payroll-row input,
+.scen-row span:last-child,
+.payroll-total {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Header ---------- */
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+.header-strip {
+  background: var(--black);
+  color: var(--cream);
+  padding: 14px 20px;
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+}
+.brand {
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  font-size: 19px;
+}
+.brand-sub {
+  color: var(--gold-soft);
+  letter-spacing: 0.16em;
+  font-size: 12px;
+  text-transform: uppercase;
+}
+.header-line {
+  height: 3px;
+  background: var(--gold);
+}
+.header-bar {
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.header-tag {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+.header-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ---------- Botones ---------- */
+.btn {
+  font-family: var(--font);
+  font-size: 13px;
+  padding: 8px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--gold);
+  background: var(--gold);
+  color: #fff;
+  cursor: pointer;
+  letter-spacing: 0.02em;
+  transition: opacity 0.15s;
+}
+.btn:hover {
+  opacity: 0.88;
+}
+.btn.ghost {
+  background: transparent;
+  color: var(--black);
+  border-color: var(--border);
+}
+.btn.ghost:hover {
+  border-color: var(--gold);
+}
+.btn.danger {
+  background: transparent;
+  color: var(--red);
+  border-color: var(--red);
+}
+.btn.small {
+  padding: 6px 10px;
+  font-size: 12px;
+  background: transparent;
+  color: var(--black);
+  border-color: var(--border);
+}
+
+/* ---------- Layout ---------- */
+.layout {
+  display: grid;
+  grid-template-columns: 380px 1fr;
+  gap: 22px;
+  max-width: 1320px;
+  margin: 0 auto;
+  padding: 22px;
+}
+.assumptions {
+  position: sticky;
+  top: 96px;
+  align-self: start;
+  max-height: calc(100vh - 110px);
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.assumptions-toggle {
+  display: none;
+}
+
+/* ---------- Secciones de supuestos ---------- */
+.sec {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+.sec-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--font);
+}
+.sec-num {
+  font-family: var(--mono);
+  color: var(--gold);
+  font-size: 12px;
+  font-weight: 500;
+}
+.sec-title {
+  flex: 1;
+  font-size: 14px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.sec-toggle {
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+}
+.sec-body {
+  padding: 4px 14px 16px;
+  border-top: 1px solid var(--border);
+}
+
+/* ---------- Campos ---------- */
+.grid2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 10px 0 0;
+}
+.field-label {
+  font-size: 12px;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.field-input {
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+  overflow: hidden;
+}
+.field-input:focus-within {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 2px rgba(184, 146, 59, 0.15);
+}
+.field-input input {
+  flex: 1;
+  border: none;
+  outline: none;
+  padding: 9px 10px;
+  font-size: 14px;
+  background: transparent;
+  width: 100%;
+  min-width: 0;
+}
+.field-suffix {
+  padding: 0 10px;
+  color: var(--muted);
+  font-size: 12px;
+  font-family: var(--mono);
+  border-left: 1px solid var(--border);
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+}
+.hint {
+  font-size: 11.5px;
+  color: var(--muted);
+  margin: 10px 0 0;
+  line-height: 1.45;
+}
+
+/* ---------- Tooltip ⓘ ---------- */
+.info {
+  position: relative;
+  display: inline-flex;
+  cursor: help;
+}
+.info-mark {
+  color: var(--gold);
+  font-size: 12px;
+  line-height: 1;
+}
+.info-bubble {
+  position: absolute;
+  bottom: 140%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--black);
+  color: var(--cream);
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  line-height: 1.4;
+  width: 210px;
+  z-index: 40;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+  font-family: var(--font);
+}
+.info-bubble::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-top-color: var(--black);
+}
+
+/* ---------- Nómina ---------- */
+.payroll {
+  margin-top: 8px;
+  font-size: 12px;
+}
+.payroll-head,
+.payroll-row {
+  display: grid;
+  grid-template-columns: 1.6fr 0.6fr 0.9fr 0.8fr 0.8fr 0.8fr 1fr 0.4fr;
+  gap: 4px;
+  align-items: center;
+}
+.payroll-head {
+  color: var(--muted);
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.payroll-row {
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border);
+}
+.payroll-row input {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 5px 4px;
+  font-size: 12px;
+  background: #fff;
+  outline: none;
+  min-width: 0;
+}
+.payroll-row input:focus {
+  border-color: var(--gold);
+}
+.payroll-row .p-name {
+  font-family: var(--font);
+  text-align: left;
+}
+.p-cost {
+  font-size: 11.5px;
+  text-align: right;
+  padding-right: 2px;
+}
+.p-del {
+  border: none;
+  background: none;
+  color: var(--red);
+  font-size: 16px;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0;
+}
+.payroll-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 12px;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.payroll-total {
+  font-size: 12.5px;
+}
+
+/* ---------- Resultados ---------- */
+.results {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+}
+.kpi {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-top: 3px solid var(--gold);
+  border-radius: 8px;
+  padding: 16px;
+}
+.kpi-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+.kpi-value {
+  font-size: 26px;
+  margin-top: 8px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+.kpi-value.neg {
+  color: var(--red);
+}
+.kpi-sub {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 4px;
+  font-family: var(--mono);
+}
+
+/* ---------- Tarjetas ---------- */
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-top: 3px solid var(--gold);
+  border-radius: 8px;
+  padding: 18px;
+}
+.card-title {
+  margin: 0 0 14px;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* Comensales */
+.diners {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  text-align: center;
+}
+.diners > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  border-radius: 6px;
+  background: var(--cream);
+}
+.d-num {
+  font-size: 24px;
+  font-weight: 500;
+}
+.d-lbl {
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Escenarios */
+.scen-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-top: 16px;
+}
+.scen {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px;
+  background: var(--cream);
+}
+.scen.base {
+  border-color: var(--gold);
+  background: #fff;
+}
+.scen-name {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 8px;
+  color: var(--gold);
+  font-weight: 700;
+}
+.scen-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12.5px;
+  padding: 3px 0;
+}
+.scen-row span:first-child {
+  color: var(--muted);
+}
+
+/* Lectura accionistas */
+.shareholders {
+  background: var(--black);
+  color: var(--cream);
+  border-radius: 8px;
+  padding: 22px;
+}
+.shareholders h3 {
+  margin: 0 0 12px;
+  color: var(--gold-soft);
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.sh-text p {
+  margin: 0 0 12px;
+  line-height: 1.6;
+  font-size: 14.5px;
+}
+.sh-text p:last-child {
+  margin-bottom: 0;
+}
+.sh-text strong {
+  color: #fff;
+}
+
+/* Negativos */
+.neg {
+  color: var(--red);
+}
+.neg-light {
+  color: #e98b80;
+}
+
+.foot {
+  text-align: center;
+  font-size: 11.5px;
+  color: var(--muted);
+  padding: 8px 0 20px;
+}
+
+/* ============================================================
+   RESPONSIVE — iPhone / iPad
+   ============================================================ */
+@media (max-width: 900px) {
+  .layout {
+    grid-template-columns: 1fr;
+    padding: 14px;
+    gap: 16px;
+  }
+  .assumptions {
+    position: static;
+    max-height: none;
+    overflow: visible;
+    display: none;
+    order: -1;
+  }
+  .assumptions.open {
+    display: block;
+  }
+  .assumptions-toggle {
+    display: block;
+    width: 100%;
+    padding: 12px;
+    background: var(--gold);
+    color: #fff;
+    border: none;
+    font-family: var(--font);
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+    position: sticky;
+    top: 0;
+    z-index: 15;
+  }
+  .kpis {
+    grid-template-columns: 1fr 1fr;
+  }
+  .diners {
+    grid-template-columns: 1fr 1fr;
+  }
+  .scen-cards {
+    grid-template-columns: 1fr;
+  }
+  .payroll-head {
+    display: none;
+  }
+  .payroll-row {
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    padding: 10px 0;
+  }
+  .payroll-row .p-name {
+    grid-column: 1 / -1;
+  }
+  .p-cost {
+    grid-column: 1 / 2;
+    text-align: left;
+  }
+  .p-del {
+    grid-column: 2 / 3;
+    justify-self: end;
+  }
+}
+
+@media (max-width: 520px) {
+  .kpis {
+    grid-template-columns: 1fr;
+  }
+  .header-strip {
+    flex-direction: column;
+    gap: 2px;
+    align-items: flex-start;
+  }
+}
+
+/* ============================================================
+   IMPRESIÓN / PDF
+   ============================================================ */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  body {
+    background: #fff;
+  }
+  .layout {
+    display: block;
+    padding: 0;
+  }
+  .header {
+    position: static;
+  }
+  .results {
+    gap: 14px;
+  }
+  .card,
+  .kpi,
+  .shareholders {
+    break-inside: avoid;
+    box-shadow: none;
+  }
+  .shareholders {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}
