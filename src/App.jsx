@@ -12,6 +12,7 @@ import {
 } from './lib.js'
 import { Field, Info, Section, Card, Kpi } from './ui.jsx'
 import { Waterfall, ScenarioChart, ProjectionChart } from './charts.jsx'
+import Presentation from './Presentation.jsx'
 
 const STORAGE_KEY = 'quinta-mama-modelo-v1'
 const ACCENT = '#B8923B'
@@ -34,6 +35,7 @@ function loadState() {
 export default function App() {
   const [state, setState] = useState(loadState)
   const [showAssumptions, setShowAssumptions] = useState(false) // móvil
+  const [presenting, setPresenting] = useState(false)
   const fileRef = useRef(null)
 
   // Persistencia en localStorage
@@ -102,6 +104,10 @@ export default function App() {
 
   return (
     <div className="app">
+      {presenting && (
+        <Presentation state={state} set={set} modelo={modelo} onClose={() => setPresenting(false)} />
+      )}
+
       {/* ---------- Header ---------- */}
       <header className="header">
         <div className="header-strip">
@@ -114,6 +120,9 @@ export default function App() {
             Modelo operativo del comedor · edita los supuestos y observa el resultado en vivo
           </p>
           <div className="header-actions">
+            <button className="btn" onClick={() => setPresenting(true)}>
+              ▶ Presentar
+            </button>
             <button className="btn ghost" onClick={() => window.print()}>
               Exportar a PDF
             </button>

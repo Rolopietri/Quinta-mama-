@@ -623,3 +623,357 @@ body {
     print-color-adjust: exact;
   }
 }
+
+/* ============================================================
+   MODO PRESENTACIÓN
+   ============================================================ */
+.pres {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: var(--cream);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.pres-top {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 22px;
+  background: var(--black);
+  color: var(--cream);
+}
+.pres-brand {
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  font-size: 14px;
+  flex: 1;
+}
+.pres-count {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--gold-soft);
+}
+.pres-close {
+  background: transparent;
+  border: 1px solid #555;
+  color: var(--cream);
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: var(--font);
+  font-size: 13px;
+}
+.pres-close:hover {
+  border-color: var(--gold);
+}
+
+.pres-stage {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px clamp(24px, 6vw, 90px);
+  overflow-y: auto;
+  animation: slideIn 0.35s ease;
+}
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.slide {
+  width: 100%;
+  max-width: 1100px;
+}
+.slide h2 {
+  font-size: clamp(26px, 4vw, 46px);
+  margin: 6px 0 22px;
+  letter-spacing: -0.01em;
+  line-height: 1.1;
+}
+.kicker {
+  display: inline-block;
+  font-size: 13px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--gold);
+  font-weight: 700;
+}
+.kicker.gold {
+  color: var(--gold-soft);
+}
+
+/* Portada */
+.cover {
+  text-align: center;
+}
+.cover-title {
+  font-size: clamp(48px, 10vw, 110px);
+  margin: 14px 0 0;
+  letter-spacing: 0.02em;
+}
+.cover-line {
+  width: 90px;
+  height: 4px;
+  background: var(--gold);
+  margin: 24px auto;
+}
+.cover-sub {
+  font-size: clamp(16px, 2.4vw, 24px);
+  color: var(--muted);
+  max-width: 620px;
+  margin: 0 auto;
+  line-height: 1.5;
+}
+.cover-hint {
+  margin-top: 48px;
+  font-size: 13px;
+  color: var(--gold);
+  letter-spacing: 0.06em;
+}
+
+/* Listas grandes */
+.big-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.big-list li {
+  font-size: clamp(17px, 2.4vw, 26px);
+  line-height: 1.5;
+  padding: 14px 0 14px 34px;
+  border-bottom: 1px solid var(--border);
+  position: relative;
+}
+.big-list li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 26px;
+  width: 14px;
+  height: 14px;
+  background: var(--gold);
+  border-radius: 2px;
+}
+.lead {
+  font-size: clamp(15px, 2vw, 20px);
+  color: var(--muted);
+  margin: 0 0 26px;
+  line-height: 1.5;
+}
+
+/* Concepto */
+.concept-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 18px;
+}
+.concept-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-top: 3px solid var(--gold);
+  border-radius: 10px;
+  padding: 26px 18px;
+  text-align: center;
+}
+.concept-num {
+  font-family: var(--mono);
+  font-size: clamp(34px, 5vw, 54px);
+  color: var(--black);
+}
+.concept-lbl {
+  font-size: 13px;
+  color: var(--muted);
+  margin-top: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* KPI de presentación */
+.pk {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-top: 3px solid var(--gold);
+  border-radius: 10px;
+  padding: 18px 20px;
+}
+.pk-label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+.pk-value {
+  font-family: var(--mono);
+  font-size: clamp(26px, 3.6vw, 40px);
+  margin-top: 6px;
+}
+.pk-value.neg {
+  color: var(--red);
+}
+.pk-sub {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+/* Slide en vivo: ocupación */
+.live-row {
+  display: grid;
+  grid-template-columns: 1fr 1.4fr;
+  gap: 26px;
+  align-items: start;
+}
+.live-control {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.live-kpis {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+/* Slide números */
+.num-grid {
+  display: grid;
+  grid-template-columns: 1fr 1.2fr;
+  gap: 26px;
+  align-items: center;
+}
+.num-kpis {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+/* Slide escenarios */
+.scen-live {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 26px;
+  align-items: center;
+}
+.scen-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.hint.light {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+/* Slide oscura (propuesta) */
+.dark-slide {
+  background: var(--black);
+  color: var(--cream);
+  border-radius: 16px;
+  padding: clamp(28px, 5vw, 56px);
+}
+.on-dark {
+  color: #fff;
+}
+.ask-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 26px;
+}
+.dark-slide .pk {
+  background: #141414;
+  border-color: #333;
+}
+.dark-slide .pk-value {
+  color: var(--gold-soft);
+}
+.dark-slide .pk-label,
+.dark-slide .pk-sub {
+  color: #9b988c;
+}
+.ask-text {
+  font-size: clamp(16px, 2.2vw, 22px);
+  line-height: 1.6;
+  color: var(--cream);
+}
+.ask-text b {
+  color: var(--gold-soft);
+}
+
+/* Flechas y puntos */
+.pres-arrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--black);
+  font-size: 26px;
+  line-height: 1;
+  cursor: pointer;
+  z-index: 110;
+}
+.pres-arrow.left {
+  left: 14px;
+}
+.pres-arrow.right {
+  right: 14px;
+}
+.pres-arrow:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.pres-dots {
+  display: flex;
+  gap: 9px;
+  justify-content: center;
+  padding: 14px;
+}
+.dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: none;
+  background: var(--border);
+  cursor: pointer;
+  padding: 0;
+}
+.dot.on {
+  background: var(--gold);
+  transform: scale(1.25);
+}
+
+/* Responsive presentación */
+@media (max-width: 820px) {
+  .concept-grid,
+  .ask-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  .live-row,
+  .num-grid,
+  .scen-live {
+    grid-template-columns: 1fr;
+  }
+  .num-kpis,
+  .live-kpis {
+    grid-template-columns: 1fr 1fr;
+  }
+  .pres-arrow {
+    width: 40px;
+    height: 40px;
+    font-size: 22px;
+  }
+}
