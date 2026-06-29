@@ -13,38 +13,58 @@ import {
 } from 'recharts'
 import { fEur } from './lib.js'
 
-const COL = {
+// Paleta por defecto (calculadora) — dorado + crema
+const GOLD = {
+  primary: '#B8923B',
+  secondary: '#D8C081',
+  neg: '#B23A2E',
+  total: '#B8923B',
   black: '#000000',
-  gold: '#B8923B',
-  goldSoft: '#D8C081',
-  red: '#B23A2E',
   grid: '#DED7C4',
   text: '#7C7A6E',
+  font: 'DM Mono, monospace',
 }
 
-const axisStyle = { fontSize: 11, fill: COL.text, fontFamily: 'DM Mono, monospace' }
+// Paleta monocroma (presentación) — negro / gris, sin acentos
+const MONO = {
+  primary: '#111111',
+  secondary: '#B5B5B5',
+  neg: '#111111',
+  total: '#111111',
+  black: '#000000',
+  grid: '#E2E2E2',
+  text: '#888888',
+  font: "'Futura', 'Century Gothic', 'Twentieth Century', sans-serif",
+}
+
+const pal = (mono) => (mono ? MONO : GOLD)
 
 function eurAxis(v) {
   if (Math.abs(v) >= 1000) return `${Math.round(v / 1000)}k`
   return `${Math.round(v)}`
 }
 
+const tip = (c) => ({
+  background: c.font.includes('Futura') ? '#FFFFFF' : '#FCFAF3',
+  border: `1px solid ${c.grid}`,
+  borderRadius: 6,
+  fontFamily: c.font,
+  fontSize: 12,
+  color: c.black,
+})
+
 // --- Gráfico de cascada -------------------------------------
 // Ventas → −CMV → −Nómina → −Otros fijos → EBITDA
-export function Waterfall({ modelo }) {
+export function Waterfall({ modelo, mono }) {
+  const c = pal(mono)
+  const axisStyle = { fontSize: 11, fill: c.text, fontFamily: c.font }
   const { ventas, cmv, nomina, otrosFijos, ebitda } = modelo
   let run = 0
   const step = (name, delta, type) => {
     const y0 = run
     const y1 = run + delta
     run = y1
-    return {
-      name,
-      base: Math.min(y0, y1),
-      span: Math.abs(y1 - y0),
-      type,
-      valor: delta,
-    }
+    return { name, base: Math.min(y0, y1), span: Math.abs(y1 - y0), type, valor: delta }
   }
   const data = [
     step('Ventas', ventas, 'total'),
@@ -52,7 +72,6 @@ export function Waterfall({ modelo }) {
     step('−Nómina', -nomina, 'down'),
     step('−Otros fijos', -otrosFijos, 'down'),
   ]
-  // EBITDA como barra total desde 0
   data.push({
     name: 'EBITDA',
     base: Math.min(0, ebitda),
@@ -62,19 +81,19 @@ export function Waterfall({ modelo }) {
   })
 
   const color = (t) =>
-    t === 'total' ? COL.gold : t === 'down' ? COL.goldSoft : t === 'neg' ? COL.red : COL.black
+    t === 'total' ? c.total : t === 'down' ? c.secondary : t === 'neg' ? c.neg : c.black
 
   return (
     <ResponsiveContainer width="100%" height={300}>
       <BarChart data={data} margin={{ top: 10, right: 8, left: 8, bottom: 4 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke={COL.grid} vertical={false} />
-        <XAxis dataKey="name" tick={axisStyle} axisLine={{ stroke: COL.grid }} tickLine={false} interval={0} />
+        <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={false} />
+        <XAxis dataKey="name" tick={axisStyle} axisLine={{ stroke: c.grid }} tickLine={false} interval={0} />
         <YAxis tickFormatter={eurAxis} tick={axisStyle} axisLine={false} tickLine={false} width={38} />
         <Tooltip
-          cursor={{ fill: 'rgba(184,146,59,0.08)' }}
+          cursor={{ fill: 'rgba(0,0,0,0.05)' }}
           formatter={(v, _n, p) => [fEur(p.payload.valor), p.payload.name]}
           labelFormatter={() => ''}
-          contentStyle={tooltipStyle}
+          contentStyle={tip(c)}
         />
         <Bar dataKey="base" stackId="a" fill="transparent" />
         <Bar dataKey="span" stackId="a" radius={[2, 2, 0, 0]}>
@@ -88,7 +107,9 @@ export function Waterfall({ modelo }) {
 }
 
 // --- Gráfico de barras de escenarios ------------------------
-export function ScenarioChart({ escenarios }) {
+export function ScenarioChart({ escenarios, mono }) {
+  const c = pal(mono)
+  const axisStyle = { fontSize: 11, fill: c.text, fontFamily: c.font }
   const data = escenarios.map((e) => ({
     nombre: e.nombre,
     Ventas: Math.round(e.ventas),
@@ -97,19 +118,15 @@ export function ScenarioChart({ escenarios }) {
   return (
     <ResponsiveContainer width="100%" height={300}>
       <BarChart data={data} margin={{ top: 10, right: 8, left: 8, bottom: 4 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke={COL.grid} vertical={false} />
-        <XAxis dataKey="nombre" tick={axisStyle} axisLine={{ stroke: COL.grid }} tickLine={false} />
+        <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={false} />
+        <XAxis dataKey="nombre" tick={axisStyle} axisLine={{ stroke: c.grid }} tickLine={false} />
         <YAxis tickFormatter={eurAxis} tick={axisStyle} axisLine={false} tickLine={false} width={38} />
-        <Tooltip
-          cursor={{ fill: 'rgba(184,146,59,0.08)' }}
-          formatter={(v) => fEur(v)}
-          contentStyle={tooltipStyle}
-        />
-        <Legend wrapperStyle={{ fontSize: 12, fontFamily: 'DM Mono, monospace' }} />
-        <Bar dataKey="Ventas" fill={COL.goldSoft} radius={[2, 2, 0, 0]} />
+        <Tooltip cursor={{ fill: 'rgba(0,0,0,0.05)' }} formatter={(v) => fEur(v)} contentStyle={tip(c)} />
+        <Legend wrapperStyle={{ fontSize: 12, fontFamily: c.font }} />
+        <Bar dataKey="Ventas" fill={c.secondary} radius={[2, 2, 0, 0]} />
         <Bar dataKey="EBITDA" radius={[2, 2, 0, 0]}>
           {data.map((d, i) => (
-            <Cell key={i} fill={d.EBITDA >= 0 ? COL.gold : COL.red} />
+            <Cell key={i} fill={d.EBITDA >= 0 ? c.primary : c.neg} />
           ))}
         </Bar>
       </BarChart>
@@ -118,21 +135,23 @@ export function ScenarioChart({ escenarios }) {
 }
 
 // --- Proyección a 12 meses ----------------------------------
-export function ProjectionChart({ meses }) {
+export function ProjectionChart({ meses, mono }) {
+  const c = pal(mono)
+  const axisStyle = { fontSize: 11, fill: c.text, fontFamily: c.font }
   return (
     <ResponsiveContainer width="100%" height={300}>
       <ComposedChart data={meses} margin={{ top: 10, right: 8, left: 8, bottom: 4 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke={COL.grid} vertical={false} />
-        <XAxis dataKey="mes" tick={axisStyle} axisLine={{ stroke: COL.grid }} tickLine={false} />
+        <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={false} />
+        <XAxis dataKey="mes" tick={axisStyle} axisLine={{ stroke: c.grid }} tickLine={false} />
         <YAxis tickFormatter={eurAxis} tick={axisStyle} axisLine={false} tickLine={false} width={38} />
-        <Tooltip formatter={(v) => fEur(v)} contentStyle={tooltipStyle} />
-        <Legend wrapperStyle={{ fontSize: 12, fontFamily: 'DM Mono, monospace' }} />
-        <Bar dataKey="ventas" name="Ventas" fill={COL.goldSoft} radius={[2, 2, 0, 0]} />
-        <Line dataKey="ebitda" name="EBITDA" stroke={COL.gold} strokeWidth={2} dot={false} />
+        <Tooltip formatter={(v) => fEur(v)} contentStyle={tip(c)} />
+        <Legend wrapperStyle={{ fontSize: 12, fontFamily: c.font }} />
+        <Bar dataKey="ventas" name="Ventas" fill={c.secondary} radius={[2, 2, 0, 0]} />
+        <Line dataKey="ebitda" name="EBITDA" stroke={c.primary} strokeWidth={2} dot={false} />
         <Line
           dataKey="acumulado"
           name="EBITDA acumulado"
-          stroke={COL.black}
+          stroke={c.black}
           strokeWidth={2}
           strokeDasharray="4 3"
           dot={false}
@@ -140,13 +159,4 @@ export function ProjectionChart({ meses }) {
       </ComposedChart>
     </ResponsiveContainer>
   )
-}
-
-const tooltipStyle = {
-  background: '#FCFAF3',
-  border: `1px solid ${COL.grid}`,
-  borderRadius: 6,
-  fontFamily: 'DM Mono, monospace',
-  fontSize: 12,
-  color: COL.black,
 }
