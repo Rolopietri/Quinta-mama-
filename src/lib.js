@@ -3,7 +3,7 @@
 //  Toda la lógica de cálculo vive aquí (funciones puras).
 // ============================================================
 
-export const SEM_MES = 4.33 // semanas por mes (constante)
+export const DIAS_MES = 26 // días de operación al mes (promedio, constante)
 
 // --- Valores por defecto del modelo --------------------------
 // Los campos que el usuario edita se guardan como TEXTO (string)
@@ -11,17 +11,17 @@ export const SEM_MES = 4.33 // semanas por mes (constante)
 // Los porcentajes se guardan en su forma "humana" (55 = 55%).
 export const DEFAULTS = {
   // 01 General
-  diasSem: '6',
   tasa: '0', // Bs por €
 
-  // 02 Aforo y rotación
+  // 02 Comensales (entrada directa) + aforo de referencia
+  desDia: '28', // comensales de desayuno por día (lo escribe el usuario)
+  almDia: '34', // comensales de almuerzo por día (lo escribe el usuario)
   plazasF: '32',
   plazasI: '12',
   rotDesF: '1.2',
   rotDesI: '1.0',
   rotAlmF: '1.5',
   rotAlmI: '1.2',
-  ocup: '55', // % ocupación media
 
   // 03 Ticket y food cost
   tkDes: '7',
@@ -74,18 +74,24 @@ export function costoRol(rol) {
 
 // --- Modelo completo ----------------------------------------
 export function calcular(state) {
-  const diasSem = num(state.diasSem)
-  const diasMes = diasSem * SEM_MES
+  const diasMes = DIAS_MES // 26 días/mes (constante)
   const tasa = num(state.tasa)
 
-  // Aforo y rotación
-  const plazasF = num(state.plazasF)
-  const plazasI = num(state.plazasI)
-  const ocup = pct(state.ocup)
-  const desDia = (plazasF * num(state.rotDesF) + plazasI * num(state.rotDesI)) * ocup
-  const almDia = (plazasF * num(state.rotAlmF) + plazasI * num(state.rotAlmI)) * ocup
+  // Comensales por día — ENTRADA DIRECTA (lo escribe el usuario)
+  const desDia = num(state.desDia)
+  const almDia = num(state.almDia)
   const comensalesDia = desDia + almDia
   const comensalesMes = comensalesDia * diasMes
+
+  // Aforo de referencia: sirve para DERIVAR la ocupación a partir
+  // de los comensales que el usuario escribió (capacidad teórica).
+  const plazasF = num(state.plazasF)
+  const plazasI = num(state.plazasI)
+  const capDes = plazasF * num(state.rotDesF) + plazasI * num(state.rotDesI)
+  const capAlm = plazasF * num(state.rotAlmF) + plazasI * num(state.rotAlmI)
+  const ocupDes = capDes > 0 ? desDia / capDes : null
+  const ocupAlm = capAlm > 0 ? almDia / capAlm : null
+  const ocup = capDes + capAlm > 0 ? comensalesDia / (capDes + capAlm) : null
 
   // Ticket y food cost
   const tkDes = num(state.tkDes)
@@ -160,6 +166,11 @@ export function calcular(state) {
     almDia,
     comensalesDia,
     comensalesMes,
+    capDes,
+    capAlm,
+    ocupDes,
+    ocupAlm,
+    ocup,
     ingDes,
     ingAlm,
     ventas,

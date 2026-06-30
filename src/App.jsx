@@ -14,7 +14,7 @@ import { Field, Info, Section, Card, Kpi } from './ui.jsx'
 import { Waterfall, ScenarioChart, ProjectionChart } from './charts.jsx'
 import Presentation from './Presentation.jsx'
 
-const STORAGE_KEY = 'quinta-mama-modelo-v1'
+const STORAGE_KEY = 'quinta-mama-modelo-v2'
 const ACCENT = '#B8923B'
 
 // Carga inicial desde localStorage (o valores por defecto)
@@ -158,14 +158,30 @@ export default function App() {
         {/* ================= IZQUIERDA: SUPUESTOS ================= */}
         <aside className={`assumptions no-print ${showAssumptions ? 'open' : ''}`}>
           <Section num="01" title="General">
-            <div className="grid2">
-              <Field label="Días operativos / semana" value={state.diasSem} onChange={set('diasSem')} />
-              <Field label="Tasa euro" suffix="Bs/€" value={state.tasa} onChange={set('tasa')} />
-            </div>
-            <p className="hint">Semanas/mes: 4,33 (constante) · Días/mes: {fNum(modelo.diasMes, 1)}</p>
+            <Field label="Tasa euro" suffix="Bs/€" value={state.tasa} onChange={set('tasa')} />
+            <p className="hint">Días de operación: 26 al mes (promedio, constante).</p>
           </Section>
 
-          <Section num="02" title="Aforo y rotación">
+          <Section num="02" title="Comensales y aforo">
+            <div className="grid2">
+              <Field
+                label="Comensales desayuno / día"
+                info="Número de personas que esperas atender en el desayuno cada día. Lo escribes tú."
+                value={state.desDia}
+                onChange={set('desDia')}
+              />
+              <Field
+                label="Comensales almuerzo / día"
+                info="Número de personas que esperas atender en el almuerzo cada día. Lo escribes tú."
+                value={state.almDia}
+                onChange={set('almDia')}
+              />
+            </div>
+            <p className="hint">
+              Ocupación estimada (se calcula sola): desayuno {fPct(modelo.ocupDes)} · almuerzo{' '}
+              {fPct(modelo.ocupAlm)} · media <strong>{fPct(modelo.ocup)}</strong>. Sale de comparar
+              los comensales con la capacidad (plazas × rotación) de abajo.
+            </p>
             <div className="grid2">
               <Field label="Plazas mesa formal" value={state.plazasF} onChange={set('plazasF')} />
               <Field label="Plazas sofá / informal" value={state.plazasI} onChange={set('plazasI')} />
@@ -183,7 +199,6 @@ export default function App() {
               <Field label="Rotación almuerzo · mesa" value={state.rotAlmF} onChange={set('rotAlmF')} />
               <Field label="Rotación almuerzo · sofá" value={state.rotAlmI} onChange={set('rotAlmI')} />
             </div>
-            <Field label="Ocupación media" suffix="%" value={state.ocup} onChange={set('ocup')} />
           </Section>
 
           <Section num="03" title="Ticket y food cost">
@@ -312,15 +327,15 @@ export default function App() {
           <Card title="Comensales por día" accent={ACCENT}>
             <div className="diners">
               <div>
-                <span className="d-num">{fNum(modelo.desDia, 1)}</span>
+                <span className="d-num">{fNum(modelo.desDia, 0)}</span>
                 <span className="d-lbl">Desayuno</span>
               </div>
               <div>
-                <span className="d-num">{fNum(modelo.almDia, 1)}</span>
+                <span className="d-num">{fNum(modelo.almDia, 0)}</span>
                 <span className="d-lbl">Almuerzo</span>
               </div>
               <div>
-                <span className="d-num">{fNum(modelo.comensalesDia, 1)}</span>
+                <span className="d-num">{fNum(modelo.comensalesDia, 0)}</span>
                 <span className="d-lbl">Total / día</span>
               </div>
               <div>

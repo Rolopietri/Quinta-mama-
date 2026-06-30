@@ -188,18 +188,19 @@ function buildSlides({ state, set, modelo }) {
         <div className="slide">
           <h2 className="s-title">El modelo operativo</h2>
           <p className="s-lead">
-            Mueve la ocupación y mira cómo cambian los comensales. Así de sensible es el negocio.
+            Escribe cuántos comensales esperas en desayuno y almuerzo. El total y la ocupación se
+            calculan solos.
           </p>
           <div className="live-row">
             <div className="live-control">
-              <Field label="Ocupación media" suffix="%" value={state.ocup} onChange={set('ocup')} />
-              <Field label="Ticket almuerzo" suffix="€" value={state.tkAlm} onChange={set('tkAlm')} />
+              <Field label="Comensales desayuno / día" value={state.desDia} onChange={set('desDia')} />
+              <Field label="Comensales almuerzo / día" value={state.almDia} onChange={set('almDia')} />
             </div>
             <div className="live-kpis">
-              <PK label="Desayuno / día" value={fNum(modelo.desDia, 0)} sub="comensales" />
-              <PK label="Almuerzo / día" value={fNum(modelo.almDia, 0)} sub="comensales" />
               <PK label="Total / día" value={fNum(modelo.comensalesDia, 0)} sub="comensales" />
-              <PK label="Total / mes" value={fNum(modelo.comensalesMes, 0)} sub="comensales" />
+              <PK label="Total / mes" value={fNum(modelo.comensalesMes, 0)} sub="× 26 días" />
+              <PK label="Ocupación media" value={fPct(modelo.ocup)} sub="se calcula sola" />
+              <PK label="Ventas / mes" value={fEur(modelo.ventas)} sub={fBs(modelo.ventas, modelo.tasa)} />
             </div>
           </div>
         </div>
