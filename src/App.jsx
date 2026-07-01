@@ -277,7 +277,42 @@ export default function App() {
             </p>
           </Section>
 
-          <Section num="06" title="Factores de escenario">
+          <Section num="06" title="Catering (eventos)">
+            <div className="grid2">
+              <Field
+                label="Eventos / mes"
+                info="Número de eventos de catering al mes en la Quinta Mamá."
+                value={state.catEventos}
+                onChange={set('catEventos')}
+              />
+              <Field label="Personas / evento" value={state.catPersonas} onChange={set('catPersonas')} />
+            </div>
+            <div className="grid2">
+              <Field
+                label="Precio por plato"
+                suffix="€"
+                info="Lo que se cobra por cada plato/persona en el catering."
+                value={state.catTicket}
+                onChange={set('catTicket')}
+              />
+              <Field label="Food cost catering" suffix="%" value={state.catFood} onChange={set('catFood')} />
+            </div>
+            <div className="grid2">
+              <Field
+                label="Horas extra / mes"
+                info="Horas extra de cocina dedicadas al catering en el mes."
+                value={state.catHoras}
+                onChange={set('catHoras')}
+              />
+              <Field label="Costo por hora extra" suffix="€" value={state.catCostoHora} onChange={set('catCostoHora')} />
+            </div>
+            <p className="hint">
+              Ventas catering: <strong>{fEur(modelo.ventasCat)}/mes</strong> · margen de ganancia{' '}
+              {fPct(modelo.margenCatPct)} · horas extra {fEur(modelo.nominaExtra)}/mes.
+            </p>
+          </Section>
+
+          <Section num="07" title="Factores de escenario">
             <div className="grid2">
               <Field label="Factor conservador" suffix="×" value={state.fCons} onChange={set('fCons')} />
               <Field label="Factor optimista" suffix="×" value={state.fOpt} onChange={set('fOpt')} />
@@ -341,6 +376,31 @@ export default function App() {
               <div>
                 <span className="d-num">{fNum(modelo.comensalesMes)}</span>
                 <span className="d-lbl">Total / mes</span>
+              </div>
+            </div>
+          </Card>
+
+          {/* Ramas de ingreso */}
+          <Card title="Ramas de ingreso" accent={ACCENT}>
+            <div className="branches">
+              <div className="branch">
+                <div className="branch-name">Comedor</div>
+                <div className="branch-val">{fEur(modelo.ventasComedor)}</div>
+                <div className="branch-sub">
+                  {modelo.ventas > 0 ? fPct(modelo.ventasComedor / modelo.ventas) : '—'} de las ventas
+                </div>
+              </div>
+              <div className="branch">
+                <div className="branch-name">Catering</div>
+                <div className="branch-val">{fEur(modelo.ventasCat)}</div>
+                <div className="branch-sub">
+                  {modelo.ventas > 0 ? fPct(modelo.ventasCat / modelo.ventas) : '—'} de las ventas
+                </div>
+              </div>
+              <div className="branch total">
+                <div className="branch-name">Total</div>
+                <div className="branch-val">{fEur(modelo.ventas)}</div>
+                <div className="branch-sub">ventas / mes</div>
               </div>
             </div>
           </Card>

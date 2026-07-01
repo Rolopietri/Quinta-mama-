@@ -58,7 +58,8 @@ const tip = (c) => ({
 export function Waterfall({ modelo, mono }) {
   const c = pal(mono)
   const axisStyle = { fontSize: 11, fill: c.text, fontFamily: c.font }
-  const { ventas, cmv, nomina, otrosFijos, ebitda } = modelo
+  const { ventas, cmv, otrosFijos, ebitda } = modelo
+  const nomina = modelo.nominaTotal ?? modelo.nomina
   let run = 0
   const step = (name, delta, type) => {
     const y0 = run

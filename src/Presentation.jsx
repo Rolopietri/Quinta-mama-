@@ -200,14 +200,50 @@ function buildSlides({ state, set, modelo }) {
               <PK label="Total / día" value={fNum(modelo.comensalesDia, 0)} sub="comensales" />
               <PK label="Total / mes" value={fNum(modelo.comensalesMes, 0)} sub="× 26 días" />
               <PK label="Ocupación media" value={fPct(modelo.ocup)} sub="se calcula sola" />
-              <PK label="Ventas / mes" value={fEur(modelo.ventas)} sub={fBs(modelo.ventas, modelo.tasa)} />
+              <PK label="Ventas comedor / mes" value={fEur(modelo.ventasComedor)} sub={fBs(modelo.ventasComedor, modelo.tasa)} />
             </div>
           </div>
         </div>
       ),
     },
 
-    // 6 · Los números en vivo (fondo: salón madera 1)
+    // 6 · Catering — segunda rama de ingresos (fondo: salón madera 2)
+    {
+      key: 'catering',
+      bg: '/img/salon-madera-2.jpg',
+      render: (
+        <div className="slide">
+          <h2 className="s-title">Catering para eventos</h2>
+          <p className="s-lead">
+            La segunda rama: platos para los eventos que ya ocurren en la Quinta Mamá. Misma cocina,
+            ingreso adicional.
+          </p>
+          <div className="live-row">
+            <div className="live-control">
+              <Field label="Eventos / mes" value={state.catEventos} onChange={set('catEventos')} />
+              <Field label="Personas / evento" value={state.catPersonas} onChange={set('catPersonas')} />
+              <Field label="Precio por plato" suffix="€" value={state.catTicket} onChange={set('catTicket')} />
+            </div>
+            <div className="live-kpis">
+              <PK label="Ventas catering / mes" value={fEur(modelo.ventasCat)} sub={fBs(modelo.ventasCat, modelo.tasa)} />
+              <PK label="Margen de ganancia" value={fPct(modelo.margenCatPct)} sub="sobre el precio" />
+              <PK
+                label="% del total"
+                value={modelo.ventas > 0 ? fPct(modelo.ventasCat / modelo.ventas) : '—'}
+                sub="de las ventas"
+              />
+              <PK
+                label="Aporte / mes"
+                value={fEur(modelo.ventasCat - modelo.cmvCat - modelo.nominaExtra)}
+                sub="tras comida y horas extra"
+              />
+            </div>
+          </div>
+        </div>
+      ),
+    },
+
+    // 7 · Los números en vivo (fondo: salón madera 1)
     {
       key: 'numeros',
       bg: '/img/salon-madera-1.jpg',

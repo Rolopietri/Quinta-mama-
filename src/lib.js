@@ -42,7 +42,15 @@ export const DEFAULTS = {
   otrosFijos: '610',
   inversion: '15000',
 
-  // 06 Factores de escenario
+  // 06 Catering (segunda rama de ingresos)
+  catEventos: '4', // eventos de catering al mes
+  catPersonas: '30', // personas (platos) por evento
+  catTicket: '12', // precio por plato / persona (€)
+  catFood: '30', // % food cost del catering
+  catHoras: '40', // horas extra de cocina al mes por catering
+  catCostoHora: '6', // costo por hora extra (€)
+
+  // 07 Factores de escenario
   fCons: '0.8',
   fOpt: '1.3',
 
@@ -99,24 +107,39 @@ export function calcular(state) {
   const fcDes = pct(state.fcDes)
   const fcAlm = pct(state.fcAlm)
 
-  // Ingresos
+  // Ingresos del COMEDOR
   const ingDes = desDia * tkDes * diasMes
   const ingAlm = almDia * tkAlm * diasMes
-  const ventas = ingDes + ingAlm
+  const ventasComedor = ingDes + ingAlm
+  const cmvComedor = ingDes * fcDes + ingAlm * fcAlm
 
-  // Costo de alimentos (CMV)
-  const cmv = ingDes * fcDes + ingAlm * fcAlm
+  // Rama CATERING (segunda fuente de ingresos)
+  const catEventos = num(state.catEventos)
+  const catPersonas = num(state.catPersonas)
+  const catTicket = num(state.catTicket)
+  const ventasCat = catEventos * catPersonas * catTicket
+  const catFood = pct(state.catFood)
+  const cmvCat = ventasCat * catFood
+  const margenCatPct = ventasCat > 0 ? 1 - catFood : null // margen bruto del catering
+  const catHoras = num(state.catHoras)
+  const catCostoHora = num(state.catCostoHora)
+  const nominaExtra = catHoras * catCostoHora // horas extra de cocina por catering
+
+  // Totales (comedor + catering)
+  const ventas = ventasComedor + ventasCat
+  const cmv = cmvComedor + cmvCat
   const margenBruto = ventas - cmv
 
   // Nómina
   const roles = (state.roles || []).map((r) => ({ ...r, costo: costoRol(r) }))
   const nomina = roles.reduce((acc, r) => acc + r.costo, 0)
   const personas = roles.reduce((acc, r) => acc + num(r.n), 0)
+  const nominaTotal = nomina + nominaExtra // fija del comedor + horas extra de catering
 
   // Fijos e inversión
   const otrosFijos = num(state.otrosFijos)
   const inversion = num(state.inversion)
-  const costosFijos = nomina + otrosFijos
+  const costosFijos = nominaTotal + otrosFijos
 
   // Resultado
   const ebitda = margenBruto - costosFijos
@@ -133,8 +156,8 @@ export function calcular(state) {
   const payback = ebitda > 0 ? inversion / ebitda : null
   const roiAnual = inversion > 0 ? (ebitda * 12) / inversion : null
 
-  // Peso de la nómina sobre ventas
-  const nominaPct = ventas > 0 ? nomina / ventas : null
+  // Peso de la nómina sobre ventas (incluye horas extra de catering)
+  const nominaPct = ventas > 0 ? nominaTotal / ventas : null
 
   // Escenarios (escala ventas y CMV; fijos NO escalan)
   const factores = {
@@ -173,6 +196,15 @@ export function calcular(state) {
     ocup,
     ingDes,
     ingAlm,
+    ventasComedor,
+    cmvComedor,
+    ventasCat,
+    cmvCat,
+    margenCatPct,
+    catEventos,
+    catPersonas,
+    nominaExtra,
+    nominaTotal,
     ventas,
     cmv,
     margenBruto,

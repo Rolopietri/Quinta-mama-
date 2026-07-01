@@ -1050,3 +1050,42 @@ body {
     padding: 22px 18px;
   }
 }
+
+/* ---------- Ramas de ingreso (comedor vs catering) ---------- */
+.branches {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 12px;
+}
+.branch {
+  background: var(--cream);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 14px;
+  text-align: center;
+}
+.branch.total {
+  background: #fff;
+  border-color: var(--gold);
+}
+.branch-name {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.branch-val {
+  font-family: var(--mono);
+  font-size: 22px;
+  margin-top: 6px;
+}
+.branch-sub {
+  font-size: 11.5px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+@media (max-width: 520px) {
+  .branches {
+    grid-template-columns: 1fr;
+  }
+}
