@@ -859,8 +859,10 @@ export type PlanProduccion = {
   recetaId: string;
   recetaNombre: string;          // snapshot
   raciones: number;
-  /** Raciones ya vendidas (vía Xetux o manual) que liberaron su compromiso. */
+  /** Raciones ya consumidas (ventas + mermas) que liberaron su compromiso. */
   racionesConsumidas: number;
+  /** De las consumidas, cuántas fueron por MERMA (pérdida de producción). */
+  racionesPerdidas: number;
   fechaObjetivo?: string;        // YYYY-MM-DD
   nota?: string;
   estado: EstadoPlanProduccion;

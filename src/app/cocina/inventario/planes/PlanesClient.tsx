@@ -247,8 +247,9 @@ export function PlanesClient() {
       year: "numeric",
       timeZone: "America/Caracas",
     });
-    const vendidas = p.racionesConsumidas;
-    const sinVender = Math.max(0, p.raciones - vendidas);
+    const perdidas = p.racionesPerdidas ?? 0;
+    const vendidas = Math.max(0, p.racionesConsumidas - perdidas);
+    const sinVender = Math.max(0, p.raciones - p.racionesConsumidas);
     return (
       <div
         key={p.id}
@@ -279,11 +280,19 @@ export function PlanesClient() {
               {p.compromisos.length} ingrediente
               {p.compromisos.length === 1 ? "" : "s"}
             </div>
-            {vendidas > 0 && p.estado !== "cancelado" && (
+            {(vendidas > 0 || perdidas > 0) && p.estado !== "cancelado" && (
               <div className="text-xs mt-1">
-                <span className="text-sky-700">
-                  {vendidas} vendida{vendidas === 1 ? "" : "s"}
-                </span>
+                {vendidas > 0 && (
+                  <span className="text-sky-700">
+                    {vendidas} vendida{vendidas === 1 ? "" : "s"}
+                  </span>
+                )}
+                {perdidas > 0 && (
+                  <span className="text-terracotta">
+                    {vendidas > 0 ? " · " : ""}
+                    {perdidas} perdida{perdidas === 1 ? "" : "s"}
+                  </span>
+                )}
                 {sinVender > 0 ? (
                   <span className="text-cacao-soft">
                     {" "}

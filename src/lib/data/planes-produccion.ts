@@ -24,6 +24,7 @@ type HeaderRow = {
   receta_nombre: string;
   raciones: number | string;
   raciones_consumidas: number | string | null;
+  raciones_perdidas: number | string | null;
   fecha_objetivo: string | null;
   nota: string | null;
   estado: string;
@@ -60,6 +61,7 @@ function headerToPlan(
     recetaNombre: h.receta_nombre,
     raciones: Number(h.raciones),
     racionesConsumidas: Number(h.raciones_consumidas ?? 0),
+    racionesPerdidas: Number(h.raciones_perdidas ?? 0),
     fechaObjetivo: h.fecha_objetivo ?? undefined,
     nota: h.nota ?? undefined,
     estado: h.estado as EstadoPlanProduccion,
