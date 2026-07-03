@@ -412,11 +412,14 @@ export function PlanesClient() {
               </select>
             </label>
             <label className="text-sm text-cacao">
-              Raciones a producir
+              Raciones a producir{" "}
+              <span className="text-cacao-mute font-normal">
+                (admite fracciones, ej. 0.5)
+              </span>
               <input
                 type="number"
-                min="1"
-                step="1"
+                min="0"
+                step="any"
                 value={formRaciones}
                 onChange={(e) => setFormRaciones(e.target.value)}
                 required
