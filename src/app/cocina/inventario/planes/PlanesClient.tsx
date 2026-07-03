@@ -148,6 +148,12 @@ export function PlanesClient() {
     return previewConsumo(rec, raciones, recetas, insumos);
   }, [formRecetaId, formRaciones, recetas, insumos]);
 
+  // Receta seleccionada en el formulario (para mostrar su rendimiento).
+  const formReceta = useMemo(
+    () => recetas.find((r) => r.id === formRecetaId) ?? null,
+    [recetas, formRecetaId],
+  );
+
   function resetForm() {
     setFormRecetaId("");
     setFormRaciones("10");
@@ -425,6 +431,21 @@ export function PlanesClient() {
                 required
                 className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2"
               />
+              {formReceta && (
+                <span className="mt-1 block text-xs text-cacao-soft">
+                  Rinde {formReceta.porciones}{" "}
+                  {formReceta.porciones === 1 ? "porción" : "porciones"} por receta
+                  completa
+                  {Number(formRaciones) > 0
+                    ? ` · esta tanda ≈ ${Math.round(
+                        formReceta.porciones * Number(formRaciones) * 100,
+                      ) / 100} porciones`
+                    : ""}
+                  {formReceta.rendimiento
+                    ? ` · ${formReceta.rendimiento} ${formReceta.rendimientoUnidad || "g"}/porción`
+                    : ""}
+                </span>
+              )}
             </label>
             <label className="text-sm text-cacao">
               Fecha objetivo{" "}
