@@ -98,6 +98,12 @@ export function InventarioClient() {
   const [mermaOpen, setMermaOpen] = useState(false);
   const [mermaRecetaId, setMermaRecetaId] = useState("");
   const [mermaRaciones, setMermaRaciones] = useState("1");
+  // Unidad de la merma: por raciones (default) o por gramos (según el
+  // rendimiento de la receta). El backend siempre guarda en raciones.
+  const [mermaUnidad, setMermaUnidad] = useState<"raciones" | "gramos">(
+    "raciones",
+  );
+  const [mermaGramos, setMermaGramos] = useState("");
   const [mermaMotivo, setMermaMotivo] = useState<string>(
     MOTIVOS_MERMA_PRODUCCION[0],
   );
@@ -211,9 +217,39 @@ export function InventarioClient() {
     );
   }, [planes]);
 
+  // Receta seleccionada en el modal de merma y su gramaje por ración.
+  // gramosPorRacion = rendimiento total ÷ porciones (solo si la receta
+  // tiene rendimiento definido). Sirve para convertir gramos → raciones.
+  const mermaReceta = useMemo(
+    () => recetas.find((r) => r.id === mermaRecetaId) ?? null,
+    [recetas, mermaRecetaId],
+  );
+  const gramosPorRacion =
+    mermaReceta &&
+    typeof mermaReceta.rendimiento === "number" &&
+    mermaReceta.rendimiento > 0 &&
+    mermaReceta.porciones > 0
+      ? mermaReceta.rendimiento / mermaReceta.porciones
+      : null;
+  const rendUnidad = mermaReceta?.rendimientoUnidad || "g";
+
+  // Raciones efectivas a registrar, según la unidad elegida. NaN si es inválido.
+  const mermaRacionesCalc = useMemo(() => {
+    if (mermaUnidad === "gramos") {
+      if (!gramosPorRacion) return NaN;
+      const g = Number(mermaGramos);
+      if (!Number.isFinite(g) || g <= 0) return NaN;
+      return g / gramosPorRacion;
+    }
+    const r = Number(mermaRaciones);
+    return Number.isFinite(r) && r > 0 ? r : NaN;
+  }, [mermaUnidad, mermaGramos, mermaRaciones, gramosPorRacion]);
+
   function openMerma() {
     setMermaRecetaId("");
     setMermaRaciones("1");
+    setMermaUnidad("raciones");
+    setMermaGramos("");
     setMermaMotivo(MOTIVOS_MERMA_PRODUCCION[0]);
     setMermaFecha(new Date().toISOString().slice(0, 10));
     setMermaNota("");
@@ -223,9 +259,17 @@ export function InventarioClient() {
   async function handleMermaSubmit(e: React.FormEvent) {
     e.preventDefault();
     const rec = recetas.find((r) => r.id === mermaRecetaId);
-    const raciones = Number(mermaRaciones);
-    if (!rec || !Number.isFinite(raciones) || raciones <= 0) {
-      setError("Elegí una receta y una cantidad de raciones válida.");
+    const raciones = mermaRacionesCalc;
+    if (!rec) {
+      setError("Elegí una receta.");
+      return;
+    }
+    if (!Number.isFinite(raciones) || raciones <= 0) {
+      setError(
+        mermaUnidad === "gramos"
+          ? "Ingresá un gramaje válido (la receta debe tener rendimiento definido)."
+          : "Ingresá una cantidad de raciones válida.",
+      );
       return;
     }
     setMermaProcesando(true);
@@ -240,9 +284,11 @@ export function InventarioClient() {
         nota: mermaNota || undefined,
       });
       await refrescarTrasMerma();
-      setInfo(
-        `Merma registrada: ${raciones} ración${raciones === 1 ? "" : "es"} de ${rec.nombre}.`,
-      );
+      const detalle =
+        mermaUnidad === "gramos"
+          ? `${Number(mermaGramos)} ${rendUnidad} (≈ ${raciones.toFixed(2)} raciones)`
+          : `${raciones} ración${raciones === 1 ? "" : "es"}`;
+      setInfo(`Merma registrada: ${detalle} de ${rec.nombre}.`);
       setMermaOpen(false);
     } catch (err) {
       setError(extractError(err, "Error registrando merma"));
@@ -268,11 +314,11 @@ export function InventarioClient() {
   // Costo estimado de la merma en edición (para mostrar en el modal)
   const mermaCostoPreview = useMemo(() => {
     const rec = recetas.find((r) => r.id === mermaRecetaId);
-    const raciones = Number(mermaRaciones);
+    const raciones = mermaRacionesCalc;
     if (!rec || !Number.isFinite(raciones) || raciones <= 0) return null;
     const { porPorcion } = calcularCostoReceta(rec, insumos, recetas);
     return porPorcion * raciones;
-  }, [mermaRecetaId, mermaRaciones, recetas, insumos]);
+  }, [mermaRecetaId, mermaRacionesCalc, recetas, insumos]);
 
   // Banner auto-cerrable
   useEffect(() => {
@@ -1086,19 +1132,59 @@ export function InventarioClient() {
                 ))}
               </select>
             </label>
+            {/* Unidad de la merma: por raciones o por gramos */}
+            <div className="flex gap-2 text-sm">
+              <button
+                type="button"
+                onClick={() => setMermaUnidad("raciones")}
+                className={`flex-1 rounded-lg px-3 py-1.5 transition ${
+                  mermaUnidad === "raciones"
+                    ? "bg-terracotta text-white"
+                    : "ring-1 ring-marfil text-cacao hover:bg-marfil-soft"
+                }`}
+              >
+                Por raciones
+              </button>
+              <button
+                type="button"
+                onClick={() => setMermaUnidad("gramos")}
+                className={`flex-1 rounded-lg px-3 py-1.5 transition ${
+                  mermaUnidad === "gramos"
+                    ? "bg-terracotta text-white"
+                    : "ring-1 ring-marfil text-cacao hover:bg-marfil-soft"
+                }`}
+              >
+                Por gramos
+              </button>
+            </div>
             <div className="grid grid-cols-2 gap-3">
-              <label className="text-sm text-cacao">
-                Raciones perdidas
-                <input
-                  type="number"
-                  min="1"
-                  step="1"
-                  value={mermaRaciones}
-                  onChange={(e) => setMermaRaciones(e.target.value)}
-                  required
-                  className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2"
-                />
-              </label>
+              {mermaUnidad === "gramos" ? (
+                <label className="text-sm text-cacao">
+                  Cantidad perdida ({rendUnidad})
+                  <input
+                    type="number"
+                    min="0"
+                    step="any"
+                    value={mermaGramos}
+                    onChange={(e) => setMermaGramos(e.target.value)}
+                    required
+                    className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2"
+                  />
+                </label>
+              ) : (
+                <label className="text-sm text-cacao">
+                  Raciones perdidas
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={mermaRaciones}
+                    onChange={(e) => setMermaRaciones(e.target.value)}
+                    required
+                    className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2"
+                  />
+                </label>
+              )}
               <label className="text-sm text-cacao">
                 Motivo
                 <select
@@ -1114,6 +1200,22 @@ export function InventarioClient() {
                 </select>
               </label>
             </div>
+            {/* Conversión gramos → raciones (según el rendimiento de la receta) */}
+            {mermaUnidad === "gramos" && mermaReceta && !gramosPorRacion && (
+              <p className="text-xs text-terracotta font-serif leading-relaxed">
+                Esta receta no tiene rendimiento definido. Registrá por raciones,
+                o agregá el rendimiento (g/ml) en la ficha de la receta.
+              </p>
+            )}
+            {mermaUnidad === "gramos" && gramosPorRacion && (
+              <p className="text-xs text-cacao-soft font-serif leading-relaxed">
+                Rendimiento: {gramosPorRacion.toFixed(0)} {rendUnidad}/ración
+                {Number.isFinite(mermaRacionesCalc)
+                  ? ` · equivale a ≈ ${mermaRacionesCalc.toFixed(2)} raciones`
+                  : ""}
+                .
+              </p>
+            )}
             <label className="text-sm text-cacao block">
               Fecha
               <input
