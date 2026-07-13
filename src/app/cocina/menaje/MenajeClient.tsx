@@ -111,6 +111,7 @@ export function MenajeClient() {
   const [listaConPrecios, setListaConPrecios] = useState(false);
   const [listaPct, setListaPct] = useState("10");
   const [listaBuscar, setListaBuscar] = useState("");
+  const [listaCat, setListaCat] = useState<string>("todas");
   // selección por item: { [itemId]: { cantidad, precio } }
   const [listaSel, setListaSel] = useState<
     Record<string, { cantidad: string; precio: string }>
@@ -453,6 +454,7 @@ export function MenajeClient() {
     setListaConPrecios(false);
     setListaPct("10");
     setListaBuscar("");
+    setListaCat("todas");
     setListaSel({});
     setListaOpen(true);
   }
@@ -536,6 +538,7 @@ export function MenajeClient() {
   const listaItemsFiltrados = items.filter(
     (it) =>
       it.activo &&
+      (listaCat === "todas" || it.categoria === listaCat) &&
       (listaBuscar.trim() === "" ||
         it.nombre.toLowerCase().includes(listaBuscar.toLowerCase()) ||
         it.categoria.toLowerCase().includes(listaBuscar.toLowerCase())),
@@ -1470,13 +1473,44 @@ export function MenajeClient() {
               )}
             </div>
 
+            {/* Filtro por categoría */}
+            {categoriasReales.length > 0 && (
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setListaCat("todas")}
+                  className={pillClass(listaCat === "todas")}
+                >
+                  Todas
+                </button>
+                {categoriasReales.map((c) => {
+                  const nSel = items.filter(
+                    (it) =>
+                      it.categoria === c &&
+                      (Number(listaSel[it.id]?.cantidad) || 0) > 0,
+                  ).length;
+                  return (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => setListaCat(c)}
+                      className={pillClass(listaCat === c)}
+                    >
+                      {c}
+                      {nSel > 0 ? ` · ${nSel}` : ""}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
             {/* Buscador */}
             <input
               type="text"
               placeholder="Buscar pieza..."
               value={listaBuscar}
               onChange={(e) => setListaBuscar(e.target.value)}
-              className="mt-4 w-full rounded-lg ring-1 ring-marfil px-3 py-2"
+              className="mt-3 w-full rounded-lg ring-1 ring-marfil px-3 py-2"
             />
 
             {/* Lista de ítems */}
