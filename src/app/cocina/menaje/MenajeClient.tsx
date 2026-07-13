@@ -102,6 +102,21 @@ export function MenajeClient() {
   >(null);
   const [borrando, setBorrando] = useState(false);
 
+  // Modal "Lista para evento" (genera PDF ad-hoc)
+  const [listaOpen, setListaOpen] = useState(false);
+  const [listaEvento, setListaEvento] = useState("");
+  const [listaCliente, setListaCliente] = useState("");
+  const [listaFecha, setListaFecha] = useState("");
+  const [listaNotas, setListaNotas] = useState("");
+  const [listaConPrecios, setListaConPrecios] = useState(false);
+  const [listaPct, setListaPct] = useState("10");
+  const [listaBuscar, setListaBuscar] = useState("");
+  // selección por item: { [itemId]: { cantidad, precio } }
+  const [listaSel, setListaSel] = useState<
+    Record<string, { cantidad: string; precio: string }>
+  >({});
+  const [generandoPdf, setGenerandoPdf] = useState(false);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -430,6 +445,105 @@ export function MenajeClient() {
     }
   }
 
+  function abrirLista() {
+    setListaEvento("");
+    setListaCliente("");
+    setListaFecha(new Date().toISOString().slice(0, 10));
+    setListaNotas("");
+    setListaConPrecios(false);
+    setListaPct("10");
+    setListaBuscar("");
+    setListaSel({});
+    setListaOpen(true);
+  }
+
+  function setSel(id: string, patch: { cantidad?: string; precio?: string }) {
+    setListaSel((prev) => {
+      const cur = prev[id] ?? { cantidad: "", precio: "" };
+      return { ...prev, [id]: { ...cur, ...patch } };
+    });
+  }
+
+  // Autollena el precio unitario = % del costo de reposición, para los ítems
+  // seleccionados (cantidad > 0).
+  function autollenarPrecios() {
+    const pct = Number(listaPct) || 0;
+    setListaSel((prev) => {
+      const next = { ...prev };
+      for (const it of items) {
+        const sel = next[it.id];
+        if (!sel || (Number(sel.cantidad) || 0) <= 0) continue;
+        const base = it.precioReposicionUsd ?? 0;
+        next[it.id] = {
+          ...sel,
+          precio: base > 0 ? ((base * pct) / 100).toFixed(2) : sel.precio,
+        };
+      }
+      return next;
+    });
+  }
+
+  async function generarListaPDF() {
+    const seleccionados = items
+      .filter((it) => (Number(listaSel[it.id]?.cantidad) || 0) > 0)
+      .map((it) => ({
+        nombre: it.nombre,
+        categoria: it.categoria,
+        cantidad: Number(listaSel[it.id]!.cantidad) || 0,
+        disponible: it.cantidadActual,
+        precioUnit: listaConPrecios
+          ? Number(listaSel[it.id]?.precio) || 0
+          : undefined,
+      }));
+    if (seleccionados.length === 0) {
+      setError("Selecciona al menos un ítem con cantidad.");
+      return;
+    }
+    setGenerandoPdf(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/cocina/menaje/lista-pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          evento: listaEvento || undefined,
+          cliente: listaCliente || undefined,
+          fecha: listaFecha || undefined,
+          notas: listaNotas || undefined,
+          conPrecios: listaConPrecios,
+          items: seleccionados,
+        }),
+      });
+      if (!res.ok) {
+        throw new Error((await res.text()) || "Error generando el PDF");
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `menaje-${listaEvento || "evento"}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setListaOpen(false);
+      setInfo("PDF generado.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error generando el PDF");
+    } finally {
+      setGenerandoPdf(false);
+    }
+  }
+
+  const listaItemsFiltrados = items.filter(
+    (it) =>
+      it.activo &&
+      (listaBuscar.trim() === "" ||
+        it.nombre.toLowerCase().includes(listaBuscar.toLowerCase()) ||
+        it.categoria.toLowerCase().includes(listaBuscar.toLowerCase())),
+  );
+  const listaSelCount = items.filter(
+    (it) => (Number(listaSel[it.id]?.cantidad) || 0) > 0,
+  ).length;
+
   if (loading) {
     return (
       <div className="rounded-2xl bg-white ring-1 ring-marfil p-8 text-center text-cacao-soft">
@@ -480,6 +594,14 @@ export function MenajeClient() {
           </div>
         )}
       </section>
+
+      {/* Lista para evento (PDF) */}
+      <button
+        onClick={abrirLista}
+        className="w-full rounded-xl ring-1 ring-cacao text-cacao py-2.5 font-medium hover:bg-marfil-soft transition-colors"
+      >
+        📄 Lista de menaje para evento (PDF)
+      </button>
 
       {/* Nuevo item */}
       {!adding ? (
@@ -1231,6 +1353,223 @@ export function MenajeClient() {
               >
                 {borrando ? "Eliminando..." : "Sí, eliminar"}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: lista de menaje para evento (PDF) */}
+      {listaOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-start justify-center p-4 bg-cacao/40 backdrop-blur-sm overflow-y-auto"
+          onClick={() => !generandoPdf && setListaOpen(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="my-6 rounded-2xl bg-white ring-1 ring-marfil p-6 max-w-2xl w-full shadow-xl"
+          >
+            <h2 className="font-cinzel text-xl tracking-[0.08em] text-cacao">
+              Lista de menaje para evento
+            </h2>
+            <p className="mt-1 text-sm text-cacao-soft font-serif">
+              Escoge las piezas y las cantidades. Genera un PDF como lista de
+              preparación, o una cotización con precio de alquiler.
+            </p>
+
+            {/* Datos del evento */}
+            <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <label className="block">
+                <span className="text-[11px] uppercase tracking-widest text-cacao-mute">
+                  Evento
+                </span>
+                <input
+                  type="text"
+                  value={listaEvento}
+                  onChange={(e) => setListaEvento(e.target.value)}
+                  placeholder="Ej. Boda García"
+                  className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2"
+                />
+              </label>
+              <label className="block">
+                <span className="text-[11px] uppercase tracking-widest text-cacao-mute">
+                  Cliente
+                </span>
+                <input
+                  type="text"
+                  value={listaCliente}
+                  onChange={(e) => setListaCliente(e.target.value)}
+                  className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2"
+                />
+              </label>
+              <label className="block">
+                <span className="text-[11px] uppercase tracking-widest text-cacao-mute">
+                  Fecha
+                </span>
+                <input
+                  type="date"
+                  value={listaFecha}
+                  onChange={(e) => setListaFecha(e.target.value)}
+                  className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2"
+                />
+              </label>
+              <label className="block">
+                <span className="text-[11px] uppercase tracking-widest text-cacao-mute">
+                  Notas
+                </span>
+                <input
+                  type="text"
+                  value={listaNotas}
+                  onChange={(e) => setListaNotas(e.target.value)}
+                  placeholder="Opcional"
+                  className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2"
+                />
+              </label>
+            </div>
+
+            {/* Toggle precios + autollenado */}
+            <div className="mt-4 rounded-xl bg-marfil-soft ring-1 ring-marfil p-3">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={listaConPrecios}
+                  onChange={(e) => setListaConPrecios(e.target.checked)}
+                  className="h-4 w-4 accent-cacao"
+                />
+                <span className="text-sm text-cacao font-medium">
+                  Incluir precios (cotización de alquiler)
+                </span>
+              </label>
+              {listaConPrecios && (
+                <div className="mt-3 flex flex-wrap items-end gap-2">
+                  <label className="block">
+                    <span className="text-[11px] uppercase tracking-widest text-cacao-mute">
+                      % del costo de reposición
+                    </span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={listaPct}
+                      onChange={(e) => setListaPct(e.target.value)}
+                      className="mt-1 w-24 rounded-lg ring-1 ring-marfil px-3 py-2"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={autollenarPrecios}
+                    className="rounded-lg ring-1 ring-cacao text-cacao px-3 py-2 text-sm hover:bg-white transition-colors"
+                  >
+                    Autollenar precios
+                  </button>
+                  <span className="text-xs text-cacao-soft font-serif">
+                    Aplica a los ítems con cantidad. Puedes editar cada precio.
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Buscador */}
+            <input
+              type="text"
+              placeholder="Buscar pieza..."
+              value={listaBuscar}
+              onChange={(e) => setListaBuscar(e.target.value)}
+              className="mt-4 w-full rounded-lg ring-1 ring-marfil px-3 py-2"
+            />
+
+            {/* Lista de ítems */}
+            <div className="mt-3 max-h-[45vh] overflow-y-auto rounded-xl ring-1 ring-marfil divide-y divide-marfil">
+              {listaItemsFiltrados.length === 0 ? (
+                <p className="p-4 text-sm text-cacao-soft text-center">
+                  No hay piezas que coincidan.
+                </p>
+              ) : (
+                listaItemsFiltrados.map((it) => {
+                  const sel = listaSel[it.id] ?? { cantidad: "", precio: "" };
+                  const cant = Number(sel.cantidad) || 0;
+                  const excede = cant > it.cantidadActual;
+                  return (
+                    <div
+                      key={it.id}
+                      className="flex flex-wrap items-center gap-3 p-3"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm text-cacao font-medium truncate">
+                          {it.nombre}
+                        </p>
+                        <p className="text-[11px] uppercase tracking-widest text-cacao-mute">
+                          {it.categoria} · disp. {it.cantidadActual}
+                        </p>
+                      </div>
+                      <label className="block">
+                        <span className="text-[10px] uppercase tracking-widest text-cacao-mute">
+                          Cant.
+                        </span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={sel.cantidad}
+                          onChange={(e) =>
+                            setSel(it.id, { cantidad: e.target.value })
+                          }
+                          className={`mt-0.5 w-20 rounded-lg ring-1 px-2 py-1.5 text-right ${
+                            excede
+                              ? "ring-terracotta text-terracotta"
+                              : "ring-marfil"
+                          }`}
+                        />
+                      </label>
+                      {listaConPrecios && (
+                        <label className="block">
+                          <span className="text-[10px] uppercase tracking-widest text-cacao-mute">
+                            P. unit
+                          </span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={sel.precio}
+                            onChange={(e) =>
+                              setSel(it.id, { precio: e.target.value })
+                            }
+                            className="mt-0.5 w-24 rounded-lg ring-1 ring-marfil px-2 py-1.5 text-right"
+                          />
+                        </label>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="mt-5 flex flex-wrap items-center justify-between gap-2">
+              <span className="text-sm text-cacao-soft">
+                {listaSelCount === 0
+                  ? "Ninguna pieza seleccionada"
+                  : `${listaSelCount} pieza(s) seleccionada(s)`}
+              </span>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setListaOpen(false)}
+                  disabled={generandoPdf}
+                  className="rounded-xl ring-1 ring-marfil px-4 py-2 text-cacao hover:bg-marfil-soft disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={generarListaPDF}
+                  disabled={generandoPdf || listaSelCount === 0}
+                  className="rounded-xl bg-cacao text-white px-4 py-2 font-medium hover:bg-cacao-soft disabled:opacity-50"
+                >
+                  {generandoPdf ? "Generando..." : "Generar PDF"}
+                </button>
+              </div>
             </div>
           </div>
         </div>
