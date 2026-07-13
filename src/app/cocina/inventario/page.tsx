@@ -14,6 +14,11 @@ const SUBMODULOS: SubModulo[] = [
     desc: "Reservá stock por adelantado para producciones planificadas (eventos, batches).",
   },
   {
+    href: "/cocina/inventario/auditoria",
+    label: "Auditoría de stock",
+    desc: "Historial automático de cada cambio de stock: cuándo, cuánto y de dónde vino.",
+  },
+  {
     href: "/cocina/ventas",
     label: "Ventas",
     desc: "Importar Xetux o registrar manual — descuenta stock automáticamente.",
