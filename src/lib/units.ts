@@ -89,6 +89,29 @@ export function dimension(unidad: string | undefined | null): Dimension {
   return getUnit(unidad)?.dimension ?? "desconocida";
 }
 
+/** Cantidad expresada en la unidad base de su dimensión (g, ml o unidad).
+ *  Sirve para comparar/ordenar ingredientes aunque estén en unidades distintas
+ *  (ej. 1 Kg = 1000 > 200 g). Si la unidad es desconocida, usa la cantidad tal
+ *  cual. */
+export function cantidadEnBase(
+  cantidad: number,
+  unidad: string | undefined | null,
+): number {
+  return cantidad * (getUnit(unidad)?.toBase ?? 1);
+}
+
+/** Ordena ingredientes (o cualquier item con cantidad+unidad) de MAYOR a MENOR
+ *  cantidad, comparando en unidad base. No muta el arreglo original. */
+export function ordenarPorCantidadDesc<
+  T extends { cantidad: number; unidad: string },
+>(items: T[]): T[] {
+  return [...items].sort(
+    (a, b) =>
+      cantidadEnBase(b.cantidad, b.unidad) -
+      cantidadEnBase(a.cantidad, a.unidad),
+  );
+}
+
 /** Forma canónica si la conocemos (ej "Kilos" → "kg"); si no, devuelve el original. */
 export function canonica(unidad: string): string {
   return getUnit(unidad)?.canonica ?? unidad;

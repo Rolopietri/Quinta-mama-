@@ -15,6 +15,7 @@ import {
   Image,
 } from "@react-pdf/renderer";
 import type { Receta } from "@/lib/types";
+import { ordenarPorCantidadDesc } from "@/lib/units";
 
 // ─── Fuentes (cargadas desde /public/fonts) ──────────────────────
 const fontDir = path.join(process.cwd(), "public", "fonts");
@@ -303,7 +304,7 @@ export function RecetaPDF({ receta: r, logoSrc }: RecetaPDFProps) {
         {/* Ingredientes */}
         <Text style={styles.sectionTitle}>Ingredientes</Text>
         <View>
-          {r.ingredientes.map((i) => (
+          {ordenarPorCantidadDesc(r.ingredientes).map((i) => (
             <View key={i.id} style={styles.ingItem}>
               <Text style={styles.ingQty}>
                 {i.cantidad} {i.unidad}

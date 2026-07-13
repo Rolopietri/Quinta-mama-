@@ -13,6 +13,7 @@ import {
 } from "@/lib/data/recetas";
 import { listInsumos } from "@/lib/data/cocina";
 import { getCocinaConfig } from "@/lib/data/cocinaConfig";
+import { ordenarPorCantidadDesc } from "@/lib/units";
 import { RecetaForm } from "../RecetaForm";
 
 export function RecetaDetail({ id }: { id: string }) {
@@ -271,7 +272,7 @@ export function RecetaDetail({ id }: { id: string }) {
           Ingredientes
         </h2>
         <ul className="divide-y divide-marfil">
-          {lineas.map((i) => (
+          {ordenarPorCantidadDesc(lineas).map((i) => (
             <li
               key={i.id}
               className="py-2 grid grid-cols-12 gap-2 items-baseline"

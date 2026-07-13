@@ -24,6 +24,7 @@ import {
   convertirParaCosto,
   areCompatible,
   dimension,
+  ordenarPorCantidadDesc,
 } from "@/lib/units";
 
 type LineForm = {
@@ -424,21 +425,24 @@ export function RecetaForm({
           esSubreceta && rendimientoUnidad.trim()
             ? rendimientoUnidad.trim()
             : undefined,
-        ingredientes: lineas
-          .filter((l) => l.nombre.trim().length > 0)
-          .map((l, i) => ({
-            insumoId: l.insumoId,
-            subrecetaId: l.subrecetaId,
-            nombre: l.nombre.trim(),
-            cantidad: Number(l.cantidad) || 0,
-            unidad: l.unidad,
-            observaciones: l.observaciones.trim() || undefined,
-            costoManualUsd:
-              !l.insumoId && !l.subrecetaId && l.costoManual.trim() !== ""
-                ? Number(l.costoManual)
-                : undefined,
-            orden: i,
-          })),
+        // Se guardan ordenados de MAYOR a MENOR cantidad (en unidad base),
+        // así el orden queda persistido y se re-ordena solo al agregar uno.
+        ingredientes: ordenarPorCantidadDesc(
+          lineas
+            .filter((l) => l.nombre.trim().length > 0)
+            .map((l) => ({
+              insumoId: l.insumoId,
+              subrecetaId: l.subrecetaId,
+              nombre: l.nombre.trim(),
+              cantidad: Number(l.cantidad) || 0,
+              unidad: l.unidad,
+              observaciones: l.observaciones.trim() || undefined,
+              costoManualUsd:
+                !l.insumoId && !l.subrecetaId && l.costoManual.trim() !== ""
+                  ? Number(l.costoManual)
+                  : undefined,
+            })),
+        ).map((ing, i) => ({ ...ing, orden: i })),
       };
       if (existing) {
         const upd = await updateReceta(existing.id, input);
