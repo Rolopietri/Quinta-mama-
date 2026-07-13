@@ -691,7 +691,32 @@ export type Venta = {
   esMerma?: boolean;
   /** Motivo de la merma (falla de equipo, quemado, etc.). Solo si esMerma. */
   mermaMotivo?: string;
+  /** Clasificación del ítem del POS: 'insumo' (gestionado por inventario,
+   *  descuenta stock), 'servicio', 'consignacion' o 'sin_clasificar'
+   *  (no gestionados por inventario). Default 'insumo'. */
+  tipoItem?: TipoItem;
   createdAt: string;
+};
+
+/** Tipo de ítem del POS respecto al módulo de inventario. */
+export type TipoItem = "insumo" | "servicio" | "consignacion" | "sin_clasificar";
+
+/** Clasificación de un ítem del POS que NO es una receta (servicio,
+ *  consignación, etc.), para que la importación sepa qué hacer con él. */
+export type PosClasificacion = {
+  id: string;
+  /** Nombre normalizado del ítem tal como llega del POS (clave de match). */
+  nombreNorm: string;
+  /** Nombre tal como aparece en el reporte de Xetux. */
+  nombreOriginal: string;
+  tipo: TipoItem;
+  /** Solo si tipo = 'insumo': receta a la que se vincula. */
+  recetaId?: string;
+  /** Solo consignación: proveedor y % de acuerdo (para futura liquidación). */
+  proveedorId?: string;
+  porcentajeAcuerdo?: number;
+  createdAt: string;
+  updatedAt: string;
 };
 
 /** Motivos de merma de producción (pérdida de algo ya preparado/pre-producido). */

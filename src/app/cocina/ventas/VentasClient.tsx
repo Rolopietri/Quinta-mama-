@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { Receta, Venta } from "@/lib/types";
+import type { Receta, Venta, PosClasificacion, TipoItem } from "@/lib/types";
 import { listRecetas } from "@/lib/data/recetas";
 import {
   listVentas,
@@ -9,8 +9,10 @@ import {
   createVentasBatch,
   deleteVenta,
   parseCSV,
-  matchVentasConRecetas,
-  type MatchResult,
+  clasificarFilas,
+  listClasificacion,
+  upsertClasificacion,
+  type ClasificItem,
 } from "@/lib/data/ventas";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 
@@ -41,7 +43,8 @@ export function VentasClient() {
   // Importar
   const [iFecha, setIFecha] = useState(todayISO());
   const [csvText, setCsvText] = useState("");
-  const [matches, setMatches] = useState<MatchResult[] | null>(null);
+  const [clasif, setClasif] = useState<ClasificItem[] | null>(null);
+  const [clasifs, setClasifs] = useState<PosClasificacion[]>([]);
   const [importing, setImporting] = useState(false);
   const [pendienteBorrar, setPendienteBorrar] = useState<string | null>(null);
 
@@ -49,10 +52,15 @@ export function VentasClient() {
     let cancelled = false;
     (async () => {
       try {
-        const [r, v] = await Promise.all([listRecetas(), listVentas(50)]);
+        const [r, v, c] = await Promise.all([
+          listRecetas(),
+          listVentas(50),
+          listClasificacion(),
+        ]);
         if (!cancelled) {
           setRecetas(r);
           setVentas(v);
+          setClasifs(c);
         }
       } catch (e) {
         if (!cancelled)
@@ -94,55 +102,73 @@ export function VentasClient() {
     }
   }
 
+  const recetasVendibles = useMemo(
+    () => recetas.filter((r) => !r.esSubreceta),
+    [recetas],
+  );
+
   function parsear() {
     setError(null);
     try {
       const filas = parseCSV(csvText);
       if (filas.length === 0) {
         setError("No se pudo leer ninguna fila del archivo.");
-        setMatches(null);
+        setClasif(null);
         return;
       }
-      // Solo matchear contra recetas normales (no sub-recetas, que no se venden)
-      const res = matchVentasConRecetas(
-        filas,
-        recetas.filter((r) => !r.esSubreceta),
-      );
-      setMatches(res);
+      setClasif(clasificarFilas(filas, recetasVendibles, clasifs));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error parseando CSV");
-      setMatches(null);
+      setClasif(null);
+    }
+  }
+
+  // Clasifica un ítem del POS (lo guarda y re-clasifica el preview).
+  async function reclasificar(
+    nombreOriginal: string,
+    tipo: TipoItem,
+    recetaId?: string,
+  ) {
+    setError(null);
+    try {
+      const saved = await upsertClasificacion({ nombreOriginal, tipo, recetaId });
+      const nuevos = [
+        ...clasifs.filter((c) => c.nombreNorm !== saved.nombreNorm),
+        saved,
+      ];
+      setClasifs(nuevos);
+      if (clasif) {
+        const filas = clasif.map((c) => c.fila);
+        setClasif(clasificarFilas(filas, recetasVendibles, nuevos));
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error clasificando");
     }
   }
 
   async function confirmarImport() {
-    if (!matches) return;
+    if (!clasif || clasif.length === 0) return;
     setError(null);
     setImporting(true);
     try {
       const batch = uid();
-      const valid = matches.filter((m) => m.matched && m.receta);
-      if (valid.length === 0) {
-        setError("Ninguna fila se pudo mapear a una receta.");
-        setImporting(false);
-        return;
-      }
-      const ventasInput = valid.map((m) => ({
+      // Se registran TODAS las filas. Los que no son insumo van sin receta
+      // (receta_id null) → no descuentan stock, pero sí registran el ingreso.
+      const ventasInput = clasif.map((c) => ({
         fecha: iFecha,
-        recetaId: m.receta!.id,
-        recetaNombre: m.receta!.nombre,
-        cantidad: m.fila.cantidad,
-        precioUnitarioUsd: m.fila.precio,
-        totalUsd: m.fila.precio
-          ? m.fila.cantidad * m.fila.precio
-          : undefined,
+        recetaId: c.tipo === "insumo" && c.receta ? c.receta.id : undefined,
+        recetaNombre: c.receta?.nombre ?? c.fila.nombre,
+        cantidad: c.fila.cantidad,
+        precioUnitarioUsd: c.fila.precio,
+        totalUsd: c.fila.precio ? c.fila.cantidad * c.fila.precio : undefined,
         fuente: "xetux_csv" as const,
         batchId: batch,
+        tipoItem: c.tipo,
       }));
       const created = await createVentasBatch(ventasInput);
       setVentas((prev) => [...created, ...prev]);
       setCsvText("");
-      setMatches(null);
+      setClasif(null);
       setTab("historial");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error importando");
@@ -160,8 +186,13 @@ export function VentasClient() {
     }
   }
 
-  const matchedCount = matches?.filter((m) => m.matched).length ?? 0;
-  const totalRows = matches?.length ?? 0;
+  const insumoCount = clasif?.filter((c) => c.tipo === "insumo").length ?? 0;
+  const noGestCount =
+    clasif?.filter((c) => c.tipo === "servicio" || c.tipo === "consignacion")
+      .length ?? 0;
+  const sinClasCount =
+    clasif?.filter((c) => c.tipo === "sin_clasificar").length ?? 0;
+  const totalRows = clasif?.length ?? 0;
 
   return (
     <div className="space-y-6">
@@ -329,47 +360,97 @@ export function VentasClient() {
             </div>
           </section>
 
-          {matches && (
+          {clasif && (
             <section className="rounded-2xl bg-white ring-1 ring-marfil p-5">
               <div className="flex items-baseline justify-between mb-3">
                 <h3 className="font-display text-xs tracking-[0.3em] uppercase text-cacao-mute">
-                  Preview · {matchedCount} / {totalRows} mapeados
+                  Preview · {totalRows} ítems
                 </h3>
                 <button
                   onClick={confirmarImport}
-                  disabled={importing || matchedCount === 0}
+                  disabled={importing || totalRows === 0}
                   className="rounded-lg bg-cacao text-white px-4 py-2 text-sm font-medium hover:bg-terracotta disabled:opacity-50"
                 >
                   {importing ? "Importando..." : "Confirmar import →"}
                 </button>
               </div>
-              <p className="text-xs text-cacao-soft italic font-serif mb-3">
-                Solo se importan las filas mapeadas. Para que falten menos: en
-                cada receta, define el campo <strong>xetux_nombre</strong> con
-                el nombre exacto que usa Xetux.
-              </p>
+              <div className="flex flex-wrap gap-2 text-xs mb-3">
+                <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200">
+                  {insumoCount} insumo (descuenta stock)
+                </span>
+                <span className="px-2 py-0.5 rounded-full bg-sky-50 text-sky-800 ring-1 ring-sky-200">
+                  {noGestCount} no gestionados (servicio/consignación)
+                </span>
+                {sinClasCount > 0 && (
+                  <span className="px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 ring-1 ring-amber-300">
+                    {sinClasCount} sin clasificar
+                  </span>
+                )}
+              </div>
+              {sinClasCount > 0 && (
+                <p className="text-xs text-amber-800 bg-amber-50 ring-1 ring-amber-200 rounded-lg p-2 mb-3 font-serif">
+                  Hay ítems <strong>sin clasificar</strong>. Se importarán como
+                  ingreso pero <strong>sin tocar inventario</strong>. Clasifícalos
+                  para que el sistema los recuerde y no queden como alerta.
+                </p>
+              )}
               <ul className="divide-y divide-marfil text-sm">
-                {matches.map((m, i) => (
+                {clasif.map((c, i) => (
                   <li
                     key={i}
-                    className="py-2 grid grid-cols-12 gap-2 items-center"
+                    className={`py-2 grid grid-cols-12 gap-2 items-center ${
+                      c.tipo === "sin_clasificar" ? "bg-amber-50/60 -mx-2 px-2 rounded" : ""
+                    }`}
                   >
-                    <div className="col-span-5 text-cacao">{m.fila.nombre}</div>
-                    <div className="col-span-2 text-cacao-soft text-xs">
-                      cant: {m.fila.cantidad}
+                    <div className="col-span-4 text-cacao">{c.fila.nombre}</div>
+                    <div className="col-span-1 text-cacao-soft text-xs">
+                      ×{c.fila.cantidad}
                     </div>
                     <div className="col-span-2 text-cacao-soft text-xs">
-                      {m.fila.precio ? `$${m.fila.precio.toFixed(2)}` : ""}
+                      {c.fila.precio ? `$${c.fila.precio.toFixed(2)}` : ""}
                     </div>
-                    <div className="col-span-3 text-right">
-                      {m.matched && m.receta ? (
+                    <div className="col-span-5 flex flex-wrap gap-1 justify-end">
+                      {c.tipo === "insumo" ? (
                         <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200">
-                          → {m.receta.nombre}
+                          → {c.receta?.nombre ?? "insumo"}
                         </span>
+                      ) : c.tipo === "servicio" || c.tipo === "consignacion" ? (
+                        <>
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-sky-50 text-sky-800 ring-1 ring-sky-200">
+                            {c.tipo === "servicio" ? "Servicio" : "Consignación"}
+                          </span>
+                          <button
+                            onClick={() => reclasificar(c.fila.nombre, "sin_clasificar")}
+                            className="text-[11px] text-cacao-mute hover:text-terracotta underline"
+                          >
+                            cambiar
+                          </button>
+                        </>
                       ) : (
-                        <span className="text-xs px-2 py-0.5 rounded-full bg-stone-100 text-stone-600 ring-1 ring-stone-200">
-                          sin match
-                        </span>
+                        <>
+                          {c.sugerencia && (
+                            <button
+                              onClick={() =>
+                                reclasificar(c.fila.nombre, "insumo", c.sugerencia!.id)
+                              }
+                              className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200 hover:bg-emerald-100"
+                            >
+                              ¿{c.sugerencia.nombre}?
+                            </button>
+                          )}
+                          <button
+                            onClick={() => reclasificar(c.fila.nombre, "servicio")}
+                            className="text-[11px] px-2 py-0.5 rounded-full ring-1 ring-sky-200 text-sky-800 hover:bg-sky-50"
+                          >
+                            Servicio
+                          </button>
+                          <button
+                            onClick={() => reclasificar(c.fila.nombre, "consignacion")}
+                            className="text-[11px] px-2 py-0.5 rounded-full ring-1 ring-sky-200 text-sky-800 hover:bg-sky-50"
+                          >
+                            Consignación
+                          </button>
+                        </>
                       )}
                     </div>
                   </li>
@@ -402,8 +483,23 @@ export function VentasClient() {
                     className="p-4 flex flex-wrap items-start justify-between gap-3"
                   >
                     <div className="min-w-0">
-                      <div className="font-medium text-cacao">
+                      <div className="font-medium text-cacao flex items-center gap-2 flex-wrap">
                         {v.recetaNombre}
+                        {v.tipoItem && v.tipoItem !== "insumo" && (
+                          <span
+                            className={`text-[10px] px-2 py-0.5 rounded-full ring-1 ${
+                              v.tipoItem === "sin_clasificar"
+                                ? "bg-amber-50 text-amber-800 ring-amber-300"
+                                : "bg-sky-50 text-sky-800 ring-sky-200"
+                            }`}
+                          >
+                            {v.tipoItem === "servicio"
+                              ? "Servicio"
+                              : v.tipoItem === "consignacion"
+                                ? "Consignación"
+                                : "Sin clasificar"}
+                          </span>
+                        )}
                       </div>
                       <div className="text-xs text-cacao-soft mt-0.5">
                         {new Date(v.fecha + "T00:00").toLocaleDateString(

@@ -4,6 +4,8 @@ import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import type {
   Venta,
   FuenteVenta,
+  TipoItem,
+  PosClasificacion,
   PedidoSugerido,
   PedidoSugeridoItem,
   Receta,
@@ -26,6 +28,7 @@ type Row = {
   notas: string | null;
   es_merma: boolean | null;
   merma_motivo: string | null;
+  tipo_item: string | null;
   created_at: string;
 };
 
@@ -46,6 +49,7 @@ function rowToVenta(r: Row): Venta {
     notas: r.notas ?? undefined,
     esMerma: r.es_merma ?? false,
     mermaMotivo: r.merma_motivo ?? undefined,
+    tipoItem: (r.tipo_item as TipoItem) ?? "insumo",
     createdAt: r.created_at,
   };
 }
@@ -60,6 +64,9 @@ export type VentaInput = {
   fuente?: FuenteVenta;
   batchId?: string;
   notas?: string;
+  /** Clasificación del ítem. Default 'insumo'. Los no-insumo NO descuentan
+   *  stock (van con receta_id null). */
+  tipoItem?: TipoItem;
 };
 
 export async function listVentas(limit = 100): Promise<Venta[]> {
@@ -139,6 +146,7 @@ export async function createVenta(input: VentaInput): Promise<Venta> {
       fuente: input.fuente ?? "manual",
       batch_id: input.batchId ?? null,
       notas: input.notas ?? null,
+      tipo_item: input.tipoItem ?? "insumo",
     })
     .select("*")
     .single();
@@ -161,6 +169,7 @@ export async function createVentasBatch(
     fuente: v.fuente ?? "manual",
     batch_id: v.batchId ?? null,
     notas: v.notas ?? null,
+    tipo_item: v.tipoItem ?? "insumo",
   }));
   const { data, error } = await sb.from("ventas").insert(rows).select("*");
   if (error) {
@@ -477,5 +486,147 @@ export function matchVentasConRecetas(
       }
     }
     return { fila: f, receta, matched: !!receta };
+  });
+}
+
+// ─── CLASIFICACIÓN DE ÍTEMS DEL POS (insumo / servicio / consignación) ──────
+
+/** Normaliza un nombre del POS para hacer match (minúsculas, sin acentos ni
+ *  símbolos). */
+export function normPos(s: string): string {
+  return s
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9]/g, "");
+}
+
+type ClasifRow = {
+  id: string;
+  nombre_norm: string;
+  nombre_original: string;
+  tipo: string;
+  receta_id: string | null;
+  proveedor_id: string | null;
+  porcentaje_acuerdo: number | string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+function rowToClasif(r: ClasifRow): PosClasificacion {
+  return {
+    id: r.id,
+    nombreNorm: r.nombre_norm,
+    nombreOriginal: r.nombre_original,
+    tipo: (r.tipo as TipoItem) ?? "sin_clasificar",
+    recetaId: r.receta_id ?? undefined,
+    proveedorId: r.proveedor_id ?? undefined,
+    porcentajeAcuerdo:
+      r.porcentaje_acuerdo == null ? undefined : Number(r.porcentaje_acuerdo),
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
+
+/** Lista las clasificaciones guardadas. Si la tabla aún no existe (migración
+ *  pendiente), devuelve [] en lugar de romper. */
+export async function listClasificacion(): Promise<PosClasificacion[]> {
+  const sb = createSupabaseBrowserClient();
+  const { data, error } = await sb.from("pos_clasificacion").select("*");
+  if (error) return [];
+  return (data as ClasifRow[]).map(rowToClasif);
+}
+
+/** Crea o actualiza (por nombre normalizado) la clasificación de un ítem. */
+export async function upsertClasificacion(input: {
+  nombreOriginal: string;
+  tipo: TipoItem;
+  recetaId?: string;
+  proveedorId?: string;
+  porcentajeAcuerdo?: number;
+}): Promise<PosClasificacion> {
+  const sb = createSupabaseBrowserClient();
+  const { data, error } = await sb
+    .from("pos_clasificacion")
+    .upsert(
+      {
+        nombre_norm: normPos(input.nombreOriginal),
+        nombre_original: input.nombreOriginal,
+        tipo: input.tipo,
+        receta_id: input.recetaId ?? null,
+        proveedor_id: input.proveedorId ?? null,
+        porcentaje_acuerdo: input.porcentajeAcuerdo ?? null,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "nombre_norm" },
+    )
+    .select("*")
+    .single();
+  if (error) throw error;
+  return rowToClasif(data as ClasifRow);
+}
+
+/** Resultado de clasificar una fila importada del POS. */
+export type ClasificItem = {
+  fila: FilaImportada;
+  tipo: TipoItem;
+  /** Presente si tipo = 'insumo' (matcheó una receta). */
+  receta?: Receta;
+  /** Clasificación guardada, si existe. */
+  clasif?: PosClasificacion;
+  /** Sugerencia difusa (NO se aplica sola) para ítems sin clasificar. */
+  sugerencia?: Receta;
+};
+
+/**
+ * Clasifica cada fila del reporte:
+ *   1. Si hay clasificación guardada → se respeta (prioridad).
+ *   2. Si matchea EXACTO una receta (nombre o xetux_nombre) → 'insumo'.
+ *   3. Si no → 'sin_clasificar' (con sugerencia difusa opcional).
+ * A propósito NO auto-clasifica por match difuso, para no descontar stock por
+ * accidente sobre un ítem que en realidad es servicio/consignación.
+ */
+export function clasificarFilas(
+  filas: FilaImportada[],
+  recetas: Receta[],
+  clasifs: PosClasificacion[],
+): ClasificItem[] {
+  const recIndex = new Map<string, Receta>();
+  for (const r of recetas) {
+    recIndex.set(normPos(r.nombre), r);
+    if (r.xetux_nombre) recIndex.set(normPos(r.xetux_nombre), r);
+  }
+  const recById = new Map(recetas.map((r) => [r.id, r]));
+  const clasIndex = new Map(clasifs.map((c) => [c.nombreNorm, c]));
+
+  return filas.map((f) => {
+    const k = normPos(f.nombre);
+
+    // 1) Clasificación explícita guardada (prioridad).
+    const clasif = clasIndex.get(k);
+    if (clasif) {
+      if (clasif.tipo === "insumo") {
+        const receta = clasif.recetaId
+          ? recById.get(clasif.recetaId)
+          : recIndex.get(k);
+        return { fila: f, tipo: "insumo" as const, receta, clasif };
+      }
+      return { fila: f, tipo: clasif.tipo, clasif };
+    }
+
+    // 2) Match exacto con receta → insumo.
+    const receta = recIndex.get(k);
+    if (receta) return { fila: f, tipo: "insumo" as const, receta };
+
+    // 3) Sin clasificar. Sugerencia difusa (no se aplica automáticamente).
+    let sugerencia: Receta | undefined;
+    for (const r of recetas) {
+      const rn = normPos(r.nombre);
+      if (rn.length >= 4 && (k.includes(rn) || rn.includes(k))) {
+        sugerencia = r;
+        break;
+      }
+    }
+    return { fila: f, tipo: "sin_clasificar" as const, sugerencia };
   });
 }
