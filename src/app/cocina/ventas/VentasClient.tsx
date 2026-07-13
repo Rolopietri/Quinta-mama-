@@ -1,8 +1,15 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { Receta, Venta, PosClasificacion, TipoItem } from "@/lib/types";
+import type {
+  Receta,
+  Venta,
+  PosClasificacion,
+  TipoItem,
+  Proveedor,
+} from "@/lib/types";
 import { listRecetas } from "@/lib/data/recetas";
+import { listProveedores } from "@/lib/data/cocina";
 import {
   listVentas,
   createVenta,
@@ -12,6 +19,7 @@ import {
   clasificarFilas,
   listClasificacion,
   upsertClasificacion,
+  deleteClasificacion,
   type ClasificItem,
 } from "@/lib/data/ventas";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -24,12 +32,13 @@ function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }
 
-type Tab = "registrar" | "importar" | "historial";
+type Tab = "registrar" | "importar" | "clasificacion" | "historial";
 
 export function VentasClient() {
   const [tab, setTab] = useState<Tab>("registrar");
   const [recetas, setRecetas] = useState<Receta[]>([]);
   const [ventas, setVentas] = useState<Venta[]>([]);
+  const [proveedores, setProveedores] = useState<Proveedor[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -52,15 +61,17 @@ export function VentasClient() {
     let cancelled = false;
     (async () => {
       try {
-        const [r, v, c] = await Promise.all([
+        const [r, v, c, p] = await Promise.all([
           listRecetas(),
           listVentas(50),
           listClasificacion(),
+          listProveedores(),
         ]);
         if (!cancelled) {
           setRecetas(r);
           setVentas(v);
           setClasifs(c);
+          setProveedores(p);
         }
       } catch (e) {
         if (!cancelled)
@@ -146,6 +157,48 @@ export function VentasClient() {
     }
   }
 
+  // Guarda/actualiza una clasificación del catálogo (con todos sus campos).
+  async function saveClasif(
+    nombreOriginal: string,
+    next: {
+      tipo: TipoItem;
+      recetaId?: string;
+      proveedorId?: string;
+      porcentajeAcuerdo?: number;
+    },
+  ) {
+    setError(null);
+    try {
+      const saved = await upsertClasificacion({ nombreOriginal, ...next });
+      setClasifs((prev) => {
+        const rest = prev.filter((c) => c.nombreNorm !== saved.nombreNorm);
+        return [...rest, saved].sort((a, b) =>
+          a.nombreOriginal.localeCompare(b.nombreOriginal),
+        );
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error guardando");
+    }
+  }
+
+  async function removeClasif(id: string) {
+    setError(null);
+    try {
+      await deleteClasificacion(id);
+      setClasifs((prev) => prev.filter((c) => c.id !== id));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error eliminando");
+    }
+  }
+
+  const clasifsOrdenadas = useMemo(
+    () =>
+      [...clasifs].sort((a, b) =>
+        a.nombreOriginal.localeCompare(b.nombreOriginal),
+      ),
+    [clasifs],
+  );
+
   async function confirmarImport() {
     if (!clasif || clasif.length === 0) return;
     setError(null);
@@ -208,6 +261,7 @@ export function VentasClient() {
           [
             { v: "registrar", l: "Registro manual" },
             { v: "importar", l: "Importar Xetux" },
+            { v: "clasificacion", l: "Clasificación POS" },
             { v: "historial", l: "Historial" },
           ] as { v: Tab; l: string }[]
         ).map((t) => (
@@ -459,6 +513,140 @@ export function VentasClient() {
             </section>
           )}
         </div>
+      )}
+
+      {/* TAB: Clasificación POS */}
+      {tab === "clasificacion" && (
+        <section className="rounded-2xl bg-white ring-1 ring-marfil p-5">
+          <h2 className="font-display text-xs tracking-[0.3em] uppercase text-cacao-mute mb-1">
+            Clasificación de ítems del POS
+          </h2>
+          <p className="text-xs text-cacao-soft italic font-serif mb-4">
+            Administra cómo se trata cada ítem del reporte: si descuenta
+            inventario (insumo) o si es servicio/consignación (solo registra
+            ingreso). En consignación puedes guardar el proveedor y el % de
+            acuerdo para futuras liquidaciones.
+          </p>
+          {clasifsOrdenadas.length === 0 ? (
+            <p className="font-serif italic text-cacao-soft text-sm">
+              Todavía no hay ítems clasificados. Se crean al importar un cierre
+              de Xetux (clasificando los que salen en ámbar).
+            </p>
+          ) : (
+            <ul className="divide-y divide-marfil">
+              {clasifsOrdenadas.map((c) => (
+                <li
+                  key={c.id}
+                  className="py-3 grid grid-cols-1 sm:grid-cols-12 gap-2 sm:items-center"
+                >
+                  <div className="sm:col-span-4 text-sm text-cacao font-medium">
+                    {c.nombreOriginal}
+                  </div>
+                  <div className="sm:col-span-2">
+                    <select
+                      value={c.tipo}
+                      onChange={(e) => {
+                        const t = e.target.value as TipoItem;
+                        saveClasif(c.nombreOriginal, {
+                          tipo: t,
+                          recetaId: t === "insumo" ? c.recetaId : undefined,
+                          proveedorId:
+                            t === "consignacion" ? c.proveedorId : undefined,
+                          porcentajeAcuerdo:
+                            t === "consignacion"
+                              ? c.porcentajeAcuerdo
+                              : undefined,
+                        });
+                      }}
+                      className="w-full rounded-lg ring-1 ring-marfil px-2 py-1.5 text-sm bg-white"
+                    >
+                      <option value="insumo">Insumo</option>
+                      <option value="servicio">Servicio</option>
+                      <option value="consignacion">Consignación</option>
+                      <option value="sin_clasificar">Sin clasificar</option>
+                    </select>
+                  </div>
+                  <div className="sm:col-span-5">
+                    {c.tipo === "insumo" ? (
+                      <select
+                        value={c.recetaId ?? ""}
+                        onChange={(e) =>
+                          saveClasif(c.nombreOriginal, {
+                            tipo: "insumo",
+                            recetaId: e.target.value || undefined,
+                          })
+                        }
+                        className="w-full rounded-lg ring-1 ring-marfil px-2 py-1.5 text-sm bg-white"
+                      >
+                        <option value="">— Vincular receta —</option>
+                        {recetasVendibles.map((r) => (
+                          <option key={r.id} value={r.id}>
+                            {r.nombre}
+                          </option>
+                        ))}
+                      </select>
+                    ) : c.tipo === "consignacion" ? (
+                      <div className="flex gap-2">
+                        <select
+                          value={c.proveedorId ?? ""}
+                          onChange={(e) =>
+                            saveClasif(c.nombreOriginal, {
+                              tipo: "consignacion",
+                              proveedorId: e.target.value || undefined,
+                              porcentajeAcuerdo: c.porcentajeAcuerdo,
+                            })
+                          }
+                          className="flex-1 rounded-lg ring-1 ring-marfil px-2 py-1.5 text-sm bg-white"
+                        >
+                          <option value="">— Proveedor —</option>
+                          {proveedores.map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.nombre}
+                            </option>
+                          ))}
+                        </select>
+                        <div className="flex items-center rounded-lg ring-1 ring-marfil px-2 w-24">
+                          <input
+                            type="number"
+                            min="0"
+                            max="100"
+                            step="0.5"
+                            defaultValue={c.porcentajeAcuerdo ?? ""}
+                            placeholder="%"
+                            onBlur={(e) =>
+                              saveClasif(c.nombreOriginal, {
+                                tipo: "consignacion",
+                                proveedorId: c.proveedorId,
+                                porcentajeAcuerdo:
+                                  e.target.value === ""
+                                    ? undefined
+                                    : Number(e.target.value),
+                              })
+                            }
+                            className="w-full py-1.5 text-sm outline-none bg-transparent"
+                          />
+                          <span className="text-xs text-cacao-mute">%</span>
+                        </div>
+                      </div>
+                    ) : (
+                      <span className="text-xs text-cacao-soft italic">
+                        Solo registra ingreso, no toca inventario.
+                      </span>
+                    )}
+                  </div>
+                  <div className="sm:col-span-1 text-right">
+                    <button
+                      onClick={() => removeClasif(c.id)}
+                      className="text-[10px] uppercase tracking-widest text-cacao-mute hover:text-terracotta"
+                    >
+                      Quitar
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
       )}
 
       {/* TAB: Historial */}

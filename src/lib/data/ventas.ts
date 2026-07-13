@@ -566,6 +566,13 @@ export async function upsertClasificacion(input: {
   return rowToClasif(data as ClasifRow);
 }
 
+/** Elimina una clasificación guardada. */
+export async function deleteClasificacion(id: string): Promise<void> {
+  const sb = createSupabaseBrowserClient();
+  const { error } = await sb.from("pos_clasificacion").delete().eq("id", id);
+  if (error) throw error;
+}
+
 /** Resultado de clasificar una fila importada del POS. */
 export type ClasificItem = {
   fila: FilaImportada;
