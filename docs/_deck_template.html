@@ -1,0 +1,462 @@
+<style>
+/* ─────────────────────────────────────────────────────────────
+   La Quinta Mamá — Una semilla para Panamá
+   Fuentes reales del proyecto, incrustadas (Cinzel · Jost · EB Garamond)
+   ───────────────────────────────────────────────────────────── */
+@font-face{
+  font-family:"CinzelDeck";font-style:normal;font-weight:600;font-display:swap;
+  src:url(data:font/ttf;base64,__CINZEL600__) format("truetype");
+}
+@font-face{
+  font-family:"JostDeck";font-style:normal;font-weight:400;font-display:swap;
+  src:url(data:font/ttf;base64,__JOST400__) format("truetype");
+}
+@font-face{
+  font-family:"JostDeck";font-style:normal;font-weight:500;font-display:swap;
+  src:url(data:font/ttf;base64,__JOST500__) format("truetype");
+}
+@font-face{
+  font-family:"GaramondDeck";font-style:italic;font-weight:400;font-display:swap;
+  src:url(data:font/ttf;base64,__GARAMOND400I__) format("truetype");
+}
+
+:root{
+  --ground:#FFFFFF;
+  --ground-alt:#FAF6F0;
+  --panel:#FFFFFF;
+  --ink:#0A0A0A;
+  --ink-soft:#565049;
+  --ink-mute:#9a938a;
+  --hair:#EAE3DB;
+  --hair-strong:#D5CECB;
+  --terra:#B53727;
+  --terra-deep:#952D20;
+  --oliva:#6E7C56;
+  --shadow:0 1px 40px rgba(20,15,8,.05);
+
+  --f-display:"CinzelDeck","Cinzel","Trajan Pro",serif;
+  --f-body:"JostDeck","Futura","Avenir Next",system-ui,sans-serif;
+  --f-italic:"GaramondDeck","EB Garamond",Georgia,serif;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --ground:#141110;
+    --ground-alt:#1B1714;
+    --panel:#1C1815;
+    --ink:#F1EBE2;
+    --ink-soft:#B4ACA1;
+    --ink-mute:#7C746A;
+    --hair:#2B2621;
+    --hair-strong:#3A332B;
+    --terra:#D9695A;
+    --terra-deep:#C4574A;
+    --oliva:#9BAA7E;
+    --shadow:0 1px 44px rgba(0,0,0,.32);
+  }
+}
+:root[data-theme="light"]{
+  --ground:#FFFFFF;--ground-alt:#FAF6F0;--panel:#FFFFFF;
+  --ink:#0A0A0A;--ink-soft:#565049;--ink-mute:#9a938a;
+  --hair:#EAE3DB;--hair-strong:#D5CECB;
+  --terra:#B53727;--terra-deep:#952D20;--oliva:#6E7C56;
+  --shadow:0 1px 40px rgba(20,15,8,.05);
+}
+:root[data-theme="dark"]{
+  --ground:#141110;--ground-alt:#1B1714;--panel:#1C1815;
+  --ink:#F1EBE2;--ink-soft:#B4ACA1;--ink-mute:#7C746A;
+  --hair:#2B2621;--hair-strong:#3A332B;
+  --terra:#D9695A;--terra-deep:#C4574A;--oliva:#9BAA7E;
+  --shadow:0 1px 44px rgba(0,0,0,.32);
+}
+
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  margin:0;background:var(--ground);color:var(--ink);
+  font-family:var(--f-body);font-weight:400;
+  font-size:clamp(16px,1.05vw,17.5px);line-height:1.5;
+  -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+  overflow-x:hidden;
+}
+@media (prefers-reduced-motion:no-preference){html{scroll-behavior:smooth}}
+
+/* ── scroll progress ── */
+.progress{
+  position:fixed;top:0;left:0;height:2px;width:0%;
+  background:linear-gradient(90deg,var(--terra),var(--terra-deep));
+  z-index:50;transition:width .1s linear;
+}
+
+/* ── right-side movement index ── */
+.index{
+  position:fixed;right:26px;top:50%;transform:translateY(-50%);
+  z-index:40;display:flex;flex-direction:column;gap:16px;align-items:center;
+}
+.index a{
+  font-family:var(--f-display);font-size:.62rem;letter-spacing:.12em;
+  color:var(--ink-mute);text-decoration:none;line-height:1;
+  opacity:.55;transition:opacity .3s,color .3s;position:relative;
+}
+.index a::after{
+  content:"";position:absolute;right:-14px;top:50%;transform:translateY(-50%);
+  width:6px;height:1px;background:var(--hair-strong);transition:width .3s,background .3s;
+}
+.index a.on{opacity:1;color:var(--terra)}
+.index a.on::after{width:12px;background:var(--terra)}
+@media (max-width:1180px){.index{display:none}}
+
+/* ── layout scaffolding ── */
+.wrap{max-width:62rem;margin:0 auto;padding:0 clamp(22px,5vw,40px)}
+.col{max-width:40rem}
+.movement{padding:clamp(76px,11vh,140px) 0;border-top:1px solid var(--hair)}
+.movement.tint{background:var(--ground-alt)}
+
+/* ── shared type ── */
+.eyebrow{
+  font-family:var(--f-body);font-weight:500;font-size:.72rem;
+  letter-spacing:.34em;text-transform:uppercase;color:var(--ink-mute);
+  display:flex;align-items:center;gap:14px;margin:0 0 26px;
+}
+.eyebrow .rn{color:var(--terra);font-family:var(--f-display);letter-spacing:.06em}
+.eyebrow::before{content:"";width:26px;height:1px;background:var(--hair-strong)}
+
+h1,h2,h3{font-weight:600;margin:0}
+.display{
+  font-family:var(--f-display);font-weight:600;letter-spacing:.02em;
+  line-height:1.12;text-wrap:balance;color:var(--ink);
+}
+h2.display{font-size:clamp(1.72rem,3.7vw,2.85rem);margin-bottom:.7em}
+.lede{
+  font-size:clamp(1.06rem,1.5vw,1.22rem);line-height:1.75;color:var(--ink-soft);
+  max-width:38rem;
+}
+.lede strong{color:var(--ink);font-weight:500}
+p{margin:0 0 1.1em}
+.quote{
+  font-family:var(--f-italic);font-style:italic;font-weight:400;
+  font-size:clamp(1.45rem,3vw,2.15rem);line-height:1.4;color:var(--ink);
+  max-width:32rem;text-wrap:balance;
+}
+.quote .mk{color:var(--terra);font-style:normal}
+
+.sprig{width:34px;height:auto;color:var(--oliva);display:block}
+.rule{height:1px;background:var(--hair);border:0;margin:0}
+
+/* ── HERO ── */
+.hero{
+  min-height:100svh;display:flex;flex-direction:column;justify-content:center;
+  align-items:center;text-align:center;position:relative;
+  padding:96px clamp(22px,5vw,40px) 72px;
+}
+.hero .emblem-svg{width:clamp(88px,13vw,132px);height:auto;color:var(--ink);opacity:.92}
+.emblem-svg [stroke]{stroke:currentColor}
+.hero-eyebrow{
+  margin:34px 0 0;font-family:var(--f-body);font-weight:500;font-size:.74rem;
+  letter-spacing:.36em;text-transform:uppercase;color:var(--ink-mute);
+}
+.wordmark{
+  font-family:var(--f-display);font-weight:600;color:var(--ink);
+  font-size:clamp(1.9rem,5.4vw,3.6rem);letter-spacing:.16em;text-transform:uppercase;
+  margin:20px 0 0;line-height:1.05;
+}
+.hero-tag{
+  font-family:var(--f-italic);font-style:italic;color:var(--ink-soft);
+  font-size:clamp(1.05rem,2vw,1.4rem);margin:16px 0 0;
+}
+.hero-seed{
+  font-family:var(--f-display);font-weight:600;color:var(--terra);
+  font-size:clamp(2.4rem,8vw,5.4rem);letter-spacing:.03em;line-height:1;
+  margin:clamp(38px,7vh,72px) 0 0;text-wrap:balance;
+}
+.hero-sub{
+  max-width:34rem;margin:22px auto 0;color:var(--ink-soft);
+  font-size:clamp(1rem,1.4vw,1.12rem);line-height:1.7;
+}
+.hero-meta{
+  margin:44px 0 0;font-family:var(--f-body);font-weight:500;font-size:.68rem;
+  letter-spacing:.28em;text-transform:uppercase;color:var(--ink-mute);
+}
+.scrollcue{
+  position:absolute;bottom:30px;left:50%;transform:translateX(-50%);
+  font-family:var(--f-body);font-size:.62rem;letter-spacing:.3em;text-transform:uppercase;
+  color:var(--ink-mute);display:flex;flex-direction:column;align-items:center;gap:8px;
+}
+.scrollcue .line{width:1px;height:34px;background:var(--hair-strong);position:relative;overflow:hidden}
+.scrollcue .line::after{
+  content:"";position:absolute;inset:0;background:var(--terra);
+  animation:drop 2.4s cubic-bezier(.6,0,.2,1) infinite;
+}
+@keyframes drop{0%{transform:translateY(-100%)}55%,100%{transform:translateY(100%)}}
+
+/* ── inner grids ── */
+.pillars{list-style:none;padding:0;margin:44px 0 0;display:grid;gap:1px;
+  grid-template-columns:repeat(2,1fr);background:var(--hair);
+  border:1px solid var(--hair);border-radius:14px;overflow:hidden}
+.pillars li{background:var(--panel);padding:22px 22px 24px}
+.pillars .k{
+  font-family:var(--f-body);font-weight:500;font-size:.7rem;letter-spacing:.2em;
+  text-transform:uppercase;color:var(--terra);margin:0 0 9px;
+}
+.pillars .v{color:var(--ink-soft);font-size:.98rem;line-height:1.55}
+.pillars .v b{color:var(--ink);font-weight:500}
+@media (max-width:600px){.pillars{grid-template-columns:1fr}}
+
+.stats{display:flex;flex-wrap:wrap;gap:0;margin:40px 0 0;
+  border-top:1px solid var(--hair);border-bottom:1px solid var(--hair)}
+.stats div{flex:1 1 130px;padding:22px 8px 20px;text-align:center;
+  border-right:1px solid var(--hair)}
+.stats div:last-child{border-right:0}
+.stats .n{font-family:var(--f-display);font-weight:600;color:var(--ink);
+  font-size:clamp(1.5rem,3vw,2rem);line-height:1}
+.stats .l{margin-top:9px;font-size:.66rem;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--ink-mute);line-height:1.4}
+@media (max-width:600px){.stats div{flex:1 1 46%;border-bottom:1px solid var(--hair)}}
+
+/* ── criterion list ── */
+.tenets{list-style:none;padding:0;margin:40px 0 0;counter-reset:t}
+.tenets li{
+  display:grid;grid-template-columns:auto 1fr;gap:22px;align-items:start;
+  padding:24px 0;border-top:1px solid var(--hair);counter-increment:t;
+}
+.tenets li:first-child{border-top:0}
+.tenets .num{
+  font-family:var(--f-display);font-weight:600;color:var(--terra);
+  font-size:1.05rem;line-height:1.4;min-width:1.6em;
+}
+.tenets .num::before{content:counter(t,decimal-leading-zero)}
+.tenets h3{font-family:var(--f-body);font-weight:500;font-size:1.06rem;
+  letter-spacing:.01em;color:var(--ink);margin:0 0 5px}
+.tenets p{margin:0;color:var(--ink-soft);font-size:.98rem;line-height:1.62}
+
+/* ── panama vision list ── */
+.vision{list-style:none;padding:0;margin:38px 0 0;display:grid;gap:18px}
+.vision li{display:grid;grid-template-columns:auto 1fr;gap:18px;align-items:baseline}
+.vision .lab{
+  font-family:var(--f-body);font-weight:500;font-size:.72rem;letter-spacing:.18em;
+  text-transform:uppercase;color:var(--oliva);white-space:nowrap;padding-top:2px;
+  min-width:112px;
+}
+.vision .txt{color:var(--ink-soft);font-size:1rem;line-height:1.6}
+.vision .txt b{color:var(--ink);font-weight:500}
+@media (max-width:560px){.vision li{grid-template-columns:1fr;gap:4px}}
+
+/* ── invitation roles ── */
+.roles{list-style:none;padding:0;margin:40px 0 0;display:grid;gap:16px;
+  grid-template-columns:repeat(3,1fr)}
+.roles li{background:var(--panel);border:1px solid var(--hair);border-radius:14px;
+  padding:24px 22px;box-shadow:var(--shadow)}
+.roles .r{font-family:var(--f-display);font-weight:600;font-size:1.05rem;
+  letter-spacing:.06em;text-transform:uppercase;color:var(--ink);margin:0 0 10px}
+.roles p{margin:0;color:var(--ink-soft);font-size:.94rem;line-height:1.55}
+@media (max-width:720px){.roles{grid-template-columns:1fr}}
+
+.closer{margin-top:clamp(56px,9vh,96px);text-align:center}
+.closer .big{font-family:var(--f-display);font-weight:600;color:var(--ink);
+  font-size:clamp(1.7rem,4.4vw,3rem);letter-spacing:.02em;line-height:1.14;text-wrap:balance}
+.closer .big .mk{color:var(--terra)}
+.closer .sub{font-family:var(--f-italic);font-style:italic;color:var(--ink-soft);
+  font-size:clamp(1.2rem,2.4vw,1.7rem);margin:14px 0 0}
+.cta{margin:40px 0 0;display:inline-flex;flex-direction:column;align-items:center;gap:12px}
+.cta .word{font-family:var(--f-display);font-weight:600;letter-spacing:.2em;text-transform:uppercase;
+  color:var(--terra);font-size:1.2rem}
+.cta .who{font-size:.72rem;letter-spacing:.22em;text-transform:uppercase;color:var(--ink-mute)}
+
+/* ── colophon ── */
+.colophon{border-top:1px solid var(--hair);padding:56px 0 72px;text-align:center}
+.colophon .emblem-svg{width:52px;height:auto;color:var(--ink-mute);opacity:.7;margin:0 auto}
+.colophon p{margin:20px 0 0;font-size:.68rem;letter-spacing:.24em;text-transform:uppercase;
+  color:var(--ink-mute);line-height:1.9}
+
+/* ── reveal ── */
+.js .reveal{opacity:0;transform:translateY(16px);transition:opacity .9s cubic-bezier(.2,.7,.2,1),transform .9s cubic-bezier(.2,.7,.2,1)}
+.js .reveal.in{opacity:1;transform:none}
+.js .d1{transition-delay:.08s}.js .d2{transition-delay:.16s}.js .d3{transition-delay:.24s}
+@media (prefers-reduced-motion:reduce){
+  .js .reveal{opacity:1;transform:none;transition:none}
+  .scrollcue .line::after{animation:none}
+  html{scroll-behavior:auto}
+}
+</style>
+
+<div class="progress" id="progress"></div>
+
+<nav class="index" aria-label="Movimientos">
+  <a href="#proof" data-t="#proof">I</a>
+  <a href="#criterio" data-t="#criterio">II</a>
+  <a href="#panama" data-t="#panama">III</a>
+  <a href="#invitacion" data-t="#invitacion">IV</a>
+</nav>
+
+<main>
+
+  <!-- ── HERO ── -->
+  <header class="hero" id="hero">
+    __EMBLEM_SVG__
+    <p class="hero-eyebrow reveal">Caracas &nbsp;·&nbsp; Ciudad de Panamá</p>
+    <h1 class="wordmark reveal d1">La Quinta Mamá</h1>
+    <p class="hero-tag reveal d1">Donde la cultura y el bienestar florecen.</p>
+    <p class="hero-seed reveal d2">Una semilla<br>para Panamá</p>
+    <p class="hero-sub reveal d3">Una casa de salud y cultura para Ciudad de Panamá,
+      sembrada con el criterio de una década construyendo en Caracas.</p>
+    <p class="hero-meta reveal d3">Para nuestros amigos de Panamá &nbsp;·&nbsp; Julio 2026</p>
+    <div class="scrollcue" aria-hidden="true"><span class="line"></span>Bajar</div>
+  </header>
+
+  <!-- ── I · LA PRUEBA VIVA ── -->
+  <section class="movement" id="proof">
+    <div class="wrap">
+      <p class="eyebrow reveal"><span class="rn">I</span> Lo que ya existe</p>
+      <div class="col">
+        <h2 class="display reveal">No es una idea.<br>Es una casa que respira.</h2>
+        <p class="lede reveal d1">En una quinta de los años 50 en Caracas —cuatro plantas, jardín,
+          patio— construimos algo que no cabe en una sola palabra. No es un gimnasio, ni una
+          galería, ni un restaurante, ni un coworking. <strong>Es las cuatro cosas conviviendo
+          bajo un mismo techo</strong>, y por eso funciona.</p>
+      </div>
+
+      <ul class="pillars reveal d1">
+        <li><p class="k">Salud</p><p class="v">Dos estudios de <b>Pilates</b>, <b>Holistic</b>, terapias del cuerpo. El movimiento como rutina.</p></li>
+        <li><p class="k">Cultura</p><p class="v">Sala expositiva, eventos, <b>Casa Payasa</b>, el <b>Mercadillo del Buen Gusto</b>. Una agenda viva.</p></li>
+        <li><p class="k">Gastronomía</p><p class="v">Cocina propia con <b>cafetín y comedor</b>. Una mesa que nutre, no un anexo.</p></li>
+        <li><p class="k">Comunidad</p><p class="v">Siete marcas inquilinas y un equipo de ocho personas que sostienen el día a día.</p></li>
+      </ul>
+
+      <div class="stats reveal d2">
+        <div><p class="n">4</p><p class="l">Plantas</p></div>
+        <div><p class="n">~7</p><p class="l">Marcas<br>inquilinas</p></div>
+        <div><p class="n">8</p><p class="l">Personas<br>en el equipo</p></div>
+        <div><p class="n">1</p><p class="l">Casa<br>patrimonial</p></div>
+      </div>
+
+      <div class="col" style="margin-top:clamp(48px,7vh,80px)">
+        <p class="quote reveal"><span class="mk">“</span>Cada planta tiene vida propia; juntas, hacen una casa.<span class="mk">”</span></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── II · EL CRITERIO ── -->
+  <section class="movement tint" id="criterio">
+    <div class="wrap">
+      <p class="eyebrow reveal"><span class="rn">II</span> Lo que aprendimos</p>
+      <div class="col">
+        <h2 class="display reveal">Lo transferible no es<br>el edificio. Es el criterio.</h2>
+        <p class="lede reveal d1">Una década enseña cosas que no se improvisan. Esto es lo que nos
+          llevaríamos a cualquier ciudad —seis principios que hacen que una casa como esta viva
+          en vez de solo existir.</p>
+      </div>
+
+      <ol class="tenets reveal d1">
+        <li><span class="num"></span><div><h3>Una casa con alma, no un edificio nuevo.</h3><p>Lo patrimonial ya tiene historia. Nuestro trabajo es cuidarla, no inventarla desde cero.</p></div></li>
+        <li><span class="num"></span><div><h3>Salud y cultura bajo un mismo techo.</h3><p>La gente viene a moverse y se queda a una exposición; viene a un evento y descubre el Pilates. La mezcla es el producto.</p></div></li>
+        <li><span class="num"></span><div><h3>El inquilino es comunidad, no renta.</h3><p>Elegimos marcas que suman al ecosistema, no las que solo pagan. Cada vecino tiene que tener sentido.</p></div></li>
+        <li><span class="num"></span><div><h3>La cocina es el corazón.</h3><p>Una gastronomía honesta y saludable como punto de encuentro. No un servicio más: el centro de la casa.</p></div></li>
+        <li><span class="num"></span><div><h3>Operar con criterio.</h3><p>Protocolos cortos, roles claros, un sistema que sostiene lo cotidiano para que nada dependa de la memoria de nadie.</p></div></li>
+        <li><span class="num"></span><div><h3>Cada detalle, cuidado.</h3><p>Del plano a la tipografía. La estética comunica antes que las palabras: la casa se entiende con solo entrar.</p></div></li>
+      </ol>
+
+      <div class="col" style="margin-top:clamp(48px,7vh,80px)">
+        <p class="quote reveal"><span class="mk">“</span>El filtro de toda decisión: ¿se entiende en cinco segundos, sin que nadie lo explique?<span class="mk">”</span></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── III · LA SEMILLA EN PANAMÁ ── -->
+  <section class="movement" id="panama">
+    <div class="wrap">
+      <p class="eyebrow reveal"><span class="rn">III</span> Lo que imaginamos</p>
+      <div class="col">
+        <h2 class="display reveal">Ciudad de Panamá<br>pide una casa así.</h2>
+        <p class="lede reveal d1">Panamá es cruce de caminos: una ciudad que crece rápido, con una
+          comunidad ávida de lugares que no sean un centro comercial. Un <strong>tercer lugar</strong>
+          —ni casa ni oficina— donde la salud, la cultura y la mesa se encuentren. El terreno
+          emocional ya está listo; falta sembrar.</p>
+      </div>
+
+      <div style="margin:44px 0 0" class="reveal d1"><svg class="sprig" viewBox="0 0 40 62" fill="none" stroke="currentColor" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round"><path d="M20 60 V30"/><path d="M20 44 C10 40 8 28 11 21 C19 24 22 35 20 44 Z"/><path d="M20 37 C30 33 32 22 29 16 C22 18 19 28 20 37 Z"/><circle cx="20" cy="57" r="2.6"/></svg></div>
+
+      <ul class="vision reveal d1" style="margin-top:26px">
+        <li><span class="lab">El lugar</span><span class="txt">Una casa con carácter —<b>Casco Antiguo, San Francisco</b> o un barrio con alma— con patio, luz y una historia que valga la pena cuidar.</span></li>
+        <li><span class="lab">El movimiento</span><span class="txt">Estudios de <b>yoga, pilates y terapias</b>. El bienestar como práctica diaria, no como excepción.</span></li>
+        <li><span class="lab">La cultura</span><span class="txt">Un calendario vivo: <b>exposiciones, música, mercados, charlas</b>. La casa siempre tiene algo pasando.</span></li>
+        <li><span class="lab">La mesa</span><span class="txt">Una <b>cocina de casa</b>, saludable y honesta, como el corazón donde todo el mundo se cruza.</span></li>
+        <li><span class="lab">La comunidad</span><span class="txt">Marcas <b>locales panameñas</b> como inquilinas-aliadas. El ecosistema lo construyen ustedes.</span></li>
+      </ul>
+
+      <div class="col" style="margin-top:clamp(46px,7vh,76px)">
+        <p class="quote reveal"><span class="mk">“</span>No traemos una franquicia. Traemos un criterio, y lo dejamos echar raíces panameñas.<span class="mk">”</span></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── IV · LA INVITACIÓN ── -->
+  <section class="movement tint" id="invitacion">
+    <div class="wrap">
+      <p class="eyebrow reveal"><span class="rn">IV</span> Lo que proponemos</p>
+      <div class="col">
+        <h2 class="display reveal">No venimos a pedir.<br>Venimos a imaginar juntos.</h2>
+        <p class="lede reveal d1">Esta noche no hay contrato ni cifra sobre la mesa. Hay una semilla,
+          y ustedes —que conocen Panamá— son la tierra. Nos encantaría explorarlo con quien quiera,
+          en el rol que le nazca.</p>
+      </div>
+
+      <ul class="roles reveal d1">
+        <li><p class="r">Aliado</p><p>Conoces la ciudad, los barrios, la gente. Nos ayudas a leer el terreno.</p></li>
+        <li><p class="r">Socio</p><p>Te entusiasma construir y crecer con nosotros, con piel en el juego.</p></li>
+        <li><p class="r">Cómplice</p><p>La idea te mueve y quieres pensarla en voz alta con nosotros.</p></li>
+      </ul>
+
+      <div class="closer reveal d1">
+        <p class="big">La semilla ya floreció una vez<span class="mk">.</span></p>
+        <p class="sub">Panamá podría ser el segundo florecimiento.</p>
+        <div class="cta">
+          <span class="word">Conversemos</span>
+          <span class="who">Rodrigo Lopez Pietri · Fundador, La Quinta Mamá</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="colophon">
+    __EMBLEM_SVG__
+    <p>La Quinta Mamá &nbsp;·&nbsp; Caracas &nbsp;·&nbsp; Donde la cultura y el bienestar florecen<br>MMXXVI</p>
+  </footer>
+
+</main>
+
+<script>
+(function(){
+  document.documentElement.classList.add("js");
+  var reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // reveal on scroll
+  var revs = [].slice.call(document.querySelectorAll(".reveal"));
+  if(reduce || !("IntersectionObserver" in window)){
+    revs.forEach(function(el){el.classList.add("in")});
+  } else {
+    var io = new IntersectionObserver(function(es){
+      es.forEach(function(e){ if(e.isIntersecting){ e.target.classList.add("in"); io.unobserve(e.target);}});
+    },{threshold:.12,rootMargin:"0px 0px -8% 0px"});
+    revs.forEach(function(el){io.observe(el)});
+  }
+
+  // scroll progress + active movement index
+  var bar = document.getElementById("progress");
+  var links = [].slice.call(document.querySelectorAll(".index a"));
+  var secs = links.map(function(a){return document.querySelector(a.getAttribute("data-t"));});
+  var ticking=false;
+  function onScroll(){
+    var h = document.documentElement;
+    var max = h.scrollHeight - h.clientHeight;
+    var p = max>0 ? (h.scrollTop/max)*100 : 0;
+    bar.style.width = p + "%";
+    var mid = h.scrollTop + h.clientHeight*0.4;
+    var active = -1;
+    secs.forEach(function(s,i){ if(s && s.offsetTop <= mid) active = i; });
+    links.forEach(function(a,i){ a.classList.toggle("on", i===active); });
+    ticking=false;
+  }
+  window.addEventListener("scroll",function(){ if(!ticking){requestAnimationFrame(onScroll);ticking=true;} },{passive:true});
+  window.addEventListener("resize",onScroll);
+  onScroll();
+})();
+</script>
