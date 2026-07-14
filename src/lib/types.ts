@@ -707,6 +707,10 @@ export type Venta = {
   /** Receta extra descontada además de la base (combos "con papas fritas"). */
   extraRecetaId?: string;
   extraCantidad?: number;
+  /** Sustitución de insumo al descontar la receta base (ej. leche entera →
+   *  leche de almendras). */
+  swapFromInsumoId?: string;
+  swapToInsumoId?: string;
   createdAt: string;
 };
 
@@ -740,6 +744,11 @@ export type PosClasificacion = {
   extraRecetaId?: string;
   /** Cuántas veces se descuenta la receta extra por unidad vendida. Default 1. */
   extraCantidad?: number;
+  /** Sustitución de insumo (tipo 'insumo'): al descontar la receta base, el
+   *  insumo `swapFromInsumoId` se reemplaza por `swapToInsumoId` en la misma
+   *  cantidad — ej. un café pedido con leche de almendras en vez de entera. */
+  swapFromInsumoId?: string;
+  swapToInsumoId?: string;
   /** Solo si tipo = 'insumo_directo': insumo al que se vincula. */
   insumoId?: string;
   /** Solo 'insumo_directo': cuánto se descuenta de ese insumo por unidad

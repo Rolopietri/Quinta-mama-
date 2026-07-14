@@ -33,6 +33,8 @@ type Row = {
   insumo_cantidad: number | string | null;
   extra_receta_id: string | null;
   extra_cantidad: number | string | null;
+  swap_from_insumo_id: string | null;
+  swap_to_insumo_id: string | null;
   created_at: string;
 };
 
@@ -64,6 +66,8 @@ function rowToVenta(r: Row): Venta {
       r.extra_cantidad === null || r.extra_cantidad === undefined
         ? undefined
         : Number(r.extra_cantidad),
+    swapFromInsumoId: r.swap_from_insumo_id ?? undefined,
+    swapToInsumoId: r.swap_to_insumo_id ?? undefined,
     createdAt: r.created_at,
   };
 }
@@ -87,6 +91,9 @@ export type VentaInput = {
   /** Receta extra descontada además de la base (combos "con papas fritas"). */
   extraRecetaId?: string;
   extraCantidad?: number;
+  /** Sustitución de insumo al descontar la receta base. */
+  swapFromInsumoId?: string;
+  swapToInsumoId?: string;
 };
 
 export async function listVentas(limit = 100): Promise<Venta[]> {
@@ -171,6 +178,8 @@ export async function createVenta(input: VentaInput): Promise<Venta> {
       insumo_cantidad: input.insumoCantidad ?? null,
       extra_receta_id: input.extraRecetaId ?? null,
       extra_cantidad: input.extraCantidad ?? null,
+      swap_from_insumo_id: input.swapFromInsumoId ?? null,
+      swap_to_insumo_id: input.swapToInsumoId ?? null,
     })
     .select("*")
     .single();
@@ -198,6 +207,8 @@ export async function createVentasBatch(
     insumo_cantidad: v.insumoCantidad ?? null,
     extra_receta_id: v.extraRecetaId ?? null,
     extra_cantidad: v.extraCantidad ?? null,
+    swap_from_insumo_id: v.swapFromInsumoId ?? null,
+    swap_to_insumo_id: v.swapToInsumoId ?? null,
   }));
   const { data, error } = await sb.from("ventas").insert(rows).select("*");
   if (error) {
@@ -537,6 +548,8 @@ type ClasifRow = {
   receta_id: string | null;
   extra_receta_id: string | null;
   extra_cantidad: number | string | null;
+  swap_from_insumo_id: string | null;
+  swap_to_insumo_id: string | null;
   insumo_id: string | null;
   cantidad_por_unidad: number | string | null;
   proveedor_id: string | null;
@@ -555,6 +568,8 @@ function rowToClasif(r: ClasifRow): PosClasificacion {
     extraRecetaId: r.extra_receta_id ?? undefined,
     extraCantidad:
       r.extra_cantidad == null ? undefined : Number(r.extra_cantidad),
+    swapFromInsumoId: r.swap_from_insumo_id ?? undefined,
+    swapToInsumoId: r.swap_to_insumo_id ?? undefined,
     insumoId: r.insumo_id ?? undefined,
     cantidadPorUnidad:
       r.cantidad_por_unidad == null ? undefined : Number(r.cantidad_por_unidad),
@@ -582,6 +597,8 @@ export async function upsertClasificacion(input: {
   recetaId?: string;
   extraRecetaId?: string;
   extraCantidad?: number;
+  swapFromInsumoId?: string;
+  swapToInsumoId?: string;
   insumoId?: string;
   cantidadPorUnidad?: number;
   proveedorId?: string;
@@ -602,6 +619,10 @@ export async function upsertClasificacion(input: {
           input.tipo === "insumo" && input.extraRecetaId
             ? (input.extraCantidad ?? 1)
             : null,
+        swap_from_insumo_id:
+          input.tipo === "insumo" ? (input.swapFromInsumoId ?? null) : null,
+        swap_to_insumo_id:
+          input.tipo === "insumo" ? (input.swapToInsumoId ?? null) : null,
         insumo_id: input.insumoId ?? null,
         cantidad_por_unidad:
           input.tipo === "insumo_directo"
@@ -634,6 +655,9 @@ export type ClasificItem = {
   receta?: Receta;
   /** Receta extra vinculada (combo "con papas fritas"). */
   extraReceta?: Receta;
+  /** Sustitución de insumo (ej. leche entera → almendras). */
+  swapFrom?: Insumo;
+  swapTo?: Insumo;
   /** Presente si tipo = 'insumo_directo' (mapeado a un insumo). */
   insumo?: Insumo;
   /** Clasificación guardada, si existe. */
@@ -678,7 +702,21 @@ export function clasificarFilas(
         const extraReceta = clasif.extraRecetaId
           ? recById.get(clasif.extraRecetaId)
           : undefined;
-        return { fila: f, tipo: "insumo" as const, receta, extraReceta, clasif };
+        const swapFrom = clasif.swapFromInsumoId
+          ? insById.get(clasif.swapFromInsumoId)
+          : undefined;
+        const swapTo = clasif.swapToInsumoId
+          ? insById.get(clasif.swapToInsumoId)
+          : undefined;
+        return {
+          fila: f,
+          tipo: "insumo" as const,
+          receta,
+          extraReceta,
+          swapFrom,
+          swapTo,
+          clasif,
+        };
       }
       if (clasif.tipo === "insumo_directo") {
         const insumo = clasif.insumoId
