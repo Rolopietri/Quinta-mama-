@@ -93,6 +93,8 @@ export function InventarioClient() {
 
   // Confirmación de borrado de movimiento del historial
   const [pendienteBorrar, setPendienteBorrar] = useState<string | null>(null);
+  /** Al borrar una pérdida: si se devuelve la cantidad al stock (default sí). */
+  const [devolverStock, setDevolverStock] = useState(true);
 
   // Modal de merma de producción (pérdida de algo pre-producido, por receta)
   const [mermaOpen, setMermaOpen] = useState(false);
@@ -376,11 +378,21 @@ export function InventarioClient() {
     }
   }
 
-  async function handleDeleteMov(id: string) {
+  async function handleDeleteMov(id: string, devolver: boolean) {
+    const mov = movs.find((m) => m.id === id);
     try {
-      await deleteMovimiento(id);
+      const res = await deleteMovimiento(id, { devolverStock: devolver });
       setMovs((prev) => prev.filter((m) => m.id !== id));
-      setInfo("Movimiento eliminado del historial.");
+      if (devolver && res.stockTotal !== undefined && mov) {
+        setInsumos((prev) =>
+          prev.map((i) =>
+            i.id === mov.insumoId ? { ...i, stockTotal: res.stockTotal! } : i,
+          ),
+        );
+        setInfo("Movimiento eliminado y stock devuelto.");
+      } else {
+        setInfo("Movimiento eliminado del historial.");
+      }
     } catch (e) {
       setError(extractError(e, "Error eliminando"));
     }
@@ -842,8 +854,11 @@ export function InventarioClient() {
                     <div className="col-span-3 sm:col-span-1 text-right">
                       <button
                         type="button"
-                        onClick={() => setPendienteBorrar(h.mov.id)}
-                        title="Eliminar del historial (no devuelve stock)"
+                        onClick={() => {
+                          setDevolverStock(true);
+                          setPendienteBorrar(h.mov.id);
+                        }}
+                        title="Eliminar del historial"
                         className="text-cacao-mute hover:text-terracotta text-lg leading-none px-1"
                       >
                         ×
@@ -1082,12 +1097,25 @@ export function InventarioClient() {
         title="¿Eliminar este movimiento del historial?"
         message={
           <>
-            El stock NO se devuelve automáticamente — tendrías que ajustarlo
-            manualmente.
+            <label className="flex items-start gap-2 rounded-lg bg-marfil-soft ring-1 ring-marfil p-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={devolverStock}
+                onChange={(e) => setDevolverStock(e.target.checked)}
+                className="mt-0.5 h-4 w-4 accent-cacao"
+              />
+              <span className="text-sm text-cacao">
+                Devolver la cantidad al stock
+                <span className="block text-xs text-cacao-soft">
+                  Márcalo si registraste la pérdida por error. Déjalo sin marcar
+                  para solo borrar el registro sin tocar el stock.
+                </span>
+              </span>
+            </label>
           </>
         }
         onConfirm={() => {
-          if (pendienteBorrar) handleDeleteMov(pendienteBorrar);
+          if (pendienteBorrar) handleDeleteMov(pendienteBorrar, devolverStock);
           setPendienteBorrar(null);
         }}
         onCancel={() => setPendienteBorrar(null)}

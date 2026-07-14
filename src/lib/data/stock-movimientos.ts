@@ -123,8 +123,63 @@ export async function registrarPerdida(
   };
 }
 
-export async function deleteMovimiento(id: string): Promise<void> {
+/**
+ * Borra un movimiento del historial.
+ *
+ * Con `devolverStock: true` repone al stock físico la cantidad del
+ * movimiento antes de borrarlo (útil cuando se registró una pérdida por
+ * error). Solo repone movimientos de la capa 'total'. Devuelve el nuevo
+ * stock físico si hubo reposición.
+ */
+export async function deleteMovimiento(
+  id: string,
+  opts: { devolverStock?: boolean } = {},
+): Promise<{ stockTotal?: number }> {
   const sb = createSupabaseBrowserClient();
+
+  if (opts.devolverStock) {
+    const { data: movRow, error: movErr } = await sb
+      .from("stock_movimientos")
+      .select("insumo_id, capa, cantidad")
+      .eq("id", id)
+      .single();
+    if (movErr) throw movErr;
+    const m = movRow as {
+      insumo_id: string;
+      capa: string;
+      cantidad: number | string;
+    };
+    const cantidad = Number(m.cantidad);
+    // Solo reponemos la capa física ('total'). Reponer = deshacer el delta:
+    // como las pérdidas se guardan en negativo, restar la cantidad la suma
+    // de vuelta al stock.
+    if (m.capa === "total" && cantidad !== 0) {
+      const { data: insRow, error: insErr } = await sb
+        .from("insumos")
+        .select("stock_actual")
+        .eq("id", m.insumo_id)
+        .single();
+      if (insErr) throw insErr;
+      const actual = Number(
+        (insRow as { stock_actual: number | string }).stock_actual ?? 0,
+      );
+      const nuevo = Math.max(0, actual - cantidad);
+      const { error: updErr } = await sb
+        .from("insumos")
+        .update({ stock_actual: nuevo })
+        .eq("id", m.insumo_id);
+      if (updErr) throw updErr;
+
+      const { error: delErr } = await sb
+        .from("stock_movimientos")
+        .delete()
+        .eq("id", id);
+      if (delErr) throw delErr;
+      return { stockTotal: nuevo };
+    }
+  }
+
   const { error } = await sb.from("stock_movimientos").delete().eq("id", id);
   if (error) throw error;
+  return {};
 }
