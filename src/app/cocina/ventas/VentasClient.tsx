@@ -48,6 +48,8 @@ export function VentasClient() {
   const [idInsumoSel, setIdInsumoSel] = useState("");
   const [idCantidad, setIdCantidad] = useState("1");
   const [idBuscar, setIdBuscar] = useState("");
+  /** Modificador de sustitución: insumo que se DEVUELVE (opcional). */
+  const [idSwapFrom, setIdSwapFrom] = useState("");
   /** Ítem del POS que se está mapeando a una receta (modal). */
   const [recetaMapItem, setRecetaMapItem] = useState<string | null>(null);
   const [rmRecetaSel, setRmRecetaSel] = useState("");
@@ -222,9 +224,16 @@ export function VentasClient() {
   }
 
   function abrirInsumoDirecto(nombre: string) {
-    setIdInsumoSel("");
-    setIdCantidad("1");
     setIdBuscar("");
+    // Prefill desde una clasificación guardada, si existe.
+    const existente = clasifs.find((c) => c.nombreNorm === norm(nombre));
+    setIdInsumoSel(existente?.insumoId ?? "");
+    setIdCantidad(
+      existente?.cantidadPorUnidad != null
+        ? String(existente.cantidadPorUnidad)
+        : "1",
+    );
+    setIdSwapFrom(existente?.swapFromInsumoId ?? "");
     setInsumoDirectoItem(nombre);
   }
 
@@ -313,6 +322,7 @@ export function VentasClient() {
     await reclasificar(insumoDirectoItem, "insumo_directo", {
       insumoId: idInsumoSel,
       cantidadPorUnidad: Number.isFinite(cant) && cant > 0 ? cant : 1,
+      swapFromInsumoId: idSwapFrom || undefined,
     });
     setInsumoDirectoItem(null);
   }
@@ -365,8 +375,12 @@ export function VentasClient() {
           c.tipo === "insumo" && c.extraReceta
             ? (c.clasif?.extraCantidad ?? 1)
             : undefined,
+        // swap_from: en 'insumo' es reemplazo en la receta; en
+        // 'insumo_directo' es el insumo que se DEVUELVE (modificador).
         swapFromInsumoId:
-          c.tipo === "insumo" ? c.clasif?.swapFromInsumoId : undefined,
+          c.tipo === "insumo" || c.tipo === "insumo_directo"
+            ? c.clasif?.swapFromInsumoId
+            : undefined,
         swapToInsumoId:
           c.tipo === "insumo" ? c.clasif?.swapToInsumoId : undefined,
       }));
@@ -639,6 +653,9 @@ export function VentasClient() {
                         <>
                           <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200">
                             → {c.insumo?.nombre ?? "insumo"} (directo)
+                            {c.swapFrom
+                              ? ` · devuelve ${c.swapFrom.nombre}`
+                              : ""}
                           </span>
                           <button
                             onClick={() => reclasificar(c.fila.nombre, "sin_clasificar")}
@@ -1073,9 +1090,39 @@ export function VentasClient() {
                 className="mt-1 w-32 rounded-lg ring-1 ring-marfil px-3 py-2"
               />
               <span className="block text-[11px] text-cacao-mute mt-1">
-                Normalmente 1 (una venta = una unidad del insumo).
+                Normalmente 1 (una venta = una unidad del insumo). Para
+                modificadores por volumen (ej. leche), pon la cantidad de la
+                receta en la unidad base del insumo.
               </span>
             </label>
+
+            {/* Modificador de sustitución: devolver otro insumo */}
+            <div className="mt-4 rounded-lg ring-1 ring-marfil p-3">
+              <p className="text-sm text-cacao font-medium">
+                Devolver otro insumo{" "}
+                <span className="text-cacao-mute font-normal">(opcional)</span>
+              </p>
+              <p className="text-[11px] text-cacao-soft mb-2">
+                Para modificadores tipo “+X en vez de Y” (ej. + leche de
+                almendras): además de descontar el de arriba, devuelve este otro
+                (la leche completa que la receta ya descontó), en la misma
+                cantidad.
+              </p>
+              <select
+                value={idSwapFrom}
+                onChange={(e) => setIdSwapFrom(e.target.value)}
+                className="w-full rounded-lg ring-1 ring-marfil px-2 py-1.5 text-sm bg-white"
+              >
+                <option value="">— No devolver nada —</option>
+                {insumos
+                  .filter((i) => i.activo && i.id !== idInsumoSel)
+                  .map((i) => (
+                    <option key={i.id} value={i.id}>
+                      {i.nombre}
+                    </option>
+                  ))}
+              </select>
+            </div>
 
             <div className="mt-5 flex gap-2 justify-end">
               <button

@@ -619,8 +619,12 @@ export async function upsertClasificacion(input: {
           input.tipo === "insumo" && input.extraRecetaId
             ? (input.extraCantidad ?? 1)
             : null,
+        // swap_from se usa en 'insumo' (receta: reemplaza-desde) y en
+        // 'insumo_directo' (modificador: insumo que se DEVUELVE).
         swap_from_insumo_id:
-          input.tipo === "insumo" ? (input.swapFromInsumoId ?? null) : null,
+          input.tipo === "insumo" || input.tipo === "insumo_directo"
+            ? (input.swapFromInsumoId ?? null)
+            : null,
         swap_to_insumo_id:
           input.tipo === "insumo" ? (input.swapToInsumoId ?? null) : null,
         insumo_id: input.insumoId ?? null,
@@ -722,7 +726,17 @@ export function clasificarFilas(
         const insumo = clasif.insumoId
           ? insById.get(clasif.insumoId)
           : undefined;
-        return { fila: f, tipo: "insumo_directo" as const, insumo, clasif };
+        // swap_from = insumo que se devuelve (modificador de sustitución).
+        const swapFrom = clasif.swapFromInsumoId
+          ? insById.get(clasif.swapFromInsumoId)
+          : undefined;
+        return {
+          fila: f,
+          tipo: "insumo_directo" as const,
+          insumo,
+          swapFrom,
+          clasif,
+        };
       }
       return { fila: f, tipo: clasif.tipo, clasif };
     }
