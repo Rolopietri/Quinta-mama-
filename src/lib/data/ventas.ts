@@ -31,6 +31,8 @@ type Row = {
   tipo_item: string | null;
   insumo_id: string | null;
   insumo_cantidad: number | string | null;
+  extra_receta_id: string | null;
+  extra_cantidad: number | string | null;
   created_at: string;
 };
 
@@ -57,6 +59,11 @@ function rowToVenta(r: Row): Venta {
       r.insumo_cantidad === null || r.insumo_cantidad === undefined
         ? undefined
         : Number(r.insumo_cantidad),
+    extraRecetaId: r.extra_receta_id ?? undefined,
+    extraCantidad:
+      r.extra_cantidad === null || r.extra_cantidad === undefined
+        ? undefined
+        : Number(r.extra_cantidad),
     createdAt: r.created_at,
   };
 }
@@ -77,6 +84,9 @@ export type VentaInput = {
   /** Solo 'insumo_directo': insumo a descontar y cuánto por unidad vendida. */
   insumoId?: string;
   insumoCantidad?: number;
+  /** Receta extra descontada además de la base (combos "con papas fritas"). */
+  extraRecetaId?: string;
+  extraCantidad?: number;
 };
 
 export async function listVentas(limit = 100): Promise<Venta[]> {
@@ -159,6 +169,8 @@ export async function createVenta(input: VentaInput): Promise<Venta> {
       tipo_item: input.tipoItem ?? "insumo",
       insumo_id: input.insumoId ?? null,
       insumo_cantidad: input.insumoCantidad ?? null,
+      extra_receta_id: input.extraRecetaId ?? null,
+      extra_cantidad: input.extraCantidad ?? null,
     })
     .select("*")
     .single();
@@ -184,6 +196,8 @@ export async function createVentasBatch(
     tipo_item: v.tipoItem ?? "insumo",
     insumo_id: v.insumoId ?? null,
     insumo_cantidad: v.insumoCantidad ?? null,
+    extra_receta_id: v.extraRecetaId ?? null,
+    extra_cantidad: v.extraCantidad ?? null,
   }));
   const { data, error } = await sb.from("ventas").insert(rows).select("*");
   if (error) {
@@ -521,6 +535,8 @@ type ClasifRow = {
   nombre_original: string;
   tipo: string;
   receta_id: string | null;
+  extra_receta_id: string | null;
+  extra_cantidad: number | string | null;
   insumo_id: string | null;
   cantidad_por_unidad: number | string | null;
   proveedor_id: string | null;
@@ -536,6 +552,9 @@ function rowToClasif(r: ClasifRow): PosClasificacion {
     nombreOriginal: r.nombre_original,
     tipo: (r.tipo as TipoItem) ?? "sin_clasificar",
     recetaId: r.receta_id ?? undefined,
+    extraRecetaId: r.extra_receta_id ?? undefined,
+    extraCantidad:
+      r.extra_cantidad == null ? undefined : Number(r.extra_cantidad),
     insumoId: r.insumo_id ?? undefined,
     cantidadPorUnidad:
       r.cantidad_por_unidad == null ? undefined : Number(r.cantidad_por_unidad),
@@ -561,6 +580,8 @@ export async function upsertClasificacion(input: {
   nombreOriginal: string;
   tipo: TipoItem;
   recetaId?: string;
+  extraRecetaId?: string;
+  extraCantidad?: number;
   insumoId?: string;
   cantidadPorUnidad?: number;
   proveedorId?: string;
@@ -575,6 +596,12 @@ export async function upsertClasificacion(input: {
         nombre_original: input.nombreOriginal,
         tipo: input.tipo,
         receta_id: input.recetaId ?? null,
+        extra_receta_id:
+          input.tipo === "insumo" ? (input.extraRecetaId ?? null) : null,
+        extra_cantidad:
+          input.tipo === "insumo" && input.extraRecetaId
+            ? (input.extraCantidad ?? 1)
+            : null,
         insumo_id: input.insumoId ?? null,
         cantidad_por_unidad:
           input.tipo === "insumo_directo"
@@ -605,6 +632,8 @@ export type ClasificItem = {
   tipo: TipoItem;
   /** Presente si tipo = 'insumo' (matcheó una receta). */
   receta?: Receta;
+  /** Receta extra vinculada (combo "con papas fritas"). */
+  extraReceta?: Receta;
   /** Presente si tipo = 'insumo_directo' (mapeado a un insumo). */
   insumo?: Insumo;
   /** Clasificación guardada, si existe. */
@@ -646,7 +675,10 @@ export function clasificarFilas(
         const receta = clasif.recetaId
           ? recById.get(clasif.recetaId)
           : recIndex.get(k);
-        return { fila: f, tipo: "insumo" as const, receta, clasif };
+        const extraReceta = clasif.extraRecetaId
+          ? recById.get(clasif.extraRecetaId)
+          : undefined;
+        return { fila: f, tipo: "insumo" as const, receta, extraReceta, clasif };
       }
       if (clasif.tipo === "insumo_directo") {
         const insumo = clasif.insumoId

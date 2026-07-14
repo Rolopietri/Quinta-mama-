@@ -48,6 +48,11 @@ export function VentasClient() {
   const [idInsumoSel, setIdInsumoSel] = useState("");
   const [idCantidad, setIdCantidad] = useState("1");
   const [idBuscar, setIdBuscar] = useState("");
+  /** Ítem del POS que se está mapeando a una receta (modal). */
+  const [recetaMapItem, setRecetaMapItem] = useState<string | null>(null);
+  const [rmRecetaSel, setRmRecetaSel] = useState("");
+  const [rmExtraPapas, setRmExtraPapas] = useState(false);
+  const [rmBuscar, setRmBuscar] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -149,7 +154,13 @@ export function VentasClient() {
   async function reclasificar(
     nombreOriginal: string,
     tipo: TipoItem,
-    opts?: { recetaId?: string; insumoId?: string; cantidadPorUnidad?: number },
+    opts?: {
+      recetaId?: string;
+      extraRecetaId?: string;
+      extraCantidad?: number;
+      insumoId?: string;
+      cantidadPorUnidad?: number;
+    },
   ) {
     setError(null);
     try {
@@ -157,6 +168,8 @@ export function VentasClient() {
         nombreOriginal,
         tipo,
         recetaId: opts?.recetaId,
+        extraRecetaId: opts?.extraRecetaId,
+        extraCantidad: opts?.extraCantidad,
         insumoId: opts?.insumoId,
         cantidadPorUnidad: opts?.cantidadPorUnidad,
       });
@@ -180,6 +193,8 @@ export function VentasClient() {
     next: {
       tipo: TipoItem;
       recetaId?: string;
+      extraRecetaId?: string;
+      extraCantidad?: number;
       insumoId?: string;
       cantidadPorUnidad?: number;
       proveedorId?: string;
@@ -205,6 +220,55 @@ export function VentasClient() {
     setIdCantidad("1");
     setIdBuscar("");
     setInsumoDirectoItem(nombre);
+  }
+
+  // Receta "Ración de papas fritas" (para el extra de los combos).
+  const papasReceta = useMemo(
+    () =>
+      recetasVendibles.find((r) => {
+        const n = r.nombre.toLowerCase();
+        return n.includes("papas") && n.includes("frit");
+      }),
+    [recetasVendibles],
+  );
+
+  function nombreLlevaPapas(nombre: string): boolean {
+    const n = nombre.toLowerCase();
+    return n.includes("papas") && n.includes("frit");
+  }
+
+  function abrirRecetaMap(nombre: string) {
+    setRmRecetaSel("");
+    setRmBuscar("");
+    // Si el nombre trae "con papas fritas", pre-marcamos el extra y sugerimos
+    // la receta base quitando ese texto.
+    const llevaPapas = nombreLlevaPapas(nombre);
+    setRmExtraPapas(llevaPapas && !!papasReceta);
+    if (llevaPapas) {
+      const base = nombre.replace(/con\s+papas\s+fritas?/i, "").trim();
+      const norm = (s: string) =>
+        s
+          .toLowerCase()
+          .normalize("NFD")
+          .replace(/[̀-ͯ]/g, "")
+          .replace(/[^a-z0-9]/g, "");
+      const nb = norm(base);
+      const match = recetasVendibles.find(
+        (r) => nb.length >= 4 && (norm(r.nombre).includes(nb) || nb.includes(norm(r.nombre))),
+      );
+      if (match) setRmRecetaSel(match.id);
+    }
+    setRecetaMapItem(nombre);
+  }
+
+  async function confirmarRecetaMap() {
+    if (!recetaMapItem || !rmRecetaSel) return;
+    await reclasificar(recetaMapItem, "insumo", {
+      recetaId: rmRecetaSel,
+      extraRecetaId: rmExtraPapas && papasReceta ? papasReceta.id : undefined,
+      extraCantidad: rmExtraPapas ? 1 : undefined,
+    });
+    setRecetaMapItem(null);
   }
 
   async function confirmarInsumoDirecto() {
@@ -258,6 +322,12 @@ export function VentasClient() {
         insumoCantidad:
           c.tipo === "insumo_directo"
             ? (c.clasif?.cantidadPorUnidad ?? 1)
+            : undefined,
+        extraRecetaId:
+          c.tipo === "insumo" && c.extraReceta ? c.extraReceta.id : undefined,
+        extraCantidad:
+          c.tipo === "insumo" && c.extraReceta
+            ? (c.clasif?.extraCantidad ?? 1)
             : undefined,
       }));
       const created = await createVentasBatch(ventasInput);
@@ -510,9 +580,18 @@ export function VentasClient() {
                     </div>
                     <div className="col-span-5 flex flex-wrap gap-1 justify-end items-center">
                       {c.tipo === "insumo" ? (
-                        <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200">
-                          → {c.receta?.nombre ?? "insumo"}
-                        </span>
+                        <>
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200">
+                            → {c.receta?.nombre ?? "insumo"}
+                            {c.extraReceta ? ` + ${c.extraReceta.nombre}` : ""}
+                          </span>
+                          <button
+                            onClick={() => abrirRecetaMap(c.fila.nombre)}
+                            className="text-[11px] text-cacao-mute hover:text-terracotta underline"
+                          >
+                            editar
+                          </button>
+                        </>
                       ) : c.tipo === "insumo_directo" ? (
                         <>
                           <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200">
@@ -551,6 +630,12 @@ export function VentasClient() {
                               ¿{c.sugerencia.nombre}?
                             </button>
                           )}
+                          <button
+                            onClick={() => abrirRecetaMap(c.fila.nombre)}
+                            className="text-[11px] px-2 py-0.5 rounded-full ring-1 ring-emerald-200 text-emerald-800 hover:bg-emerald-50"
+                          >
+                            Receta…
+                          </button>
                           <button
                             onClick={() => abrirInsumoDirecto(c.fila.nombre)}
                             className="text-[11px] px-2 py-0.5 rounded-full ring-1 ring-emerald-200 text-emerald-800 hover:bg-emerald-50"
@@ -640,23 +725,46 @@ export function VentasClient() {
                   </div>
                   <div className="sm:col-span-5">
                     {c.tipo === "insumo" ? (
-                      <select
-                        value={c.recetaId ?? ""}
-                        onChange={(e) =>
-                          saveClasif(c.nombreOriginal, {
-                            tipo: "insumo",
-                            recetaId: e.target.value || undefined,
-                          })
-                        }
-                        className="w-full rounded-lg ring-1 ring-marfil px-2 py-1.5 text-sm bg-white"
-                      >
-                        <option value="">— Vincular receta —</option>
-                        {recetasVendibles.map((r) => (
-                          <option key={r.id} value={r.id}>
-                            {r.nombre}
-                          </option>
-                        ))}
-                      </select>
+                      <div className="flex flex-col gap-1">
+                        <select
+                          value={c.recetaId ?? ""}
+                          onChange={(e) =>
+                            saveClasif(c.nombreOriginal, {
+                              tipo: "insumo",
+                              recetaId: e.target.value || undefined,
+                              extraRecetaId: c.extraRecetaId,
+                              extraCantidad: c.extraCantidad,
+                            })
+                          }
+                          className="w-full rounded-lg ring-1 ring-marfil px-2 py-1.5 text-sm bg-white"
+                        >
+                          <option value="">— Vincular receta —</option>
+                          {recetasVendibles.map((r) => (
+                            <option key={r.id} value={r.id}>
+                              {r.nombre}
+                            </option>
+                          ))}
+                        </select>
+                        <select
+                          value={c.extraRecetaId ?? ""}
+                          onChange={(e) =>
+                            saveClasif(c.nombreOriginal, {
+                              tipo: "insumo",
+                              recetaId: c.recetaId,
+                              extraRecetaId: e.target.value || undefined,
+                              extraCantidad: e.target.value ? 1 : undefined,
+                            })
+                          }
+                          className="w-full rounded-lg ring-1 ring-marfil px-2 py-1.5 text-xs bg-white text-cacao-soft"
+                        >
+                          <option value="">— Sin extra —</option>
+                          {recetasVendibles.map((r) => (
+                            <option key={r.id} value={r.id}>
+                              + {r.nombre}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
                     ) : c.tipo === "insumo_directo" ? (
                       <div className="flex gap-2">
                         <select
@@ -938,6 +1046,100 @@ export function VentasClient() {
                 type="button"
                 onClick={confirmarInsumoDirecto}
                 disabled={!idInsumoSel}
+                className="rounded-xl bg-cacao text-white px-4 py-2 font-medium hover:bg-terracotta disabled:opacity-50"
+              >
+                Vincular
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: mapear ítem del POS a una receta (+ extra opcional) */}
+      {recetaMapItem && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-start justify-center p-4 bg-cacao/40 backdrop-blur-sm overflow-y-auto"
+          onClick={() => setRecetaMapItem(null)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="my-8 rounded-2xl bg-white ring-1 ring-marfil p-6 max-w-md w-full shadow-xl"
+          >
+            <h2 className="font-cinzel text-xl tracking-[0.08em] text-cacao">
+              Vincular a receta
+            </h2>
+            <p className="mt-1 text-sm text-cacao-soft font-serif">
+              <strong className="text-cacao">{recetaMapItem}</strong> descuenta
+              los insumos de la receta que elijas.
+            </p>
+
+            <label className="block mt-4 text-sm text-cacao">
+              Buscar receta
+              <input
+                type="text"
+                value={rmBuscar}
+                onChange={(e) => setRmBuscar(e.target.value)}
+                placeholder="Ej. Prosciutto, Falafel…"
+                className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2"
+              />
+            </label>
+
+            <div className="mt-2 max-h-52 overflow-y-auto rounded-lg ring-1 ring-marfil divide-y divide-marfil">
+              {recetasVendibles
+                .filter(
+                  (r) =>
+                    rmBuscar.trim() === "" ||
+                    r.nombre.toLowerCase().includes(rmBuscar.toLowerCase()),
+                )
+                .slice(0, 60)
+                .map((r) => (
+                  <button
+                    key={r.id}
+                    type="button"
+                    onClick={() => setRmRecetaSel(r.id)}
+                    className={`w-full text-left px-3 py-2 text-sm hover:bg-marfil-soft ${
+                      rmRecetaSel === r.id
+                        ? "bg-emerald-50 text-emerald-900"
+                        : "text-cacao"
+                    }`}
+                  >
+                    {r.nombre}
+                  </button>
+                ))}
+            </div>
+
+            {papasReceta && (
+              <label className="flex items-start gap-2 mt-4 rounded-lg bg-marfil-soft ring-1 ring-marfil p-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={rmExtraPapas}
+                  onChange={(e) => setRmExtraPapas(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 accent-cacao"
+                />
+                <span className="text-sm text-cacao">
+                  + Ración de papas fritas
+                  <span className="block text-xs text-cacao-soft">
+                    Para combos con papas fritas: descuenta además una ración de
+                    papas, sin duplicar la receta del sándwich.
+                  </span>
+                </span>
+              </label>
+            )}
+
+            <div className="mt-5 flex gap-2 justify-end">
+              <button
+                type="button"
+                onClick={() => setRecetaMapItem(null)}
+                className="rounded-xl ring-1 ring-marfil px-4 py-2 text-cacao hover:bg-marfil-soft"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={confirmarRecetaMap}
+                disabled={!rmRecetaSel}
                 className="rounded-xl bg-cacao text-white px-4 py-2 font-medium hover:bg-terracotta disabled:opacity-50"
               >
                 Vincular

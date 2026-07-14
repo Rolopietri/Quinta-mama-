@@ -704,6 +704,9 @@ export type Venta = {
    *  por unidad vendida. El descuento total = insumoCantidad × cantidad. */
   insumoId?: string;
   insumoCantidad?: number;
+  /** Receta extra descontada además de la base (combos "con papas fritas"). */
+  extraRecetaId?: string;
+  extraCantidad?: number;
   createdAt: string;
 };
 
@@ -731,6 +734,12 @@ export type PosClasificacion = {
   tipo: TipoItem;
   /** Solo si tipo = 'insumo': receta a la que se vincula. */
   recetaId?: string;
+  /** Opcional (tipo 'insumo'): receta EXTRA que se descuenta además de la
+   *  base — ej. un combo "… con papas fritas" añade la ración de papas sin
+   *  duplicar la receta del sándwich. */
+  extraRecetaId?: string;
+  /** Cuántas veces se descuenta la receta extra por unidad vendida. Default 1. */
+  extraCantidad?: number;
   /** Solo si tipo = 'insumo_directo': insumo al que se vincula. */
   insumoId?: string;
   /** Solo 'insumo_directo': cuánto se descuenta de ese insumo por unidad
