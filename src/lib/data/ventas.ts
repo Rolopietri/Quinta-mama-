@@ -29,6 +29,8 @@ type Row = {
   es_merma: boolean | null;
   merma_motivo: string | null;
   tipo_item: string | null;
+  insumo_id: string | null;
+  insumo_cantidad: number | string | null;
   created_at: string;
 };
 
@@ -50,6 +52,11 @@ function rowToVenta(r: Row): Venta {
     esMerma: r.es_merma ?? false,
     mermaMotivo: r.merma_motivo ?? undefined,
     tipoItem: (r.tipo_item as TipoItem) ?? "insumo",
+    insumoId: r.insumo_id ?? undefined,
+    insumoCantidad:
+      r.insumo_cantidad === null || r.insumo_cantidad === undefined
+        ? undefined
+        : Number(r.insumo_cantidad),
     createdAt: r.created_at,
   };
 }
@@ -67,6 +74,9 @@ export type VentaInput = {
   /** Clasificación del ítem. Default 'insumo'. Los no-insumo NO descuentan
    *  stock (van con receta_id null). */
   tipoItem?: TipoItem;
+  /** Solo 'insumo_directo': insumo a descontar y cuánto por unidad vendida. */
+  insumoId?: string;
+  insumoCantidad?: number;
 };
 
 export async function listVentas(limit = 100): Promise<Venta[]> {
@@ -147,6 +157,8 @@ export async function createVenta(input: VentaInput): Promise<Venta> {
       batch_id: input.batchId ?? null,
       notas: input.notas ?? null,
       tipo_item: input.tipoItem ?? "insumo",
+      insumo_id: input.insumoId ?? null,
+      insumo_cantidad: input.insumoCantidad ?? null,
     })
     .select("*")
     .single();
@@ -170,6 +182,8 @@ export async function createVentasBatch(
     batch_id: v.batchId ?? null,
     notas: v.notas ?? null,
     tipo_item: v.tipoItem ?? "insumo",
+    insumo_id: v.insumoId ?? null,
+    insumo_cantidad: v.insumoCantidad ?? null,
   }));
   const { data, error } = await sb.from("ventas").insert(rows).select("*");
   if (error) {
@@ -507,6 +521,8 @@ type ClasifRow = {
   nombre_original: string;
   tipo: string;
   receta_id: string | null;
+  insumo_id: string | null;
+  cantidad_por_unidad: number | string | null;
   proveedor_id: string | null;
   porcentaje_acuerdo: number | string | null;
   created_at: string;
@@ -520,6 +536,9 @@ function rowToClasif(r: ClasifRow): PosClasificacion {
     nombreOriginal: r.nombre_original,
     tipo: (r.tipo as TipoItem) ?? "sin_clasificar",
     recetaId: r.receta_id ?? undefined,
+    insumoId: r.insumo_id ?? undefined,
+    cantidadPorUnidad:
+      r.cantidad_por_unidad == null ? undefined : Number(r.cantidad_por_unidad),
     proveedorId: r.proveedor_id ?? undefined,
     porcentajeAcuerdo:
       r.porcentaje_acuerdo == null ? undefined : Number(r.porcentaje_acuerdo),
@@ -542,6 +561,8 @@ export async function upsertClasificacion(input: {
   nombreOriginal: string;
   tipo: TipoItem;
   recetaId?: string;
+  insumoId?: string;
+  cantidadPorUnidad?: number;
   proveedorId?: string;
   porcentajeAcuerdo?: number;
 }): Promise<PosClasificacion> {
@@ -554,6 +575,11 @@ export async function upsertClasificacion(input: {
         nombre_original: input.nombreOriginal,
         tipo: input.tipo,
         receta_id: input.recetaId ?? null,
+        insumo_id: input.insumoId ?? null,
+        cantidad_por_unidad:
+          input.tipo === "insumo_directo"
+            ? (input.cantidadPorUnidad ?? 1)
+            : null,
         proveedor_id: input.proveedorId ?? null,
         porcentaje_acuerdo: input.porcentajeAcuerdo ?? null,
         updated_at: new Date().toISOString(),
@@ -579,6 +605,8 @@ export type ClasificItem = {
   tipo: TipoItem;
   /** Presente si tipo = 'insumo' (matcheó una receta). */
   receta?: Receta;
+  /** Presente si tipo = 'insumo_directo' (mapeado a un insumo). */
+  insumo?: Insumo;
   /** Clasificación guardada, si existe. */
   clasif?: PosClasificacion;
   /** Sugerencia difusa (NO se aplica sola) para ítems sin clasificar. */
@@ -597,6 +625,7 @@ export function clasificarFilas(
   filas: FilaImportada[],
   recetas: Receta[],
   clasifs: PosClasificacion[],
+  insumos: Insumo[] = [],
 ): ClasificItem[] {
   const recIndex = new Map<string, Receta>();
   for (const r of recetas) {
@@ -604,6 +633,7 @@ export function clasificarFilas(
     if (r.xetux_nombre) recIndex.set(normPos(r.xetux_nombre), r);
   }
   const recById = new Map(recetas.map((r) => [r.id, r]));
+  const insById = new Map(insumos.map((i) => [i.id, i]));
   const clasIndex = new Map(clasifs.map((c) => [c.nombreNorm, c]));
 
   return filas.map((f) => {
@@ -617,6 +647,12 @@ export function clasificarFilas(
           ? recById.get(clasif.recetaId)
           : recIndex.get(k);
         return { fila: f, tipo: "insumo" as const, receta, clasif };
+      }
+      if (clasif.tipo === "insumo_directo") {
+        const insumo = clasif.insumoId
+          ? insById.get(clasif.insumoId)
+          : undefined;
+        return { fila: f, tipo: "insumo_directo" as const, insumo, clasif };
       }
       return { fila: f, tipo: clasif.tipo, clasif };
     }

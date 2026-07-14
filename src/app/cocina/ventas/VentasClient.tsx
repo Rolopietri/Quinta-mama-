@@ -7,9 +7,10 @@ import type {
   PosClasificacion,
   TipoItem,
   Proveedor,
+  Insumo,
 } from "@/lib/types";
 import { listRecetas } from "@/lib/data/recetas";
-import { listProveedores } from "@/lib/data/cocina";
+import { listProveedores, listInsumos } from "@/lib/data/cocina";
 import {
   listVentas,
   createVenta,
@@ -39,6 +40,14 @@ export function VentasClient() {
   const [recetas, setRecetas] = useState<Receta[]>([]);
   const [ventas, setVentas] = useState<Venta[]>([]);
   const [proveedores, setProveedores] = useState<Proveedor[]>([]);
+  const [insumos, setInsumos] = useState<Insumo[]>([]);
+  /** Ítem del POS que se está mapeando a un insumo directo (modal). */
+  const [insumoDirectoItem, setInsumoDirectoItem] = useState<string | null>(
+    null,
+  );
+  const [idInsumoSel, setIdInsumoSel] = useState("");
+  const [idCantidad, setIdCantidad] = useState("1");
+  const [idBuscar, setIdBuscar] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -61,17 +70,19 @@ export function VentasClient() {
     let cancelled = false;
     (async () => {
       try {
-        const [r, v, c, p] = await Promise.all([
+        const [r, v, c, p, ins] = await Promise.all([
           listRecetas(),
           listVentas(50),
           listClasificacion(),
           listProveedores(),
+          listInsumos(),
         ]);
         if (!cancelled) {
           setRecetas(r);
           setVentas(v);
           setClasifs(c);
           setProveedores(p);
+          setInsumos(ins);
         }
       } catch (e) {
         if (!cancelled)
@@ -127,7 +138,7 @@ export function VentasClient() {
         setClasif(null);
         return;
       }
-      setClasif(clasificarFilas(filas, recetasVendibles, clasifs));
+      setClasif(clasificarFilas(filas, recetasVendibles, clasifs, insumos));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error parseando CSV");
       setClasif(null);
@@ -138,11 +149,17 @@ export function VentasClient() {
   async function reclasificar(
     nombreOriginal: string,
     tipo: TipoItem,
-    recetaId?: string,
+    opts?: { recetaId?: string; insumoId?: string; cantidadPorUnidad?: number },
   ) {
     setError(null);
     try {
-      const saved = await upsertClasificacion({ nombreOriginal, tipo, recetaId });
+      const saved = await upsertClasificacion({
+        nombreOriginal,
+        tipo,
+        recetaId: opts?.recetaId,
+        insumoId: opts?.insumoId,
+        cantidadPorUnidad: opts?.cantidadPorUnidad,
+      });
       const nuevos = [
         ...clasifs.filter((c) => c.nombreNorm !== saved.nombreNorm),
         saved,
@@ -150,7 +167,7 @@ export function VentasClient() {
       setClasifs(nuevos);
       if (clasif) {
         const filas = clasif.map((c) => c.fila);
-        setClasif(clasificarFilas(filas, recetasVendibles, nuevos));
+        setClasif(clasificarFilas(filas, recetasVendibles, nuevos, insumos));
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error clasificando");
@@ -163,6 +180,8 @@ export function VentasClient() {
     next: {
       tipo: TipoItem;
       recetaId?: string;
+      insumoId?: string;
+      cantidadPorUnidad?: number;
       proveedorId?: string;
       porcentajeAcuerdo?: number;
     },
@@ -179,6 +198,23 @@ export function VentasClient() {
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error guardando");
     }
+  }
+
+  function abrirInsumoDirecto(nombre: string) {
+    setIdInsumoSel("");
+    setIdCantidad("1");
+    setIdBuscar("");
+    setInsumoDirectoItem(nombre);
+  }
+
+  async function confirmarInsumoDirecto() {
+    if (!insumoDirectoItem || !idInsumoSel) return;
+    const cant = Number(idCantidad);
+    await reclasificar(insumoDirectoItem, "insumo_directo", {
+      insumoId: idInsumoSel,
+      cantidadPorUnidad: Number.isFinite(cant) && cant > 0 ? cant : 1,
+    });
+    setInsumoDirectoItem(null);
   }
 
   async function removeClasif(id: string) {
@@ -210,13 +246,19 @@ export function VentasClient() {
       const ventasInput = clasif.map((c) => ({
         fecha: iFecha,
         recetaId: c.tipo === "insumo" && c.receta ? c.receta.id : undefined,
-        recetaNombre: c.receta?.nombre ?? c.fila.nombre,
+        recetaNombre: c.receta?.nombre ?? c.insumo?.nombre ?? c.fila.nombre,
         cantidad: c.fila.cantidad,
         precioUnitarioUsd: c.fila.precio,
         totalUsd: c.fila.precio ? c.fila.cantidad * c.fila.precio : undefined,
         fuente: "xetux_csv" as const,
         batchId: batch,
         tipoItem: c.tipo,
+        insumoId:
+          c.tipo === "insumo_directo" && c.insumo ? c.insumo.id : undefined,
+        insumoCantidad:
+          c.tipo === "insumo_directo"
+            ? (c.clasif?.cantidadPorUnidad ?? 1)
+            : undefined,
       }));
       const created = await createVentasBatch(ventasInput);
       setVentas((prev) => [...created, ...prev]);
@@ -239,7 +281,10 @@ export function VentasClient() {
     }
   }
 
-  const insumoCount = clasif?.filter((c) => c.tipo === "insumo").length ?? 0;
+  const insumoCount =
+    clasif?.filter(
+      (c) => c.tipo === "insumo" || c.tipo === "insumo_directo",
+    ).length ?? 0;
   const noGestCount =
     clasif?.filter((c) => c.tipo === "servicio" || c.tipo === "consignacion")
       .length ?? 0;
@@ -463,11 +508,23 @@ export function VentasClient() {
                     <div className="col-span-2 text-cacao-soft text-xs">
                       {c.fila.precio ? `$${c.fila.precio.toFixed(2)}` : ""}
                     </div>
-                    <div className="col-span-5 flex flex-wrap gap-1 justify-end">
+                    <div className="col-span-5 flex flex-wrap gap-1 justify-end items-center">
                       {c.tipo === "insumo" ? (
                         <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200">
                           → {c.receta?.nombre ?? "insumo"}
                         </span>
+                      ) : c.tipo === "insumo_directo" ? (
+                        <>
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200">
+                            → {c.insumo?.nombre ?? "insumo"} (directo)
+                          </span>
+                          <button
+                            onClick={() => reclasificar(c.fila.nombre, "sin_clasificar")}
+                            className="text-[11px] text-cacao-mute hover:text-terracotta underline"
+                          >
+                            cambiar
+                          </button>
+                        </>
                       ) : c.tipo === "servicio" || c.tipo === "consignacion" ? (
                         <>
                           <span className="text-xs px-2 py-0.5 rounded-full bg-sky-50 text-sky-800 ring-1 ring-sky-200">
@@ -485,13 +542,21 @@ export function VentasClient() {
                           {c.sugerencia && (
                             <button
                               onClick={() =>
-                                reclasificar(c.fila.nombre, "insumo", c.sugerencia!.id)
+                                reclasificar(c.fila.nombre, "insumo", {
+                                  recetaId: c.sugerencia!.id,
+                                })
                               }
                               className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200 hover:bg-emerald-100"
                             >
                               ¿{c.sugerencia.nombre}?
                             </button>
                           )}
+                          <button
+                            onClick={() => abrirInsumoDirecto(c.fila.nombre)}
+                            className="text-[11px] px-2 py-0.5 rounded-full ring-1 ring-emerald-200 text-emerald-800 hover:bg-emerald-50"
+                          >
+                            Insumo directo
+                          </button>
                           <button
                             onClick={() => reclasificar(c.fila.nombre, "servicio")}
                             className="text-[11px] px-2 py-0.5 rounded-full ring-1 ring-sky-200 text-sky-800 hover:bg-sky-50"
@@ -550,6 +615,12 @@ export function VentasClient() {
                         saveClasif(c.nombreOriginal, {
                           tipo: t,
                           recetaId: t === "insumo" ? c.recetaId : undefined,
+                          insumoId:
+                            t === "insumo_directo" ? c.insumoId : undefined,
+                          cantidadPorUnidad:
+                            t === "insumo_directo"
+                              ? (c.cantidadPorUnidad ?? 1)
+                              : undefined,
                           proveedorId:
                             t === "consignacion" ? c.proveedorId : undefined,
                           porcentajeAcuerdo:
@@ -560,7 +631,8 @@ export function VentasClient() {
                       }}
                       className="w-full rounded-lg ring-1 ring-marfil px-2 py-1.5 text-sm bg-white"
                     >
-                      <option value="insumo">Insumo</option>
+                      <option value="insumo">Insumo (receta)</option>
+                      <option value="insumo_directo">Insumo directo</option>
                       <option value="servicio">Servicio</option>
                       <option value="consignacion">Consignación</option>
                       <option value="sin_clasificar">Sin clasificar</option>
@@ -585,6 +657,50 @@ export function VentasClient() {
                           </option>
                         ))}
                       </select>
+                    ) : c.tipo === "insumo_directo" ? (
+                      <div className="flex gap-2">
+                        <select
+                          value={c.insumoId ?? ""}
+                          onChange={(e) =>
+                            saveClasif(c.nombreOriginal, {
+                              tipo: "insumo_directo",
+                              insumoId: e.target.value || undefined,
+                              cantidadPorUnidad: c.cantidadPorUnidad ?? 1,
+                            })
+                          }
+                          className="flex-1 rounded-lg ring-1 ring-marfil px-2 py-1.5 text-sm bg-white"
+                        >
+                          <option value="">— Vincular insumo —</option>
+                          {insumos
+                            .filter((i) => i.activo)
+                            .map((i) => (
+                              <option key={i.id} value={i.id}>
+                                {i.nombre}
+                              </option>
+                            ))}
+                        </select>
+                        <div className="flex items-center rounded-lg ring-1 ring-marfil px-2 w-24">
+                          <input
+                            type="number"
+                            min="0"
+                            step="any"
+                            defaultValue={c.cantidadPorUnidad ?? 1}
+                            title="Cantidad por unidad vendida"
+                            onBlur={(e) =>
+                              saveClasif(c.nombreOriginal, {
+                                tipo: "insumo_directo",
+                                insumoId: c.insumoId,
+                                cantidadPorUnidad:
+                                  e.target.value === ""
+                                    ? 1
+                                    : Number(e.target.value),
+                              })
+                            }
+                            className="w-full py-1.5 text-sm outline-none bg-transparent"
+                          />
+                          <span className="text-[10px] text-cacao-mute">/u</span>
+                        </div>
+                      </div>
                     ) : c.tipo === "consignacion" ? (
                       <div className="flex gap-2">
                         <select
@@ -730,6 +846,106 @@ export function VentasClient() {
         }}
         onCancel={() => setPendienteBorrar(null)}
       />
+
+      {/* Modal: mapear ítem del POS a un insumo directo */}
+      {insumoDirectoItem && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-start justify-center p-4 bg-cacao/40 backdrop-blur-sm overflow-y-auto"
+          onClick={() => setInsumoDirectoItem(null)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="my-8 rounded-2xl bg-white ring-1 ring-marfil p-6 max-w-md w-full shadow-xl"
+          >
+            <h2 className="font-cinzel text-xl tracking-[0.08em] text-cacao">
+              Insumo directo
+            </h2>
+            <p className="mt-1 text-sm text-cacao-soft font-serif">
+              Vincula{" "}
+              <strong className="text-cacao">{insumoDirectoItem}</strong> a un
+              insumo del inventario. Al venderlo, descuenta esa cantidad del
+              insumo (ideal para bebidas y reventa, sin crear receta).
+            </p>
+
+            <label className="block mt-4 text-sm text-cacao">
+              Buscar insumo
+              <input
+                type="text"
+                value={idBuscar}
+                onChange={(e) => setIdBuscar(e.target.value)}
+                placeholder="Ej. Pepsi, Agua…"
+                className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2"
+              />
+            </label>
+
+            <div className="mt-2 max-h-52 overflow-y-auto rounded-lg ring-1 ring-marfil divide-y divide-marfil">
+              {insumos
+                .filter(
+                  (i) =>
+                    i.activo &&
+                    (idBuscar.trim() === "" ||
+                      i.nombre
+                        .toLowerCase()
+                        .includes(idBuscar.toLowerCase())),
+                )
+                .slice(0, 60)
+                .map((i) => (
+                  <button
+                    key={i.id}
+                    type="button"
+                    onClick={() => setIdInsumoSel(i.id)}
+                    className={`w-full text-left px-3 py-2 text-sm hover:bg-marfil-soft ${
+                      idInsumoSel === i.id
+                        ? "bg-emerald-50 text-emerald-900"
+                        : "text-cacao"
+                    }`}
+                  >
+                    {i.nombre}
+                    <span className="text-cacao-mute text-xs">
+                      {" "}
+                      · {i.unidadBase}
+                    </span>
+                  </button>
+                ))}
+            </div>
+
+            <label className="block mt-4 text-sm text-cacao">
+              Cantidad a descontar por unidad vendida
+              <input
+                type="number"
+                step="any"
+                min="0"
+                value={idCantidad}
+                onChange={(e) => setIdCantidad(e.target.value)}
+                className="mt-1 w-32 rounded-lg ring-1 ring-marfil px-3 py-2"
+              />
+              <span className="block text-[11px] text-cacao-mute mt-1">
+                Normalmente 1 (una venta = una unidad del insumo).
+              </span>
+            </label>
+
+            <div className="mt-5 flex gap-2 justify-end">
+              <button
+                type="button"
+                onClick={() => setInsumoDirectoItem(null)}
+                className="rounded-xl ring-1 ring-marfil px-4 py-2 text-cacao hover:bg-marfil-soft"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={confirmarInsumoDirecto}
+                disabled={!idInsumoSel}
+                className="rounded-xl bg-cacao text-white px-4 py-2 font-medium hover:bg-terracotta disabled:opacity-50"
+              >
+                Vincular
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

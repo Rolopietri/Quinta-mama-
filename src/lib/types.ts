@@ -700,11 +700,25 @@ export type Venta = {
    *  descuenta stock), 'servicio', 'consignacion' o 'sin_clasificar'
    *  (no gestionados por inventario). Default 'insumo'. */
   tipoItem?: TipoItem;
+  /** Solo ventas de tipo 'insumo_directo': insumo que se descuenta y cuánto
+   *  por unidad vendida. El descuento total = insumoCantidad × cantidad. */
+  insumoId?: string;
+  insumoCantidad?: number;
   createdAt: string;
 };
 
-/** Tipo de ítem del POS respecto al módulo de inventario. */
-export type TipoItem = "insumo" | "servicio" | "consignacion" | "sin_clasificar";
+/** Tipo de ítem del POS respecto al módulo de inventario.
+ *  - insumo:          se vende vía receta (descuenta los insumos de la receta).
+ *  - insumo_directo:  se mapea directo a UN insumo (reventa: bebidas, aguas…);
+ *                     descuenta `cantidadPorUnidad` de ese insumo por unidad.
+ *  - servicio:        no descuenta stock (alquiler, descorche, evento…).
+ *  - consignacion:    producto de un tercero; no descuenta tu stock. */
+export type TipoItem =
+  | "insumo"
+  | "insumo_directo"
+  | "servicio"
+  | "consignacion"
+  | "sin_clasificar";
 
 /** Clasificación de un ítem del POS que NO es una receta (servicio,
  *  consignación, etc.), para que la importación sepa qué hacer con él. */
@@ -717,6 +731,11 @@ export type PosClasificacion = {
   tipo: TipoItem;
   /** Solo si tipo = 'insumo': receta a la que se vincula. */
   recetaId?: string;
+  /** Solo si tipo = 'insumo_directo': insumo al que se vincula. */
+  insumoId?: string;
+  /** Solo 'insumo_directo': cuánto se descuenta de ese insumo por unidad
+   *  vendida (en la unidad base del insumo). Default 1. */
+  cantidadPorUnidad?: number;
   /** Solo consignación: proveedor y % de acuerdo (para futura liquidación). */
   proveedorId?: string;
   porcentajeAcuerdo?: number;
