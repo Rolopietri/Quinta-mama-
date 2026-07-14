@@ -70,6 +70,7 @@ type FormState = {
   precioCompraUsd: string;
   stockTotal: string;
   stockMinimo: string;
+  mermaCoccionPorc: string;
   proveedorId: string;
   notas: string;
 };
@@ -84,6 +85,7 @@ const emptyForm: FormState = {
   precioCompraUsd: "",
   stockTotal: "0",
   stockMinimo: "",
+  mermaCoccionPorc: "",
   proveedorId: "",
   notas: "",
 };
@@ -147,6 +149,7 @@ export function InsumosClient() {
       precioCompraUsd: ins.precioCompraUsd?.toString() ?? "",
       stockTotal: String(ins.stockTotal),
       stockMinimo: ins.stockMinimo?.toString() ?? "",
+      mermaCoccionPorc: ins.mermaCoccionPorc?.toString() ?? "",
       proveedorId: ins.proveedorId ?? "",
       notas: ins.notas ?? "",
     });
@@ -175,6 +178,8 @@ export function InsumosClient() {
       // (planes de producción) y al editar pisaría las reservas a cero. En
       // creación se setea 0 explícitamente abajo.
       stockMinimo: form.stockMinimo === "" ? null : Number(form.stockMinimo),
+      mermaCoccionPorc:
+        form.mermaCoccionPorc === "" ? null : Number(form.mermaCoccionPorc),
       proveedorId: form.proveedorId || undefined,
       notas: form.notas.trim() || undefined,
       activo: true,
@@ -552,6 +557,25 @@ export function InsumosClient() {
                 }
                 className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2"
               />
+            </label>
+            <label className="text-sm text-cacao">
+              Merma por cocción (%)
+              <input
+                type="number"
+                step="1"
+                min="0"
+                max="99"
+                placeholder="Ej. 70 (opcional)"
+                value={form.mermaCoccionPorc}
+                onChange={(e) =>
+                  setForm({ ...form, mermaCoccionPorc: e.target.value })
+                }
+                className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2"
+              />
+              <span className="text-[10px] text-cacao-mute block mt-1">
+                % de peso que pierde al cocinarse. Permite registrar pérdidas
+                pesando el producto ya cocido (ej. tocineta ≈ 70%).
+              </span>
             </label>
           </div>
           <textarea

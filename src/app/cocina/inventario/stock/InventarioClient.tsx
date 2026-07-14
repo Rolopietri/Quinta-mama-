@@ -89,6 +89,10 @@ export function InventarioClient() {
   );
   const [perdidaMotivo, setPerdidaMotivo] = useState("");
   const [perdidaNota, setPerdidaNota] = useState("");
+  /** "Pesé el producto ya cocido": la cantidad ingresada es peso cocido y se
+   *  convierte a crudo con el % de merma antes de descontar del stock. */
+  const [perdidaCocido, setPerdidaCocido] = useState(false);
+  const [perdidaMermaPct, setPerdidaMermaPct] = useState("");
   const [registrando, setRegistrando] = useState(false);
 
   // Confirmación de borrado de movimiento del historial
@@ -313,6 +317,17 @@ export function InventarioClient() {
     }
   }
 
+  // Conversión cocido → crudo para la vista previa del modal de pérdida.
+  const conversionCocido = useMemo(() => {
+    if (!perdidaCocido) return null;
+    const cant = Number(perdidaCant);
+    const pct = Number(perdidaMermaPct);
+    if (!Number.isFinite(cant) || cant <= 0) return { error: true as const };
+    if (!Number.isFinite(pct) || pct < 0 || pct >= 100)
+      return { error: true as const };
+    return { error: false as const, crudo: cant / (1 - pct / 100) };
+  }, [perdidaCocido, perdidaCant, perdidaMermaPct]);
+
   // Costo estimado de la merma en edición (para mostrar en el modal)
   const mermaCostoPreview = useMemo(() => {
     const rec = recetas.find((r) => r.id === mermaRecetaId);
@@ -336,6 +351,12 @@ export function InventarioClient() {
     setPerdidaFecha(new Date().toISOString().slice(0, 10));
     setPerdidaMotivo("");
     setPerdidaNota("");
+    // Si el insumo tiene merma por cocción configurada, arrancamos el modo
+    // "pesé cocido" apagado pero con el % ya cargado para cuando lo active.
+    setPerdidaCocido(false);
+    setPerdidaMermaPct(
+      ins.mermaCoccionPorc != null ? String(ins.mermaCoccionPorc) : "",
+    );
   }
   function closePerdida() {
     setPerdidaInsumo(null);
@@ -349,16 +370,32 @@ export function InventarioClient() {
       setError("La cantidad debe ser mayor a 0.");
       return;
     }
+
+    // Cantidad a descontar del stock (siempre en crudo). Si se pesó cocido,
+    // convertimos: crudo = cocido / (1 - pct/100).
+    let cantidadCruda = cant;
+    let notaFinal = perdidaNota || undefined;
+    if (perdidaCocido) {
+      const pct = Number(perdidaMermaPct);
+      if (!Number.isFinite(pct) || pct < 0 || pct >= 100) {
+        setError("La merma por cocción debe estar entre 0 y 99%.");
+        return;
+      }
+      cantidadCruda = cant / (1 - pct / 100);
+      const nota = `Pesado cocido: ${cant} ${perdidaInsumo.unidadBase} · merma ${pct}% → ${cantidadCruda.toFixed(4)} ${perdidaInsumo.unidadBase} crudo`;
+      notaFinal = perdidaNota ? `${perdidaNota} — ${nota}` : nota;
+    }
+
     setRegistrando(true);
     setError(null);
     try {
       const res = await registrarPerdida({
         insumoId: perdidaInsumo.id,
-        cantidad: cant,
+        cantidad: cantidadCruda,
         tipo: perdidaTipo,
         motivo: perdidaMotivo || undefined,
         fecha: perdidaFecha,
-        nota: perdidaNota || undefined,
+        nota: notaFinal,
       });
       // Actualizar stock localmente — pérdida descuenta del stockTotal
       setInsumos((prev) =>
@@ -368,7 +405,9 @@ export function InventarioClient() {
       );
       setMovs((prev) => [res.movimiento, ...prev]);
       setInfo(
-        `Pérdida registrada: ${cant} ${perdidaInsumo.unidadBase} de ${perdidaInsumo.nombre}.`,
+        perdidaCocido
+          ? `Pérdida registrada: ${displayCantidad(cantidadCruda, perdidaInsumo.unidadBase)} crudo de ${perdidaInsumo.nombre} (pesado cocido).`
+          : `Pérdida registrada: ${cant} ${perdidaInsumo.unidadBase} de ${perdidaInsumo.nombre}.`,
       );
       closePerdida();
     } catch (e) {
@@ -1007,7 +1046,7 @@ export function InventarioClient() {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <label className="text-sm text-cacao">
-                Cantidad afectada
+                {perdidaCocido ? "Peso cocido" : "Cantidad afectada"}
                 <input
                   type="number"
                   step="any"
@@ -1020,7 +1059,9 @@ export function InventarioClient() {
                   className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2"
                 />
                 <span className="text-[10px] text-cacao-mute block mt-1">
-                  Se descuenta del stock.
+                  {perdidaCocido
+                    ? "Lo que pesaste ya cocido."
+                    : "Se descuenta del stock."}
                 </span>
               </label>
               <label className="text-sm text-cacao">
@@ -1040,6 +1081,62 @@ export function InventarioClient() {
                 </select>
               </label>
             </div>
+
+            {/* Pesé cocido → convertir a crudo */}
+            <div className="rounded-lg ring-1 ring-marfil p-3">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={perdidaCocido}
+                  onChange={(e) => setPerdidaCocido(e.target.checked)}
+                  className="h-4 w-4 accent-cacao"
+                />
+                <span className="text-sm text-cacao">
+                  Pesé el producto ya cocido (convertir a crudo)
+                </span>
+              </label>
+              {perdidaCocido && (
+                <div className="mt-3 space-y-2">
+                  <label className="text-sm text-cacao block">
+                    Merma por cocción (%)
+                    <input
+                      type="number"
+                      step="1"
+                      min="0"
+                      max="99"
+                      value={perdidaMermaPct}
+                      onChange={(e) => setPerdidaMermaPct(e.target.value)}
+                      placeholder="Ej. 70"
+                      className="mt-1 w-28 rounded-lg ring-1 ring-marfil px-3 py-2"
+                    />
+                    <span className="text-[10px] text-cacao-mute block mt-1">
+                      {perdidaInsumo.mermaCoccionPorc != null
+                        ? "Sugerido desde la ficha del insumo — editable."
+                        : "% de peso que pierde al cocinarse."}
+                    </span>
+                  </label>
+                  <div className="rounded-lg bg-marfil-soft p-2 text-sm">
+                    {conversionCocido === null ? null : conversionCocido.error ? (
+                      <span className="text-cacao-soft">
+                        Escribe el peso cocido y un % entre 0 y 99.
+                      </span>
+                    ) : (
+                      <span className="text-cacao">
+                        Se descontarán{" "}
+                        <strong>
+                          {displayCantidad(
+                            conversionCocido.crudo,
+                            perdidaInsumo.unidadBase,
+                          )}
+                        </strong>{" "}
+                        en crudo.
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
             <label className="text-sm text-cacao block">
               Fecha
               <input

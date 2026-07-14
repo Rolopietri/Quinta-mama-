@@ -381,6 +381,11 @@ export type Insumo = {
   /** Mínimo de stock libre antes de generar alerta y pedido sugerido.
    *  La spec lo llama "cantidad mínima de compra" del proveedor. */
   stockMinimo: number | null;
+  /** % de peso que pierde el insumo al cocinarse (0–99). Opcional. Sirve para
+   *  registrar pérdidas pesando el producto ya cocido: el sistema convierte
+   *  el peso cocido a su equivalente crudo (crudo = cocido / (1 - %/100))
+   *  antes de descontar del stock, que se lleva en crudo. */
+  mermaCoccionPorc?: number | null;
   proveedorId?: string;
   ultimaFecha?: string;
   ultimaCantidad?: number;

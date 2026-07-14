@@ -138,6 +138,7 @@ type InsumoRow = {
   stock_actual: number | string;
   stock_comprometido: number | string | null;
   stock_minimo: number | string | null;
+  merma_coccion_porc: number | string | null;
   proveedor_id: string | null;
   ultima_fecha: string | null;
   ultima_cantidad: number | string | null;
@@ -173,6 +174,10 @@ function rowToInsumo(r: InsumoRow): Insumo {
         ? 0
         : Number(r.stock_comprometido),
     stockMinimo: r.stock_minimo === null ? null : Number(r.stock_minimo),
+    mermaCoccionPorc:
+      r.merma_coccion_porc === null || r.merma_coccion_porc === undefined
+        ? null
+        : Number(r.merma_coccion_porc),
     proveedorId: r.proveedor_id ?? undefined,
     ultimaFecha: r.ultima_fecha ?? undefined,
     ultimaCantidad:
@@ -237,6 +242,7 @@ export async function createInsumo(input: InsumoInput): Promise<Insumo> {
       stock_actual: input.stockTotal,
       stock_comprometido: input.stockComprometido ?? 0,
       stock_minimo: input.stockMinimo,
+      merma_coccion_porc: input.mermaCoccionPorc ?? null,
       proveedor_id: input.proveedorId ?? null,
       notas: input.notas ?? null,
       activo: input.activo,
@@ -273,6 +279,8 @@ export async function updateInsumo(
   if (patch.stockComprometido !== undefined)
     db.stock_comprometido = patch.stockComprometido;
   if (patch.stockMinimo !== undefined) db.stock_minimo = patch.stockMinimo;
+  if (patch.mermaCoccionPorc !== undefined)
+    db.merma_coccion_porc = patch.mermaCoccionPorc ?? null;
   if (patch.proveedorId !== undefined)
     db.proveedor_id = patch.proveedorId ?? null;
   if (patch.notas !== undefined) db.notas = patch.notas ?? null;
