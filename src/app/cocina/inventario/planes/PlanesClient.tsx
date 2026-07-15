@@ -5,7 +5,6 @@ import Link from "next/link";
 import {
   ESTADOS_PLAN_PRODUCCION,
   stockLibre,
-  type EstadoPlanProduccion,
   type Insumo,
   type PlanProduccion,
   type Receta,
@@ -48,6 +47,7 @@ export function PlanesClient() {
 
   // Vista de la lista: agrupada por receta (default) o lista cronológica
   const [vista, setVista] = useState<"receta" | "cronologico">("receta");
+  const [mostrarCerrados, setMostrarCerrados] = useState(false);
 
   async function reload() {
     const [r, i, p] = await Promise.all([
@@ -109,9 +109,30 @@ export function PlanesClient() {
   );
 
   // Vista cronológica: todos los planes, del más nuevo al más viejo.
-  const planesCronologico = useMemo(
-    () => [...planes].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+  // Un plan está ACTIVO si aún reserva stock: pendiente/completado y con
+  // raciones sin consumir. El resto (vendido, cancelado o agotado) va al
+  // historial de cerrados.
+  const esPlanActivo = (p: PlanProduccion) =>
+    (p.estado === "pendiente" || p.estado === "completado") &&
+    p.racionesConsumidas < p.raciones;
+
+  const planesActivos = useMemo(() => planes.filter(esPlanActivo), [planes]);
+  const planesCerrados = useMemo(
+    () =>
+      planes
+        .filter((p) => !esPlanActivo(p))
+        .sort((a, b) =>
+          (b.completadoAt ?? b.canceladoAt ?? b.createdAt).localeCompare(
+            a.completadoAt ?? a.canceladoAt ?? a.createdAt,
+          ),
+        ),
     [planes],
+  );
+
+  const planesCronologico = useMemo(
+    () =>
+      [...planesActivos].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+    [planesActivos],
   );
 
   // Vista por receta: planes agrupados por receta, ordenados alfabéticamente.
@@ -119,7 +140,7 @@ export function PlanesClient() {
   // `sinVender` = raciones aún comprometidas (pendiente/completado) de esa receta.
   const planesPorReceta = useMemo(() => {
     const map = new Map<string, PlanProduccion[]>();
-    planes.forEach((p) => {
+    planesActivos.forEach((p) => {
       if (!map.has(p.recetaId)) map.set(p.recetaId, []);
       map.get(p.recetaId)!.push(p);
     });
@@ -138,7 +159,7 @@ export function PlanesClient() {
           ),
       }))
       .sort((a, b) => a.recetaNombre.localeCompare(b.recetaNombre));
-  }, [planes]);
+  }, [planesActivos]);
 
   // Preview de ingredientes a comprometer al elegir receta + raciones
   const preview = useMemo(() => {
@@ -247,9 +268,12 @@ export function PlanesClient() {
       year: "numeric",
       timeZone: "America/Caracas",
     });
-    const perdidas = p.racionesPerdidas ?? 0;
-    const vendidas = Math.max(0, p.racionesConsumidas - perdidas);
-    const sinVender = Math.max(0, p.raciones - p.racionesConsumidas);
+    // Redondeo a 2 decimales para evitar artefactos de punto flotante
+    // (ej. 0.7699999999999996 → 0.77) en la vista.
+    const r2 = (n: number) => Number(n.toFixed(2));
+    const perdidas = r2(p.racionesPerdidas ?? 0);
+    const vendidas = r2(Math.max(0, p.racionesConsumidas - (p.racionesPerdidas ?? 0)));
+    const sinVender = r2(Math.max(0, p.raciones - p.racionesConsumidas));
     return (
       <div
         key={p.id}
@@ -570,10 +594,15 @@ export function PlanesClient() {
         </div>
       )}
 
-      {/* Lista de planes */}
+      {/* Lista de planes ACTIVOS */}
       {planes.length === 0 ? (
         <div className="rounded-2xl bg-white ring-1 ring-marfil p-8 text-center text-cacao-soft italic font-serif">
           No hay planes registrados todavía.
+        </div>
+      ) : planesActivos.length === 0 ? (
+        <div className="rounded-2xl bg-white ring-1 ring-marfil p-8 text-center text-cacao-soft italic font-serif">
+          No hay planes activos. Los planes cerrados están en el historial de
+          abajo.
         </div>
       ) : vista === "cronologico" ? (
         <div className="space-y-3">
@@ -604,6 +633,31 @@ export function PlanesClient() {
               </div>
             </section>
           ))}
+        </div>
+      )}
+
+      {/* Historial de planes CERRADOS (colapsable) */}
+      {planesCerrados.length > 0 && (
+        <div className="pt-2">
+          <button
+            type="button"
+            onClick={() => setMostrarCerrados((v) => !v)}
+            className="w-full flex items-center justify-between gap-2 rounded-xl bg-white ring-1 ring-marfil px-4 py-3 text-left hover:bg-marfil-soft transition-colors"
+          >
+            <span className="font-display text-xs tracking-[0.3em] uppercase text-cacao-soft">
+              Historial · {planesCerrados.length} plan
+              {planesCerrados.length === 1 ? "" : "es"} cerrado
+              {planesCerrados.length === 1 ? "" : "s"}
+            </span>
+            <span className="text-cacao-mute text-sm">
+              {mostrarCerrados ? "▲ ocultar" : "▼ ver"}
+            </span>
+          </button>
+          {mostrarCerrados && (
+            <div className="space-y-3 mt-3">
+              {planesCerrados.map((p) => renderPlanCard(p))}
+            </div>
+          )}
         </div>
       )}
 
