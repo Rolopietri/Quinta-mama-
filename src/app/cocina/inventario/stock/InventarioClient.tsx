@@ -239,6 +239,23 @@ export function InventarioClient() {
       : null;
   const rendUnidad = mermaReceta?.rendimientoUnidad || "g";
 
+  // Raciones que quedan reservadas en planes de producción activos de la
+  // receta elegida — para poder mermar "lo que quedó" sin ir a buscarlo.
+  const racionesEnPlanes = useMemo(() => {
+    if (!mermaRecetaId) return null;
+    const activos = planes.filter(
+      (p) =>
+        p.recetaId === mermaRecetaId &&
+        (p.estado === "pendiente" || p.estado === "completado") &&
+        p.racionesConsumidas < p.raciones,
+    );
+    const total = activos.reduce(
+      (acc, p) => acc + (p.raciones - p.racionesConsumidas),
+      0,
+    );
+    return { total, planes: activos.length };
+  }, [mermaRecetaId, planes]);
+
   // Raciones efectivas a registrar, según la unidad elegida. NaN si es inválido.
   const mermaRacionesCalc = useMemo(() => {
     if (mermaUnidad === "gramos") {
@@ -1257,6 +1274,34 @@ export function InventarioClient() {
                 ))}
               </select>
             </label>
+            {/* Nota: raciones que quedan reservadas en planes activos */}
+            {racionesEnPlanes && racionesEnPlanes.total > 0 && (
+              <div className="rounded-lg bg-[#F1F4ED] ring-1 ring-[#C9D6BC] p-2.5 text-sm text-[#2F4A1F] flex items-center justify-between gap-2 flex-wrap">
+                <span>
+                  Quedan{" "}
+                  <strong>
+                    {Number(racionesEnPlanes.total.toFixed(2))} raciones
+                  </strong>{" "}
+                  reservadas en{" "}
+                  {racionesEnPlanes.planes === 1
+                    ? "1 plan activo"
+                    : `${racionesEnPlanes.planes} planes activos`}
+                  .
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMermaUnidad("raciones");
+                    setMermaRaciones(
+                      String(Number(racionesEnPlanes.total.toFixed(2))),
+                    );
+                  }}
+                  className="rounded-lg ring-1 ring-[#C9D6BC] px-2.5 py-1 text-xs font-medium hover:bg-white"
+                >
+                  Usar todas
+                </button>
+              </div>
+            )}
             {/* Unidad de la merma: por raciones o por gramos */}
             <div className="flex gap-2 text-sm">
               <button
