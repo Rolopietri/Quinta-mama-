@@ -955,9 +955,12 @@ export const ESTADOS_PLAN_PRODUCCION: {
     color: "bg-emerald-50 text-emerald-800 ring-emerald-200",
   },
   {
+    // Estado interno 'vendido' = plan totalmente consumido. Puede haberse
+    // consumido por ventas, por merma, o mezcla — por eso el rótulo es
+    // "Cerrado" (no necesariamente se vendió todo).
     value: "vendido",
-    label: "Vendido",
-    color: "bg-sky-50 text-sky-800 ring-sky-200",
+    label: "Cerrado",
+    color: "bg-slate-100 text-slate-600 ring-slate-200",
   },
   {
     value: "cancelado",
