@@ -1346,8 +1346,8 @@ export function InventarioClient() {
                   Raciones perdidas
                   <input
                     type="number"
-                    min="1"
-                    step="1"
+                    min="0"
+                    step="any"
                     value={mermaRaciones}
                     onChange={(e) => setMermaRaciones(e.target.value)}
                     required
