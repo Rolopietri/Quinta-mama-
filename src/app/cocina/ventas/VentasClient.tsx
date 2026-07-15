@@ -25,8 +25,10 @@ import {
 } from "@/lib/data/ventas";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 
-function uid() {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+// ID de lote (batch) para agrupar las ventas de un mismo import. Debe ser un
+// UUID válido porque la columna ventas.batch_id es de tipo uuid.
+function nuevoBatchId() {
+  return crypto.randomUUID();
 }
 
 function todayISO() {
@@ -350,7 +352,7 @@ export function VentasClient() {
     setError(null);
     setImporting(true);
     try {
-      const batch = uid();
+      const batch = nuevoBatchId();
       // Se registran TODAS las filas. Los que no son insumo van sin receta
       // (receta_id null) → no descuentan stock, pero sí registran el ingreso.
       const ventasInput = clasif.map((c) => ({
