@@ -256,11 +256,7 @@ export function VentasClient() {
   }
 
   const norm = (s: string) =>
-    s
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[̀-ͯ]/g, "")
-      .replace(/[^a-z0-9]/g, "");
+    normalizarBusqueda(s).replace(/[^a-z0-9]/g, "");
 
   function abrirRecetaMap(nombre: string) {
     setRmBuscar("");
