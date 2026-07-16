@@ -19,6 +19,7 @@ import {
 } from "@/lib/data/recetas";
 import { listInsumos } from "@/lib/data/cocina";
 import { getCocinaConfig, updateCocinaConfig } from "@/lib/data/cocinaConfig";
+import { normalizarBusqueda } from "@/lib/text";
 import { extractError } from "@/lib/data/error";
 
 type OrdenarPor = "nombre" | "costo_desc" | "precio_desc";
@@ -91,7 +92,7 @@ export function CosteoClient() {
           receta.seccion !== "ambos"
         )
           return false;
-        if (q && !receta.nombre.toLowerCase().includes(q.toLowerCase()))
+        if (q && !normalizarBusqueda(receta.nombre).includes(normalizarBusqueda(q)))
           return false;
         return true;
       })

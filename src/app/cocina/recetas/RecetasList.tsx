@@ -15,6 +15,7 @@ import {
 import { listRecetas, calcularCostoReceta } from "@/lib/data/recetas";
 import { listInsumos } from "@/lib/data/cocina";
 import { getCocinaConfig } from "@/lib/data/cocinaConfig";
+import { normalizarBusqueda } from "@/lib/text";
 
 export function RecetasList() {
   const searchParams = useSearchParams();
@@ -88,7 +89,7 @@ export function RecetasList() {
   }, [loading, items.length, highlightId]);
 
   const filtered = useMemo(() => {
-    const qq = q.trim().toLowerCase();
+    const qq = normalizarBusqueda(q.trim());
     return items.filter((r) => {
       if (
         filterSec !== "todas" &&
@@ -104,7 +105,9 @@ export function RecetasList() {
         if (r.categoria !== filterCat) return false;
       }
       if (qq) {
-        const txt = `${r.nombre} ${r.perfil ?? ""} ${r.ingredientes.map((i) => i.nombre).join(" ")}`.toLowerCase();
+        const txt = normalizarBusqueda(
+          `${r.nombre} ${r.perfil ?? ""} ${r.ingredientes.map((i) => i.nombre).join(" ")}`,
+        );
         if (!txt.includes(qq)) return false;
       }
       return true;

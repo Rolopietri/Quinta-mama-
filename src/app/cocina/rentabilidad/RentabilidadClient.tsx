@@ -14,6 +14,7 @@ import {
 import { listRecetas, calcularCostoReceta } from "@/lib/data/recetas";
 import { listInsumos } from "@/lib/data/cocina";
 import { getCocinaConfig, updateCocinaConfig } from "@/lib/data/cocinaConfig";
+import { normalizarBusqueda } from "@/lib/text";
 import {
   listConfigHistorial,
   CAMPO_LABELS,
@@ -109,7 +110,7 @@ export function RentabilidadClient() {
         )
           return false;
         if (filterSem !== "todos" && rent.semaforo !== filterSem) return false;
-        if (q && !receta.nombre.toLowerCase().includes(q.toLowerCase()))
+        if (q && !normalizarBusqueda(receta.nombre).includes(normalizarBusqueda(q)))
           return false;
         return true;
       })

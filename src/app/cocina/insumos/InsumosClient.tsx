@@ -25,6 +25,7 @@ import {
   displayCantidad,
 } from "@/lib/units";
 import { stockLibre } from "@/lib/types";
+import { normalizarBusqueda } from "@/lib/text";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 
 /**
@@ -230,14 +231,14 @@ export function InsumosClient() {
   }
 
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
+    const q = normalizarBusqueda(search.trim());
     return items.filter(
       (i) =>
         (filterCat === "todas" || i.categoria === filterCat) &&
         (filterSec === "todas" ||
           i.seccion === filterSec ||
           i.seccion === "ambos") &&
-        (q === "" || i.nombre.toLowerCase().includes(q)),
+        (q === "" || normalizarBusqueda(i.nombre).includes(q)),
     );
   }, [items, filterCat, filterSec, search]);
 

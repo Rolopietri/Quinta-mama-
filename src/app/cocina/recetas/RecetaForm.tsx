@@ -18,6 +18,7 @@ import { createReceta, updateReceta, listRecetas } from "@/lib/data/recetas";
 import { listInsumos } from "@/lib/data/cocina";
 import { getCocinaConfig } from "@/lib/data/cocinaConfig";
 import { extractError } from "@/lib/data/error";
+import { normalizarBusqueda } from "@/lib/text";
 import { UnitCalculator } from "@/components/UnitCalculator";
 import { UnidadInput } from "@/components/UnidadInput";
 import {
@@ -163,13 +164,8 @@ export function RecetaForm({
   const insumosPorCategoria = useMemo(() => {
     // Quick search: match por nombre del insumo o por label de su categoría.
     // Normalizamos (lowercase + sin acentos) para que "cafe" matchee "Café".
-    const q = insumoSearch
-      .trim()
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[̀-ͯ]/g, "");
-    const normalize = (s: string) =>
-      s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+    const q = normalizarBusqueda(insumoSearch.trim());
+    const normalize = normalizarBusqueda;
 
     const map = new Map<string, Insumo[]>();
     for (const ins of insumos) {

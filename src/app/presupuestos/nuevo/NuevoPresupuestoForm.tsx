@@ -14,6 +14,7 @@ import {
   type OrigenCatalogo,
 } from "@/lib/data/catalogo-unificado";
 import { createPresupuesto } from "@/lib/data/presupuestos";
+import { normalizarBusqueda } from "@/lib/text";
 
 type Linea = {
   key: string; // local id
@@ -171,7 +172,7 @@ export function NuevoPresupuestoForm() {
   // ── Catálogo filtrado y agrupado por origen → grupo
   // Cada "grupo" se muestra como un subheader con sus opciones debajo.
   const seccionesFiltradas = useMemo(() => {
-    const q = search.trim().toLowerCase();
+    const q = normalizarBusqueda(search.trim());
     const allEntries: CatalogoEntry[] = [
       ...catalogo.servicios,
       ...catalogo.inventario,
@@ -182,9 +183,9 @@ export function NuevoPresupuestoForm() {
       if (filterOrigen !== "todos" && e.origen !== filterOrigen) return false;
       if (q) {
         const hay =
-          e.nombre.toLowerCase().includes(q) ||
-          e.categoria.toLowerCase().includes(q) ||
-          (e.descripcion ?? "").toLowerCase().includes(q);
+          normalizarBusqueda(e.nombre).includes(q) ||
+          normalizarBusqueda(e.categoria).includes(q) ||
+          normalizarBusqueda(e.descripcion ?? "").includes(q);
         if (!hay) return false;
       }
       return true;

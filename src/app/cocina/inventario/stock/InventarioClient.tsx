@@ -28,6 +28,7 @@ import {
   recalcularStockComprometido,
 } from "@/lib/data/planes-produccion";
 import type { PlanProduccion } from "@/lib/types";
+import { normalizarBusqueda } from "@/lib/text";
 import { extractError } from "@/lib/data/error";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { displayCantidad } from "@/lib/units";
@@ -455,12 +456,12 @@ export function InventarioClient() {
   }
 
   const insumosFiltrados = useMemo(() => {
-    const q = search.trim().toLowerCase();
+    const q = normalizarBusqueda(search.trim());
     return insumos
       .filter((i) => i.activo)
       .filter((i) => filterSec === "todas" || i.seccion === filterSec || i.seccion === "ambos")
       .filter((i) => filterCat === "todas" || i.categoria === filterCat)
-      .filter((i) => (q ? i.nombre.toLowerCase().includes(q) : true))
+      .filter((i) => (q ? normalizarBusqueda(i.nombre).includes(q) : true))
       .sort((a, b) => a.nombre.localeCompare(b.nombre));
   }, [insumos, filterSec, filterCat, search]);
 

@@ -10,6 +10,7 @@ import {
 import { extractError } from "@/lib/data/error";
 import { displayCantidad } from "@/lib/units";
 import type { Insumo } from "@/lib/types";
+import { normalizarBusqueda } from "@/lib/text";
 
 type FiltroOrigen = "todos" | OrigenAuditoria;
 
@@ -131,7 +132,7 @@ export function AuditoriaClient() {
   );
 
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
+    const q = normalizarBusqueda(search.trim());
     return entries.filter((e) => {
       if (filterInsumo !== "todos" && e.insumoId !== filterInsumo) return false;
       if (filterOrigen !== "todos" && e.origen !== filterOrigen) return false;
@@ -141,7 +142,7 @@ export function AuditoriaClient() {
           e.stockAnterior === null;
         if (!cambioFisico) return false;
       }
-      if (q && !e.insumoNombre.toLowerCase().includes(q)) return false;
+      if (q && !normalizarBusqueda(e.insumoNombre).includes(q)) return false;
       return true;
     });
   }, [entries, filterInsumo, filterOrigen, soloFisico, search]);

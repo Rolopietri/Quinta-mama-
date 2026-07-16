@@ -24,6 +24,7 @@ import {
   type ClasificItem,
 } from "@/lib/data/ventas";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { normalizarBusqueda } from "@/lib/text";
 
 // ID de lote (batch) para agrupar las ventas de un mismo import. Debe ser un
 // UUID válido porque la columna ventas.batch_id es de tipo uuid.
@@ -1056,9 +1057,9 @@ export function VentasClient() {
                   (i) =>
                     i.activo &&
                     (idBuscar.trim() === "" ||
-                      i.nombre
-                        .toLowerCase()
-                        .includes(idBuscar.toLowerCase())),
+                      normalizarBusqueda(i.nombre).includes(
+                        normalizarBusqueda(idBuscar),
+                      )),
                 )
                 .slice(0, 60)
                 .map((i) => (
@@ -1183,7 +1184,9 @@ export function VentasClient() {
                 .filter(
                   (r) =>
                     rmBuscar.trim() === "" ||
-                    r.nombre.toLowerCase().includes(rmBuscar.toLowerCase()),
+                    normalizarBusqueda(r.nombre).includes(
+                      normalizarBusqueda(rmBuscar),
+                    ),
                 )
                 .slice(0, 60)
                 .map((r) => (

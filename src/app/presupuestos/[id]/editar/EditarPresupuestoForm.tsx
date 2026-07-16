@@ -19,6 +19,7 @@ import {
   updatePresupuestoCompleto,
 } from "@/lib/data/presupuestos";
 import { extractError } from "@/lib/data/error";
+import { normalizarBusqueda } from "@/lib/text";
 
 type Linea = {
   key: string;
@@ -207,7 +208,7 @@ export function EditarPresupuestoForm({ id }: { id: string }) {
   const total = Math.max(0, subtotal - descNum);
 
   const seccionesFiltradas = useMemo(() => {
-    const q = search.trim().toLowerCase();
+    const q = normalizarBusqueda(search.trim());
     const allEntries: CatalogoEntry[] = [
       ...catalogo.servicios,
       ...catalogo.inventario,
@@ -218,9 +219,9 @@ export function EditarPresupuestoForm({ id }: { id: string }) {
       if (filterOrigen !== "todos" && e.origen !== filterOrigen) return false;
       if (q) {
         const hay =
-          e.nombre.toLowerCase().includes(q) ||
-          e.categoria.toLowerCase().includes(q) ||
-          (e.descripcion ?? "").toLowerCase().includes(q);
+          normalizarBusqueda(e.nombre).includes(q) ||
+          normalizarBusqueda(e.categoria).includes(q) ||
+          normalizarBusqueda(e.descripcion ?? "").includes(q);
         if (!hay) return false;
       }
       return true;

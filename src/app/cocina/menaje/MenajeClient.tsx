@@ -20,6 +20,7 @@ import {
   deleteMovimientoMenaje,
 } from "@/lib/data/menaje";
 import { extractError } from "@/lib/data/error";
+import { normalizarBusqueda } from "@/lib/text";
 
 type TipoBaja = (typeof TIPOS_BAJA_MENAJE)[number]["value"];
 
@@ -163,11 +164,11 @@ export function MenajeClient() {
   }, [items]);
 
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
+    const q = normalizarBusqueda(search.trim());
     return items
       .filter((i) => i.activo)
       .filter((i) => filterCat === "todas" || i.categoria === filterCat)
-      .filter((i) => (q ? i.nombre.toLowerCase().includes(q) : true))
+      .filter((i) => (q ? normalizarBusqueda(i.nombre).includes(q) : true))
       .sort((a, b) => a.nombre.localeCompare(b.nombre));
   }, [items, search, filterCat]);
 
@@ -540,8 +541,8 @@ export function MenajeClient() {
       it.activo &&
       (listaCat === "todas" || it.categoria === listaCat) &&
       (listaBuscar.trim() === "" ||
-        it.nombre.toLowerCase().includes(listaBuscar.toLowerCase()) ||
-        it.categoria.toLowerCase().includes(listaBuscar.toLowerCase())),
+        normalizarBusqueda(it.nombre).includes(normalizarBusqueda(listaBuscar)) ||
+        normalizarBusqueda(it.categoria).includes(normalizarBusqueda(listaBuscar))),
   );
   const listaSelCount = items.filter(
     (it) => (Number(listaSel[it.id]?.cantidad) || 0) > 0,
