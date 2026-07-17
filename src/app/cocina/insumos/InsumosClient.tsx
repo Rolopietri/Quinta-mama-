@@ -563,9 +563,20 @@ export function InsumosClient() {
             </label>
             <label className="text-sm text-cacao">
               Stock total (físico)
+              <input
+                type="number"
+                step="0.0001"
+                min="0"
+                value={form.stockTotal}
+                onChange={(e) =>
+                  setForm({ ...form, stockTotal: e.target.value })
+                }
+                className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2"
+              />
               {/* Selector de unidad para cargar el stock: base o unidad de
-                  compra (ej. botellas). Solo aparece cuando hay conversión
-                  (cantidad por compra distinta de 1). */}
+                  compra (ej. botellas). Va DEBAJO del input para no desalinear
+                  el campo respecto a los demás de la fila. Solo aparece cuando
+                  hay conversión (cantidad por compra distinta de 1). */}
               {Number(form.cantidadPorCompra) > 0 &&
                 Number(form.cantidadPorCompra) !== 1 && (
                   <div className="mt-1 flex flex-wrap items-center gap-1 text-[11px]">
@@ -594,16 +605,6 @@ export function InsumosClient() {
                     </button>
                   </div>
                 )}
-              <input
-                type="number"
-                step="0.0001"
-                min="0"
-                value={form.stockTotal}
-                onChange={(e) =>
-                  setForm({ ...form, stockTotal: e.target.value })
-                }
-                className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2"
-              />
               <span className="text-[10px] text-cacao-mute block mt-1">
                 {form.stockUnidad === "compra" &&
                 Number(form.cantidadPorCompra) !== 1 ? (
