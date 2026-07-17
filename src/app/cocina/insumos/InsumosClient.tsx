@@ -165,10 +165,20 @@ export function InsumosClient() {
   function cambiarUnidadStock(modo: "base" | "compra") {
     if (modo === form.stockUnidad) return;
     const cantPC = Number(form.cantidadPorCompra) || 1;
-    const val = Number(form.stockTotal) || 0;
-    const convertido = modo === "compra" ? val / cantPC : val * cantPC;
-    const limpio = Math.round(convertido * 10000) / 10000;
-    setForm({ ...form, stockUnidad: modo, stockTotal: String(limpio) });
+    // Convierte un valor entre unidad base y unidad de compra. Mantiene el
+    // vacío como vacío (el mínimo es opcional). Aplica a stock total y mínimo.
+    const conv = (s: string) => {
+      if (s.trim() === "") return s;
+      const v = Number(s) || 0;
+      const c = modo === "compra" ? v / cantPC : v * cantPC;
+      return String(Math.round(c * 10000) / 10000);
+    };
+    setForm({
+      ...form,
+      stockUnidad: modo,
+      stockTotal: conv(form.stockTotal),
+      stockMinimo: conv(form.stockMinimo),
+    });
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -196,7 +206,11 @@ export function InsumosClient() {
       // OJO: NO incluir stockComprometido acá. Es manejado por el sistema
       // (planes de producción) y al editar pisaría las reservas a cero. En
       // creación se setea 0 explícitamente abajo.
-      stockMinimo: form.stockMinimo === "" ? null : Number(form.stockMinimo),
+      stockMinimo:
+        form.stockMinimo === ""
+          ? null
+          : Number(form.stockMinimo) *
+            (form.stockUnidad === "compra" ? cantPC : 1),
       mermaCoccionPorc:
         form.mermaCoccionPorc === "" ? null : Number(form.mermaCoccionPorc),
       proveedorId: form.proveedorId || undefined,
@@ -554,7 +568,8 @@ export function InsumosClient() {
                   (cantidad por compra distinta de 1). */}
               {Number(form.cantidadPorCompra) > 0 &&
                 Number(form.cantidadPorCompra) !== 1 && (
-                  <div className="mt-1 flex flex-wrap gap-1 text-[11px]">
+                  <div className="mt-1 flex flex-wrap items-center gap-1 text-[11px]">
+                    <span className="text-cacao-mute">Contar en:</span>
                     <button
                       type="button"
                       onClick={() => cambiarUnidadStock("base")}
@@ -624,6 +639,21 @@ export function InsumosClient() {
                 }
                 className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2"
               />
+              {form.stockUnidad === "compra" &&
+                Number(form.cantidadPorCompra) !== 1 &&
+                form.stockMinimo.trim() !== "" && (
+                  <span className="text-[10px] text-cacao-mute block mt-1">
+                    En <b>{form.unidadCompra || "empaque"}</b> → alerta en{" "}
+                    <b>
+                      {formatN(
+                        (Number(form.stockMinimo) || 0) *
+                          (Number(form.cantidadPorCompra) || 1),
+                      )}{" "}
+                      {form.unidadBase}
+                    </b>
+                    .
+                  </span>
+                )}
             </label>
             <label className="text-sm text-cacao">
               Merma por cocción (%)
