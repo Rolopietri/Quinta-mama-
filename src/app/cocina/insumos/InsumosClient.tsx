@@ -70,6 +70,7 @@ type FormState = {
   unidadBase: string;
   precioCompraUsd: string;
   stockTotal: string;
+  stockUnidad: "base" | "compra";
   stockMinimo: string;
   mermaCoccionPorc: string;
   proveedorId: string;
@@ -85,6 +86,7 @@ const emptyForm: FormState = {
   unidadBase: "",
   precioCompraUsd: "",
   stockTotal: "0",
+  stockUnidad: "base",
   stockMinimo: "",
   mermaCoccionPorc: "",
   proveedorId: "",
@@ -149,12 +151,24 @@ export function InsumosClient() {
       unidadBase: ins.unidadBase,
       precioCompraUsd: ins.precioCompraUsd?.toString() ?? "",
       stockTotal: String(ins.stockTotal),
+      stockUnidad: "base",
       stockMinimo: ins.stockMinimo?.toString() ?? "",
       mermaCoccionPorc: ins.mermaCoccionPorc?.toString() ?? "",
       proveedorId: ins.proveedorId ?? "",
       notas: ins.notas ?? "",
     });
     setAdding(true);
+  }
+
+  // Cambia la unidad en que se carga el stock (base ↔ unidad de compra),
+  // convirtiendo el valor actual para que la cantidad física no cambie.
+  function cambiarUnidadStock(modo: "base" | "compra") {
+    if (modo === form.stockUnidad) return;
+    const cantPC = Number(form.cantidadPorCompra) || 1;
+    const val = Number(form.stockTotal) || 0;
+    const convertido = modo === "compra" ? val / cantPC : val * cantPC;
+    const limpio = Math.round(convertido * 10000) / 10000;
+    setForm({ ...form, stockUnidad: modo, stockTotal: String(limpio) });
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -174,7 +188,11 @@ export function InsumosClient() {
       unidadBase: form.unidadBase.trim() || "unidad",
       precioCompraUsd: precioC,
       precioBaseUsd: precioB,
-      stockTotal: Number(form.stockTotal) || 0,
+      // Si cargó el stock en unidad de compra (ej. botellas), convertir a
+      // unidad base multiplicando por cuántas unidades base trae el empaque.
+      stockTotal:
+        (Number(form.stockTotal) || 0) *
+        (form.stockUnidad === "compra" ? cantPC : 1),
       // OJO: NO incluir stockComprometido acá. Es manejado por el sistema
       // (planes de producción) y al editar pisaría las reservas a cero. En
       // creación se setea 0 explícitamente abajo.
@@ -530,7 +548,37 @@ export function InsumosClient() {
               />
             </label>
             <label className="text-sm text-cacao">
-              Stock total (físico, en unidad base)
+              Stock total (físico)
+              {/* Selector de unidad para cargar el stock: base o unidad de
+                  compra (ej. botellas). Solo aparece cuando hay conversión
+                  (cantidad por compra distinta de 1). */}
+              {Number(form.cantidadPorCompra) > 0 &&
+                Number(form.cantidadPorCompra) !== 1 && (
+                  <div className="mt-1 flex flex-wrap gap-1 text-[11px]">
+                    <button
+                      type="button"
+                      onClick={() => cambiarUnidadStock("base")}
+                      className={`px-2 py-0.5 rounded-full ring-1 ${
+                        form.stockUnidad === "base"
+                          ? "bg-cacao text-white ring-cacao"
+                          : "ring-marfil text-cacao-soft"
+                      }`}
+                    >
+                      {form.unidadBase || "u. base"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => cambiarUnidadStock("compra")}
+                      className={`px-2 py-0.5 rounded-full ring-1 ${
+                        form.stockUnidad === "compra"
+                          ? "bg-cacao text-white ring-cacao"
+                          : "ring-marfil text-cacao-soft"
+                      }`}
+                    >
+                      {form.unidadCompra || "empaque"}
+                    </button>
+                  </div>
+                )}
               <input
                 type="number"
                 step="0.0001"
@@ -542,8 +590,26 @@ export function InsumosClient() {
                 className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2"
               />
               <span className="text-[10px] text-cacao-mute block mt-1">
-                Lo que hay físicamente. El stock libre (= total − comprometido)
-                aparece en el listado.
+                {form.stockUnidad === "compra" &&
+                Number(form.cantidadPorCompra) !== 1 ? (
+                  <>
+                    Contando en <b>{form.unidadCompra || "empaque"}</b> → se
+                    guardan{" "}
+                    <b>
+                      {formatN(
+                        (Number(form.stockTotal) || 0) *
+                          (Number(form.cantidadPorCompra) || 1),
+                      )}{" "}
+                      {form.unidadBase}
+                    </b>
+                    .
+                  </>
+                ) : (
+                  <>
+                    Lo que hay físicamente. El stock libre (= total −
+                    comprometido) aparece en el listado.
+                  </>
+                )}
               </span>
             </label>
             <label className="text-sm text-cacao">
