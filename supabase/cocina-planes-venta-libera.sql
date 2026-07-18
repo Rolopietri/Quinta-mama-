@@ -237,9 +237,17 @@ begin
     from public.cocina_planes_produccion where id = p_plan_id;
   if v_estado is null then return; end if;
 
-  -- Liberar el compromiso vivo (fracción no vendida). 'vendido' y 'cancelado'
-  -- ya no tienen compromiso, así que la fracción da 0.
-  if v_estado in ('pendiente', 'completado') then
+  -- Un plan COMPLETADO no se puede borrar: el producto ya está hecho y sus
+  -- insumos no vuelven a su estado original (aderezo, pesto, falafel…). Solo
+  -- puede venderse o registrarse como pérdida. Borrarlo liberaría comprometido
+  -- y dejaría el crudo "devuelto" como libre → inflaría el inventario.
+  if v_estado = 'completado' then
+    raise exception 'No se puede borrar un plan completado: solo se vende o se registra como pérdida.';
+  end if;
+
+  -- Liberar el compromiso vivo (fracción no vendida) al borrar un pendiente.
+  -- 'vendido' y 'cancelado' ya no tienen compromiso, así que la fracción da 0.
+  if v_estado = 'pendiente' then
     v_frac := case when v_raciones > 0
                    then (v_raciones - v_consumidas) / v_raciones
                    else 0 end;

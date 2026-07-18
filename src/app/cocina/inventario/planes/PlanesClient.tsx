@@ -362,13 +362,17 @@ export function PlanesClient() {
                 </button>
               </>
             )}
-            <button
-              type="button"
-              onClick={() => setConfirmAction({ type: "borrar", plan: p })}
-              className="text-[10px] uppercase tracking-widest px-3 py-1 rounded-full text-cacao-soft hover:text-terracotta"
-            >
-              Borrar
-            </button>
+            {/* Un plan completado no se puede borrar: solo se vende o se
+                pierde. Sus insumos ya son producto y no vuelven a crudo. */}
+            {p.estado !== "completado" && (
+              <button
+                type="button"
+                onClick={() => setConfirmAction({ type: "borrar", plan: p })}
+                className="text-[10px] uppercase tracking-widest px-3 py-1 rounded-full text-cacao-soft hover:text-terracotta"
+              >
+                Borrar
+              </button>
+            )}
           </div>
         </header>
 
