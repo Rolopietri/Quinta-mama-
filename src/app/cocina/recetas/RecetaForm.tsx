@@ -208,7 +208,10 @@ export function RecetaForm({
         subrecetaId: sub.id,
         nombre: sub.nombre,
         cantidad: "1",
-        unidad: "", // El usuario elige la unidad explícitamente del datalist
+        // Arranca con la unidad de rendimiento de la subreceta (ej: "g" de pesto).
+        // Es la unidad natural de la subreceta, así el cálculo cuadra por defecto.
+        // El usuario puede cambiarla con un toque en los chips (kg, ml...).
+        unidad: sub.rendimientoUnidad ?? "",
         observaciones: "",
         costoManual: "",
       },
@@ -225,10 +228,13 @@ export function RecetaForm({
         insumoId: insumo.id,
         nombre: insumo.nombre,
         cantidad: "1",
-        // La unidad queda en blanco: el usuario la elige explícitamente del
-        // datalist (kg, g, ml, L, unidad...). Así evitamos el bug donde el
-        // sistema asume una unidad y el costo sale mal por la conversión.
-        unidad: "",
+        // Arranca con la unidad BASE del propio insumo (ej: "g", "ml", "unidad").
+        // Es seguro por construcción: al ser la unidad propia del insumo, la
+        // conversión es factor 1 y nunca se descuadra. Si el usuario quiere otra
+        // (kg, L...), la cambia con un toque en los chips y el sistema convierte.
+        // Antes quedaba en blanco y, sin unidad, el costo/consumo asumía la base
+        // en silencio → error de 1000× (2 "kg" tratados como 2 g).
+        unidad: insumo.unidadBase,
         observaciones: "",
         costoManual: "",
       },
@@ -391,6 +397,21 @@ export function RecetaForm({
         );
         return;
       }
+    }
+    // Red de seguridad: ninguna línea con cantidad puede quedar sin unidad.
+    // Sin unidad el costo/consumo asume la unidad base en silencio y puede dar
+    // un error de 1000× (ej: 2 "kg" tratados como 2 g). Mejor frenar y avisar.
+    const sinUnidad = lineas.find(
+      (l) =>
+        l.nombre.trim().length > 0 &&
+        (Number(l.cantidad) || 0) > 0 &&
+        !l.unidad.trim(),
+    );
+    if (sinUnidad) {
+      setError(
+        `Falta la unidad en "${sinUnidad.nombre.trim()}". Toca un chip (g, kg, ml, unidad...) o escríbela antes de guardar.`,
+      );
+      return;
     }
     setError(null);
     setSaving(true);
@@ -994,18 +1015,17 @@ export function RecetaForm({
                       }
                       className="col-span-3 sm:col-span-2 rounded ring-1 ring-marfil px-2 py-1.5 text-sm"
                     />
-                    <input
-                      type="text"
-                      placeholder="Unidad"
-                      autoCapitalize="off"
-                      autoCorrect="off"
-                      spellCheck={false}
-                      value={l.unidad}
-                      onChange={(e) =>
-                        updateLine(l.key, { unidad: e.target.value })
-                      }
-                      className="col-span-3 sm:col-span-1 rounded ring-1 ring-marfil px-2 py-1.5 text-sm"
-                    />
+                    {/* Unidad: texto libre + chips de un toque (iPad-friendly).
+                        Reutiliza UnidadInput para que cambiar g↔kg↔ml sea un
+                        toque, sin abrir teclado. */}
+                    <div className="col-span-3 sm:col-span-2">
+                      <UnidadInput
+                        placeholder="Unidad"
+                        value={l.unidad}
+                        onChange={(v) => updateLine(l.key, { unidad: v })}
+                        className="w-full rounded ring-1 ring-marfil px-2 py-1.5 text-sm"
+                      />
+                    </div>
                     {/* Precio: editable solo si ad-hoc; viene del catálogo o de la subreceta si aplica */}
                     <div className="col-span-6 sm:col-span-3">
                       {l.insumoId ? (
@@ -1048,7 +1068,7 @@ export function RecetaForm({
                       onChange={(e) =>
                         updateLine(l.key, { observaciones: e.target.value })
                       }
-                      className="col-span-12 sm:col-span-4 rounded ring-1 ring-marfil px-2 py-1.5 text-sm"
+                      className="col-span-12 sm:col-span-3 rounded ring-1 ring-marfil px-2 py-1.5 text-sm"
                     />
                     <div className="col-span-12 sm:col-span-2 text-right text-sm text-cacao font-medium">
                       {sub > 0 ? `$${sub.toFixed(3)}` : "—"}
