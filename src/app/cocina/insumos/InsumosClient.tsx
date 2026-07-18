@@ -17,7 +17,7 @@ import {
   listProveedores,
 } from "@/lib/data/cocina";
 import { UnitCalculator } from "@/components/UnitCalculator";
-import { UnidadInput } from "@/components/UnidadInput";
+import { UnidadSelect } from "@/components/UnidadSelect";
 import {
   convert,
   areCompatible,
@@ -477,7 +477,8 @@ export function InsumosClient() {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <label className="text-sm text-cacao">
               Unidad de compra (ej: kg, paq 12 unid)
-              <UnidadInput
+              <UnidadSelect
+                permitirOtra
                 value={form.unidadCompra}
                 onChange={(v) => {
                   // Si las unidades nuevas son convertibles y la cantidad actual
@@ -497,7 +498,7 @@ export function InsumosClient() {
                       : form.cantidadPorCompra,
                   });
                 }}
-                className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2"
+                className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2 bg-white"
               />
             </label>
             <label className="text-sm text-cacao">
@@ -515,7 +516,7 @@ export function InsumosClient() {
             </label>
             <label className="text-sm text-cacao">
               Unidad base (ej: g, ml, unidad)
-              <UnidadInput
+              <UnidadSelect
                 value={form.unidadBase}
                 onChange={(v) => {
                   const nuevoRatio = ratioEsperado(form.unidadCompra, v);
@@ -533,7 +534,7 @@ export function InsumosClient() {
                       : form.cantidadPorCompra,
                   });
                 }}
-                className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2"
+                className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2 bg-white"
               />
             </label>
           </div>

@@ -20,7 +20,6 @@ import { getCocinaConfig } from "@/lib/data/cocinaConfig";
 import { extractError } from "@/lib/data/error";
 import { normalizarBusqueda } from "@/lib/text";
 import { UnitCalculator } from "@/components/UnitCalculator";
-import { UnidadInput } from "@/components/UnidadInput";
 import { UnidadSelect } from "@/components/UnidadSelect";
 import {
   convertirParaCosto,
@@ -558,11 +557,10 @@ export function RecetaForm({
             </label>
             <label className="text-sm text-cacao">
               Unidad del rendimiento
-              <UnidadInput
-                placeholder="g, ml, unidad..."
+              <UnidadSelect
                 value={rendimientoUnidad}
                 onChange={(v) => setRendimientoUnidad(v)}
-                className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2"
+                className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2 bg-white"
               />
             </label>
             <p className="sm:col-span-2 text-xs text-cacao-soft italic font-serif">
