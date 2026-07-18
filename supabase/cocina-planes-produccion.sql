@@ -242,25 +242,10 @@ end;
 $$;
 
 -- ════════════════════════════════════════════════════════════════
--- 6. RPC: delete_plan_produccion
+-- 6. RPC: delete_plan_produccion  →  MOVIDA (A5, dedupe)
 -- ════════════════════════════════════════════════════════════════
--- Si está pendiente, cancela primero (libera compromisos). Después borra.
-create or replace function public.delete_plan_produccion(p_plan_id uuid)
-returns void
-language plpgsql
-security invoker
-as $$
-declare
-  v_estado text;
-begin
-  select estado into v_estado
-    from public.cocina_planes_produccion where id = p_plan_id;
-  if v_estado is null then return; end if;
-
-  if v_estado = 'pendiente' then
-    perform public.cancelar_plan_produccion(p_plan_id);
-  end if;
-
-  delete from public.cocina_planes_produccion where id = p_plan_id;
-end;
-$$;
+-- La definición canónica de delete_plan_produccion vive en
+-- cocina-planes-venta-libera.sql: libera la FRACCIÓN no vendida del comprometido
+-- (pendiente O completado) antes de borrar. La versión que estaba aquí solo
+-- liberaba si el plan estaba 'pendiente' — dejaba comprometido colgado al borrar
+-- un completado. Se eliminó para no pisar la buena.
