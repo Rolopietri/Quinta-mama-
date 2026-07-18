@@ -469,13 +469,25 @@ export function PlanesClient() {
                   Rinde {formReceta.porciones}{" "}
                   {formReceta.porciones === 1 ? "porción" : "porciones"} por receta
                   completa
-                  {Number(formRaciones) > 0
-                    ? ` · esta tanda ≈ ${Math.round(
-                        formReceta.porciones * Number(formRaciones) * 100,
-                      ) / 100} porciones`
-                    : ""}
                   {formReceta.rendimiento
-                    ? ` · ${formReceta.rendimiento} ${formReceta.rendimientoUnidad || "g"}/porción`
+                    ? ` (= ${formReceta.rendimiento} ${formReceta.rendimientoUnidad || "g"})`
+                    : ""}
+                  {Number(formRaciones) > 0 && formReceta.porciones > 0
+                    ? ` · esta tanda: ${Number(formRaciones)} ${
+                        Number(formRaciones) === 1 ? "ración" : "raciones"
+                      } ≈ ${
+                        Math.round(
+                          (Number(formRaciones) / formReceta.porciones) * 100,
+                        ) / 100
+                      } receta(s)`
+                    : ""}
+                  {Number(formRaciones) > 0 &&
+                  formReceta.porciones > 0 &&
+                  formReceta.rendimiento
+                    ? ` · ≈ ${Math.round(
+                        (Number(formRaciones) * formReceta.rendimiento) /
+                          formReceta.porciones,
+                      )} ${formReceta.rendimientoUnidad || "g"}`
                     : ""}
                 </span>
               )}
