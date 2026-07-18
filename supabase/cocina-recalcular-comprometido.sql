@@ -48,10 +48,11 @@ begin
        set stock_comprometido = coalesce(t.total_comprometido, 0)
       from totales t
      where i.id = t.insumo_id
-       -- Solo escribir si el valor realmente cambia (redondeo a 6 decimales
-       -- para no reescribir por diferencias mínimas de cálculo).
-       and round(coalesce(i.stock_comprometido, 0), 6)
-           is distinct from round(coalesce(t.total_comprometido, 0), 6)
+       -- Solo escribir si la diferencia es REAL. La columna guarda 4 decimales;
+       -- comparar decimal por decimal reescribía siempre los valores con
+       -- decimales de división (ej. guardado 42.8571 vs calculado 42.857142…).
+       -- Por eso comparamos por diferencia significativa, no exacta.
+       and abs(coalesce(i.stock_comprometido, 0) - coalesce(t.total_comprometido, 0)) > 0.00005
     returning i.id, 0::numeric as anterior, i.stock_comprometido as nuevo
   ),
   resets as (
