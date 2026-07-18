@@ -97,7 +97,8 @@ const emptyForm: FormState = {
 export function InsumosClient() {
   const [items, setItems] = useState<Insumo[]>([]);
   const [proveedores, setProveedores] = useState<Proveedor[]>([]);
-  // Todas las unidades que ya existen en el sistema, para el desplegable.
+  // Unidades que ya existen en el sistema, SEPARADAS: base va al desplegable de
+  // unidad base; compra va al de unidad de compra. No se mezclan.
   const unidadesSistema = useMemo(() => unidadesEnUso(items), [items]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -482,7 +483,7 @@ export function InsumosClient() {
               Unidad de compra (ej: kg, paq 12 unid)
               <UnidadSelect
                 permitirOtra
-                unidadesExtra={unidadesSistema}
+                unidadesExtra={unidadesSistema.compra}
                 value={form.unidadCompra}
                 onChange={(v) => {
                   // Si las unidades nuevas son convertibles y la cantidad actual
@@ -521,7 +522,7 @@ export function InsumosClient() {
             <label className="text-sm text-cacao">
               Unidad base (ej: g, ml, unidad)
               <UnidadSelect
-                unidadesExtra={unidadesSistema}
+                unidadesExtra={unidadesSistema.base}
                 value={form.unidadBase}
                 onChange={(v) => {
                   const nuevoRatio = ratioEsperado(form.unidadCompra, v);

@@ -231,10 +231,14 @@ export const UNIDADES_COMUNES = [
 ];
 
 /**
- * Junta todas las unidades DISTINTAS que ya aparecen en los datos (insumos y
- * recetas), unificando duplicados por mayúsculas/acentos. Sirve para poblar el
- * desplegable de unidades con TODO lo que se usa en el sistema (ej. "scoops"),
- * además de las estándar, y sin tener que mantener una lista a mano.
+ * Junta las unidades DISTINTAS que ya aparecen en los datos, SEPARADAS por tipo:
+ *   • `base`   → unidades base (de insumos, y de recetas: ingredientes y
+ *                rendimiento). Ej: g, ml, unidad, "scoops".
+ *   • `compra` → unidades de compra de insumos. Ej: kg, "botella", "paq 12".
+ *
+ * Se mantienen separadas a propósito: el desplegable de "unidad base" NO debe
+ * mostrar unidades de compra ni viceversa. Unifica duplicados por
+ * mayúsculas/acentos y no requiere mantener listas a mano.
  */
 export function unidadesEnUso(
   insumos: { unidadBase?: string | null; unidadCompra?: string | null }[] = [],
@@ -242,23 +246,26 @@ export function unidadesEnUso(
     rendimientoUnidad?: string | null;
     ingredientes?: { unidad?: string | null }[];
   }[] = [],
-): string[] {
-  const vistas = new Map<string, string>(); // clave normalizada → texto a mostrar
-  const add = (u?: string | null) => {
+): { base: string[]; compra: string[] } {
+  const base = new Map<string, string>(); // clave normalizada → texto a mostrar
+  const compra = new Map<string, string>();
+  const add = (map: Map<string, string>, u?: string | null) => {
     const t = (u ?? "").trim();
     if (!t) return;
     const clave = normalize(t);
-    if (!vistas.has(clave)) vistas.set(clave, t);
+    if (!map.has(clave)) map.set(clave, t);
   };
   for (const i of insumos) {
-    add(i.unidadBase);
-    add(i.unidadCompra);
+    add(base, i.unidadBase);
+    add(compra, i.unidadCompra);
   }
   for (const r of recetas) {
-    add(r.rendimientoUnidad);
-    if (r.ingredientes) for (const ing of r.ingredientes) add(ing.unidad);
+    add(base, r.rendimientoUnidad);
+    if (r.ingredientes) for (const ing of r.ingredientes) add(base, ing.unidad);
   }
-  return Array.from(vistas.values()).sort((a, b) =>
-    a.localeCompare(b, "es", { sensitivity: "base" }),
-  );
+  const ordenar = (m: Map<string, string>) =>
+    Array.from(m.values()).sort((a, b) =>
+      a.localeCompare(b, "es", { sensitivity: "base" }),
+    );
+  return { base: ordenar(base), compra: ordenar(compra) };
 }

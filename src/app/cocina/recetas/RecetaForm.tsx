@@ -161,10 +161,11 @@ export function RecetaForm({
     [insumos],
   );
 
-  // Todas las unidades que ya existen en el sistema (insumos + recetas), para
-  // ofrecerlas en el desplegable además de las estándar (ej. "scoops").
-  const unidadesSistema = useMemo(
-    () => unidadesEnUso(insumos, recetasContexto),
+  // Unidades base que ya existen en el sistema (insumos + recetas), para el
+  // desplegable, además de las estándar (ej. "scoops"). Las recetas se miden en
+  // unidad base, así que aquí NO van unidades de compra.
+  const unidadesBase = useMemo(
+    () => unidadesEnUso(insumos, recetasContexto).base,
     [insumos, recetasContexto],
   );
 
@@ -568,7 +569,7 @@ export function RecetaForm({
               <UnidadSelect
                 value={rendimientoUnidad}
                 onChange={(v) => setRendimientoUnidad(v)}
-                unidadesExtra={unidadesSistema}
+                unidadesExtra={unidadesBase}
                 className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2 bg-white"
               />
             </label>
@@ -1030,7 +1031,7 @@ export function RecetaForm({
                       <UnidadSelect
                         value={l.unidad}
                         onChange={(v) => updateLine(l.key, { unidad: v })}
-                        unidadesExtra={unidadesSistema}
+                        unidadesExtra={unidadesBase}
                         className="w-full rounded ring-1 ring-marfil px-2 py-1.5 text-sm bg-white"
                       />
                     </div>
