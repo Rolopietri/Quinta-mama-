@@ -21,6 +21,7 @@ import { extractError } from "@/lib/data/error";
 import { normalizarBusqueda } from "@/lib/text";
 import { UnitCalculator } from "@/components/UnitCalculator";
 import { UnidadInput } from "@/components/UnidadInput";
+import { UnidadSelect } from "@/components/UnidadSelect";
 import {
   convertirParaCosto,
   areCompatible,
@@ -1015,15 +1016,14 @@ export function RecetaForm({
                       }
                       className="col-span-3 sm:col-span-2 rounded ring-1 ring-marfil px-2 py-1.5 text-sm"
                     />
-                    {/* Unidad: texto libre + chips de un toque (iPad-friendly).
-                        Reutiliza UnidadInput para que cambiar g↔kg↔ml sea un
-                        toque, sin abrir teclado. */}
+                    {/* Unidad: desplegable nativo (limpio y de un toque en iPad).
+                        La unidad ya viene autocompletada con la base del insumo;
+                        esto solo sirve para cambiarla si hace falta. */}
                     <div className="col-span-3 sm:col-span-2">
-                      <UnidadInput
-                        placeholder="Unidad"
+                      <UnidadSelect
                         value={l.unidad}
                         onChange={(v) => updateLine(l.key, { unidad: v })}
-                        className="w-full rounded ring-1 ring-marfil px-2 py-1.5 text-sm"
+                        className="w-full rounded ring-1 ring-marfil px-2 py-1.5 text-sm bg-white"
                       />
                     </div>
                     {/* Precio: editable solo si ad-hoc; viene del catálogo o de la subreceta si aplica */}
