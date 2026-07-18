@@ -418,7 +418,7 @@ export function RecetaForm({
     );
     if (sinUnidad) {
       setError(
-        `Falta la unidad en "${sinUnidad.nombre.trim()}". Toca un chip (g, kg, ml, unidad...) o escríbela antes de guardar.`,
+        `Falta la unidad en "${sinUnidad.nombre.trim()}". Elígela en el desplegable (g, kg, ml, unidad...) antes de guardar.`,
       );
       return;
     }
