@@ -17,6 +17,9 @@ const norm = (s: string) => s.trim().toLowerCase();
  * - `unidadesExtra`: unidades que ya existen en los datos del sistema (ej.
  *   "scoops"). Se suman a las estándar, sin duplicar. Así el desplegable ofrece
  *   TODO lo que se usa, sin mantener una lista a mano.
+ * - `incluirEstandar` (default true): si es false, NO se muestran las 7 unidades
+ *   estándar; solo las de `unidadesExtra` (+ "Otra…"). Se usa en la "unidad de
+ *   compra", donde no queremos ofrecer unidades base de medida (g, mg, ml…).
  * - `permitirOtra`: agrega la opción "Otra…", que abre un campo de texto para
  *   escribir unidades libres (ej. "botella", "paq 12"). Se usa en la "unidad de
  *   compra" de insumos.
@@ -26,12 +29,14 @@ export function UnidadSelect({
   onChange,
   className,
   permitirOtra = false,
+  incluirEstandar = true,
   unidadesExtra,
 }: {
   value: string;
   onChange: (v: string) => void;
   className?: string;
   permitirOtra?: boolean;
+  incluirEstandar?: boolean;
   unidadesExtra?: string[];
 }) {
   const v = value?.trim() ?? "";
@@ -39,8 +44,10 @@ export function UnidadSelect({
   // aunque el valor esté momentáneamente vacío mientras escribe).
   const [otraElegida, setOtraElegida] = useState(false);
 
-  // Extras del sistema que no son estándar, deduplicadas por mayúsculas/acentos.
-  const estandarNorm = new Set(UNIDADES.map(norm));
+  // Lista base fija: las 7 estándar, salvo que se pida ocultarlas.
+  const estandar = incluirEstandar ? UNIDADES : [];
+  const estandarNorm = new Set(estandar.map(norm));
+  // Extras del sistema que no están ya en la lista base, deduplicadas.
   const extrasMap = new Map<string, string>();
   for (const u of unidadesExtra ?? []) {
     const t = (u ?? "").trim();
@@ -60,7 +67,7 @@ export function UnidadSelect({
   // Si el valor EXACTO no está entre las opciones (diferencia de mayúsculas, o
   // unidad custom sin permitirOtra), lo agregamos para que el select lo muestre
   // y no se pierda.
-  const opcionesExactas = new Set([...UNIDADES, ...extras]);
+  const opcionesExactas = new Set([...estandar, ...extras]);
   const valorSuelto =
     v !== "" && !enOtra && !opcionesExactas.has(value) ? value : null;
 
@@ -85,7 +92,7 @@ export function UnidadSelect({
           </option>
         )}
         {valorSuelto && <option value={valorSuelto}>{valorSuelto}</option>}
-        {UNIDADES.map((u) => (
+        {estandar.map((u) => (
           <option key={u} value={u}>
             {u}
           </option>

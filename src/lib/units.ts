@@ -252,8 +252,12 @@ export function unidadesEnUso(
   const add = (map: Map<string, string>, u?: string | null) => {
     const t = (u ?? "").trim();
     if (!t) return;
-    const clave = normalize(t);
-    if (!map.has(clave)) map.set(clave, t);
+    // Canonizar unidades conocidas ("unidades"→"unidad", "grs"→"g", "Kilos"→
+    // "kg") para no mostrar la misma unidad escrita de dos formas. Las custom
+    // (scoops, botella) quedan tal cual.
+    const c = canonica(t);
+    const clave = normalize(c);
+    if (!map.has(clave)) map.set(clave, c);
   };
   for (const i of insumos) {
     add(base, i.unidadBase);

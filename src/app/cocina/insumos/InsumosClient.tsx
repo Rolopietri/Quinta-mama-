@@ -483,6 +483,7 @@ export function InsumosClient() {
               Unidad de compra (ej: kg, paq 12 unid)
               <UnidadSelect
                 permitirOtra
+                incluirEstandar={false}
                 unidadesExtra={unidadesSistema.compra}
                 value={form.unidadCompra}
                 onChange={(v) => {
