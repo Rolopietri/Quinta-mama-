@@ -2,9 +2,10 @@
 
 import { useState } from "react";
 
-// Orden solicitado por el equipo (el valor guardado es el de acá).
+// Unidades estándar, en el orden solicitado por el equipo.
 const UNIDADES = ["kg", "g", "mg", "L", "ml", "unidad", "porción"];
 const OTRA = "__otra__";
+const norm = (s: string) => s.trim().toLowerCase();
 
 /**
  * Selector de unidad: desplegable nativo (`<select>`).
@@ -13,35 +14,55 @@ const OTRA = "__otra__";
  * FILTRABA y escondía opciones cuando el campo ya tenía un valor), un `<select>`
  * muestra SIEMPRE todas las opciones. El iPad lo abre como su ruedita nativa.
  *
+ * - `unidadesExtra`: unidades que ya existen en los datos del sistema (ej.
+ *   "scoops"). Se suman a las estándar, sin duplicar. Así el desplegable ofrece
+ *   TODO lo que se usa, sin mantener una lista a mano.
  * - `permitirOtra`: agrega la opción "Otra…", que abre un campo de texto para
- *   escribir unidades libres (ej. "botella", "paq 12", "saco"). Se usa en la
- *   "unidad de compra" de insumos, que no siempre es una unidad estándar.
- * - Sin `permitirOtra`: desplegable puro. Si el valor actual es una unidad
- *   custom de data vieja (ej. "taza"), se agrega como opción para no perderla.
+ *   escribir unidades libres (ej. "botella", "paq 12"). Se usa en la "unidad de
+ *   compra" de insumos.
  */
 export function UnidadSelect({
   value,
   onChange,
   className,
   permitirOtra = false,
+  unidadesExtra,
 }: {
   value: string;
   onChange: (v: string) => void;
   className?: string;
   permitirOtra?: boolean;
+  unidadesExtra?: string[];
 }) {
   const v = value?.trim() ?? "";
-  const esEstandar = UNIDADES.some((u) => u.toLowerCase() === v.toLowerCase());
   // Recordamos si el usuario eligió "Otra…" (para quedarnos en modo texto
   // aunque el valor esté momentáneamente vacío mientras escribe).
   const [otraElegida, setOtraElegida] = useState(false);
 
-  // Modo "otra" (campo de texto visible): solo si se permite, y hay un valor
-  // custom o el usuario eligió "Otra…".
-  const enOtra = permitirOtra && (otraElegida || (v !== "" && !esEstandar));
+  // Extras del sistema que no son estándar, deduplicadas por mayúsculas/acentos.
+  const estandarNorm = new Set(UNIDADES.map(norm));
+  const extrasMap = new Map<string, string>();
+  for (const u of unidadesExtra ?? []) {
+    const t = (u ?? "").trim();
+    if (!t || estandarNorm.has(norm(t))) continue;
+    if (!extrasMap.has(norm(t))) extrasMap.set(norm(t), t);
+  }
+  const extras = Array.from(extrasMap.values());
 
-  // Sin permitirOtra, preservamos el valor custom como opción para no perderlo.
-  const extraCustom = !permitirOtra && v !== "" && !esEstandar ? value : null;
+  // ¿El valor actual ya es una unidad conocida (estándar o extra)?
+  const conocidasNorm = new Set([...estandarNorm, ...extras.map(norm)]);
+  const esConocida = v !== "" && conocidasNorm.has(norm(v));
+
+  // Modo "otra" (campo de texto visible): solo si se permite y el valor es
+  // desconocido, o el usuario eligió "Otra…" a propósito.
+  const enOtra = permitirOtra && (otraElegida || (v !== "" && !esConocida));
+
+  // Si el valor EXACTO no está entre las opciones (diferencia de mayúsculas, o
+  // unidad custom sin permitirOtra), lo agregamos para que el select lo muestre
+  // y no se pierda.
+  const opcionesExactas = new Set([...UNIDADES, ...extras]);
+  const valorSuelto =
+    v !== "" && !enOtra && !opcionesExactas.has(value) ? value : null;
 
   return (
     <div className="w-full">
@@ -63,8 +84,13 @@ export function UnidadSelect({
             Unidad…
           </option>
         )}
-        {extraCustom && <option value={extraCustom}>{extraCustom}</option>}
+        {valorSuelto && <option value={valorSuelto}>{valorSuelto}</option>}
         {UNIDADES.map((u) => (
+          <option key={u} value={u}>
+            {u}
+          </option>
+        ))}
+        {extras.map((u) => (
           <option key={u} value={u}>
             {u}
           </option>

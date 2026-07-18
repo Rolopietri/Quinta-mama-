@@ -229,3 +229,36 @@ export const UNIDADES_COMUNES = [
   "unidad",
   "porción",
 ];
+
+/**
+ * Junta todas las unidades DISTINTAS que ya aparecen en los datos (insumos y
+ * recetas), unificando duplicados por mayúsculas/acentos. Sirve para poblar el
+ * desplegable de unidades con TODO lo que se usa en el sistema (ej. "scoops"),
+ * además de las estándar, y sin tener que mantener una lista a mano.
+ */
+export function unidadesEnUso(
+  insumos: { unidadBase?: string | null; unidadCompra?: string | null }[] = [],
+  recetas: {
+    rendimientoUnidad?: string | null;
+    ingredientes?: { unidad?: string | null }[];
+  }[] = [],
+): string[] {
+  const vistas = new Map<string, string>(); // clave normalizada → texto a mostrar
+  const add = (u?: string | null) => {
+    const t = (u ?? "").trim();
+    if (!t) return;
+    const clave = normalize(t);
+    if (!vistas.has(clave)) vistas.set(clave, t);
+  };
+  for (const i of insumos) {
+    add(i.unidadBase);
+    add(i.unidadCompra);
+  }
+  for (const r of recetas) {
+    add(r.rendimientoUnidad);
+    if (r.ingredientes) for (const ing of r.ingredientes) add(ing.unidad);
+  }
+  return Array.from(vistas.values()).sort((a, b) =>
+    a.localeCompare(b, "es", { sensitivity: "base" }),
+  );
+}
