@@ -14,6 +14,10 @@
 -- incremental (que también avanza raciones_consumidas por ventas y por mermas).
 --
 -- Idempotente — se puede correr cuantas veces sea necesario.
+--
+-- EFICIENCIA: solo ESCRIBE los insumos cuyo comprometido de verdad cambia. En
+-- el caso normal (todo ya sincronizado) no toca ninguna fila. Así la llamada
+-- automática al abrir el M5 deja de reescribir la base en cada visita.
 
 create or replace function public.recalcular_stock_comprometido()
 returns table (insumo_id uuid, stock_comprometido_anterior numeric, stock_comprometido_nuevo numeric)
@@ -44,6 +48,10 @@ begin
        set stock_comprometido = coalesce(t.total_comprometido, 0)
       from totales t
      where i.id = t.insumo_id
+       -- Solo escribir si el valor realmente cambia (redondeo a 6 decimales
+       -- para no reescribir por diferencias mínimas de cálculo).
+       and round(coalesce(i.stock_comprometido, 0), 6)
+           is distinct from round(coalesce(t.total_comprometido, 0), 6)
     returning i.id, 0::numeric as anterior, i.stock_comprometido as nuevo
   ),
   resets as (
