@@ -16,7 +16,10 @@ language plpgsql
 security invoker
 as $$
 begin
-  -- Subquery: total comprometido por insumo (planes pendientes Y completados)
+  -- Subquery: total comprometido por insumo. SOLO planes PENDIENTES: un plan
+  -- completado ya consumió sus ingredientes (los descontó del stock al
+  -- completarse), así que no debe seguir reservándolos — si no, el "libre" de
+  -- ingredientes de cosas ya producidas se ve negativo/cero por reserva fantasma.
   return query
   with totales as (
     select
@@ -24,7 +27,7 @@ begin
       sum(c.cantidad) as total_comprometido
     from public.cocina_plan_compromisos c
     join public.cocina_planes_produccion p on p.id = c.plan_id
-    where p.estado in ('pendiente', 'completado')
+    where p.estado = 'pendiente'
     group by c.insumo_id
   ),
   updates as (
@@ -40,7 +43,7 @@ begin
      where not exists (
        select 1 from public.cocina_plan_compromisos c
          join public.cocina_planes_produccion p on p.id = c.plan_id
-        where c.insumo_id = i.id and p.estado in ('pendiente', 'completado')
+        where c.insumo_id = i.id and p.estado = 'pendiente'
      )
        and coalesce(i.stock_comprometido, 0) <> 0
     returning i.id, 0::numeric as anterior, 0::numeric as nuevo
