@@ -1,12 +1,17 @@
 -- Cocina · Recalcular stock_comprometido desde compromisos de planes activos
--- Útil para fixear el estado si por algún motivo el UPDATE atómico del RPC
--- create_plan_produccion no se reflejó (RLS, caching, lo que sea).
+-- Útil para fixear el estado si por algún motivo el comprometido se desincronizó
+-- (RLS, caching, un fix a medias, lo que sea).
 --
--- Lógica:
---   1. Suma cantidad de TODOS los compromisos de planes pendientes o completados
---      por insumo
---   2. Escribe ese valor en insumos.stock_comprometido
---   3. Para insumos sin compromisos activos, setea 0
+-- MODELO (confirmado con el motor real):
+--   • Pendiente  → reserva la receta COMPLETA (aún no se produjo; se puede cancelar).
+--   • Completado → ya se produjo; NO se puede cancelar. Sigue reservando lo que
+--                  falta por vender/perder, y baja solo con ventas o mermas.
+--   • Vendido    → ya se consumió del todo; no reserva nada.
+--
+-- Por eso la reserva viva de un plan = cantidad * (raciones - raciones_consumidas)
+-- / raciones, contando planes 'pendiente' Y 'completado'. Esto reconstruye
+-- EXACTAMENTE lo que mantiene el trigger liberar_comprometido_por_venta de forma
+-- incremental (que también avanza raciones_consumidas por ventas y por mermas).
 --
 -- Idempotente — se puede correr cuantas veces sea necesario.
 
@@ -16,18 +21,22 @@ language plpgsql
 security invoker
 as $$
 begin
-  -- Subquery: total comprometido por insumo. SOLO planes PENDIENTES: un plan
-  -- completado ya consumió sus ingredientes (los descontó del stock al
-  -- completarse), así que no debe seguir reservándolos — si no, el "libre" de
-  -- ingredientes de cosas ya producidas se ve negativo/cero por reserva fantasma.
   return query
   with totales as (
+    -- Reserva viva por insumo: solo lo que falta por vender/perder de cada plan
+    -- pendiente o completado. Un plan completado sigue reservando hasta que su
+    -- producto se venda o se registre como pérdida (sube raciones_consumidas).
     select
       c.insumo_id,
-      sum(c.cantidad) as total_comprometido
+      sum(
+        c.cantidad
+        * (p.raciones - coalesce(p.raciones_consumidas, 0))::numeric
+        / nullif(p.raciones, 0)
+      ) as total_comprometido
     from public.cocina_plan_compromisos c
     join public.cocina_planes_produccion p on p.id = c.plan_id
-    where p.estado = 'pendiente'
+    where p.estado in ('pendiente', 'completado')
+      and coalesce(p.raciones_consumidas, 0) < p.raciones
     group by c.insumo_id
   ),
   updates as (
@@ -38,12 +47,15 @@ begin
     returning i.id, 0::numeric as anterior, i.stock_comprometido as nuevo
   ),
   resets as (
+    -- Insumos sin ninguna reserva viva → 0.
     update public.insumos i
        set stock_comprometido = 0
      where not exists (
        select 1 from public.cocina_plan_compromisos c
          join public.cocina_planes_produccion p on p.id = c.plan_id
-        where c.insumo_id = i.id and p.estado = 'pendiente'
+        where c.insumo_id = i.id
+          and p.estado in ('pendiente', 'completado')
+          and coalesce(p.raciones_consumidas, 0) < p.raciones
      )
        and coalesce(i.stock_comprometido, 0) <> 0
     returning i.id, 0::numeric as anterior, 0::numeric as nuevo
