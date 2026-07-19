@@ -412,6 +412,29 @@ export type FilaImportada = {
   precio?: number;
 };
 
+/** Parsea un número respetando separadores de miles/decimal en cualquier
+ *  formato (venezolano/europeo "1.234,56" o gringo "1,234.56"). El separador
+ *  DECIMAL es el que aparece de último; el otro se trata como miles y se quita.
+ *  Antes se hacía `.replace(",", ".")` a secas, y "1.234,56" quedaba "1.234.56"
+ *  → parseFloat lo cortaba en 1.234 (mil veces menos). */
+function parseNumeroLocale(raw: string): number {
+  const s = (raw ?? "").replace(/[^\d.,-]/g, "").trim();
+  if (s === "" || s === "-") return NaN;
+  const lastComma = s.lastIndexOf(",");
+  const lastDot = s.lastIndexOf(".");
+  let norm: string;
+  if (lastComma > lastDot) {
+    // "," es el decimal → quitar "." (miles), "," → "."
+    norm = s.replace(/\./g, "").replace(",", ".");
+  } else if (lastDot > lastComma) {
+    // "." es el decimal → quitar "," (miles)
+    norm = s.replace(/,/g, "");
+  } else {
+    norm = s; // sin separadores
+  }
+  return parseFloat(norm);
+}
+
 export function parseCSV(content: string): FilaImportada[] {
   const lines = content.trim().split(/\r?\n/).filter((l) => l.trim() !== "");
   if (lines.length === 0) return [];
@@ -472,15 +495,11 @@ export function parseCSV(content: string): FilaImportada[] {
   for (let i = 1; i < lines.length; i++) {
     const cells = splitLine(lines[i]);
     const nombre = (cells[colNombre] ?? "").trim();
-    const cantStr = (cells[colCantidad] ?? "").replace(/[^\d.,-]/g, "").replace(",", ".");
-    const cant = parseFloat(cantStr);
+    const cant = parseNumeroLocale(cells[colCantidad] ?? "");
     if (!nombre || isNaN(cant) || cant <= 0) continue;
     let precio: number | undefined;
     if (colPrecio !== -1) {
-      const pStr = (cells[colPrecio] ?? "")
-        .replace(/[^\d.,-]/g, "")
-        .replace(",", ".");
-      const p = parseFloat(pStr);
+      const p = parseNumeroLocale(cells[colPrecio] ?? "");
       if (!isNaN(p)) precio = p;
     }
     filas.push({ nombre, cantidad: cant, precio });
