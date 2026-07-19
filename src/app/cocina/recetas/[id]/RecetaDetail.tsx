@@ -181,7 +181,7 @@ export function RecetaDetail({ id }: { id: string }) {
                 P. sugerido: ${receta.precioSugeridoUsd.toFixed(2)}
                 {margen !== null && (
                   <span
-                    className={`ml-2 ${margen > 70 ? "text-[#15803D]" : margen > 50 ? "text-[#A16207]" : "text-terracotta"}`}
+                    className={`ml-2 ${margen >= (config?.margenVerdeMin ?? 70) ? "text-[#15803D]" : margen >= (config?.margenAmarilloMin ?? 50) ? "text-[#A16207]" : "text-terracotta"}`}
                   >
                     · margen {margen.toFixed(0)}%
                   </span>

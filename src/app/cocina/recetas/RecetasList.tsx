@@ -27,6 +27,10 @@ export function RecetasList() {
   /** % de IVA configurado (default 16). Lo usamos para mostrar el precio
    *  con IVA al lado del precio sin IVA. */
   const [ivaPorc, setIvaPorc] = useState(16);
+  // Umbrales del semáforo de margen (configurables). Se usan para colorear el
+  // margen igual que en Rentabilidad, en vez de valores fijos 70/50.
+  const [margenVerdeMin, setMargenVerdeMin] = useState(70);
+  const [margenAmarilloMin, setMargenAmarilloMin] = useState(50);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [q, setQ] = useState("");
@@ -50,6 +54,8 @@ export function RecetasList() {
           setItems(rec);
           setInsumos(ins);
           setIvaPorc(cfg.ivaPorc);
+          setMargenVerdeMin(cfg.margenVerdeMin);
+          setMargenAmarilloMin(cfg.margenAmarilloMin);
         }
       } catch (e) {
         if (!cancelled)
@@ -294,7 +300,7 @@ export function RecetasList() {
                         </div>
                         {margen !== null && (
                           <div
-                            className={`text-[10px] mt-0.5 ${margen > 70 ? "text-[#15803D]" : margen > 50 ? "text-[#A16207]" : "text-terracotta"}`}
+                            className={`text-[10px] mt-0.5 ${margen >= margenVerdeMin ? "text-[#15803D]" : margen >= margenAmarilloMin ? "text-[#A16207]" : "text-terracotta"}`}
                           >
                             margen {margen.toFixed(0)}%
                           </div>
