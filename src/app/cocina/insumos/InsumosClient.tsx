@@ -227,7 +227,18 @@ export function InsumosClient() {
       // de la lista donde estaba trabajando.
       let scrollToId: string | null = null;
       if (editingId) {
-        const upd = await updateInsumo(editingId, input);
+        const patch: Partial<typeof input> = { ...input };
+        // No pisar el stock físico si NO lo cambiaste: entre que abriste el form
+        // y guardaste, pudieron entrar ventas/mermas que bajaron stock_actual;
+        // reescribirlo con el valor viejo del form las perdería (lost update).
+        const original = items.find((x) => x.id === editingId);
+        if (
+          original &&
+          Math.abs((input.stockTotal ?? 0) - original.stockTotal) < 0.00005
+        ) {
+          delete patch.stockTotal;
+        }
+        const upd = await updateInsumo(editingId, patch);
         setItems((prev) => prev.map((x) => (x.id === editingId ? upd : x)));
         scrollToId = editingId;
       } else {
