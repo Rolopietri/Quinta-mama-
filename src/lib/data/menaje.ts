@@ -214,22 +214,13 @@ export async function registrarBajaMenaje(
     .single();
   if (movErr) throw movErr;
 
-  // 2. Leer y descontar cantidad_actual del item
-  const { data: itemRow, error: itemErr } = await sb
-    .from("menaje_items")
-    .select("cantidad_actual")
-    .eq("id", input.itemId)
-    .single();
-  if (itemErr) throw itemErr;
-  const actual = Number(
-    (itemRow as { cantidad_actual: number | string }).cantidad_actual ?? 0,
+  // 2. Descontar cantidad_actual de forma ATÓMICA (delta negativo).
+  const { data: nuevaCant, error: updErr } = await sb.rpc(
+    "ajustar_menaje_stock",
+    { p_item_id: input.itemId, p_delta: -Math.abs(input.cantidad) },
   );
-  const nueva = Math.max(0, actual - Math.abs(input.cantidad));
-  const { error: updErr } = await sb
-    .from("menaje_items")
-    .update({ cantidad_actual: nueva })
-    .eq("id", input.itemId);
   if (updErr) throw updErr;
+  const nueva = Number(nuevaCant ?? 0);
   return { movimiento: rowToMov(movRow as MovRow), cantidadActual: nueva };
 }
 
@@ -307,32 +298,18 @@ export async function registrarCompraMenaje(
     .single();
   if (movErr) throw movErr;
 
-  // 3. Sumar al cantidad_actual del item
-  const { data: itemRow, error: itemErr } = await sb
-    .from("menaje_items")
-    .select("cantidad_actual, precio_reposicion_usd")
-    .eq("id", input.itemId)
-    .single();
-  if (itemErr) throw itemErr;
-  const actual = Number(
-    (itemRow as { cantidad_actual: number | string }).cantidad_actual ?? 0,
+  // 3. Sumar al cantidad_actual de forma ATÓMICA (delta positivo). El RPC
+  //    también guarda el precio de reposición si el ítem no tenía uno.
+  const { data: nuevaCant, error: updErr } = await sb.rpc(
+    "ajustar_menaje_stock",
+    {
+      p_item_id: input.itemId,
+      p_delta: Math.abs(input.cantidad),
+      p_precio_reposicion: input.precioUnitarioUsd ?? null,
+    },
   );
-  const nueva = actual + Math.abs(input.cantidad);
-  const updatePatch: Record<string, unknown> = { cantidad_actual: nueva };
-  // Si el item no tenía precio de reposición y esta compra lo tiene, lo guardamos
-  const precioActual = (itemRow as { precio_reposicion_usd: number | string | null })
-    .precio_reposicion_usd;
-  if (
-    (precioActual === null || precioActual === undefined) &&
-    input.precioUnitarioUsd
-  ) {
-    updatePatch.precio_reposicion_usd = input.precioUnitarioUsd;
-  }
-  const { error: updErr } = await sb
-    .from("menaje_items")
-    .update(updatePatch)
-    .eq("id", input.itemId);
   if (updErr) throw updErr;
+  const nueva = Number(nuevaCant ?? 0);
   return { movimiento: rowToMov(movRow as MovRow), cantidadActual: nueva };
 }
 
