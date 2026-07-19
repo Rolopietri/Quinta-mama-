@@ -276,50 +276,10 @@ end;
 $$;
 
 -- ────────────────────────────────────────────────────────────────
--- 6) recalcular_stock_comprometido — usar la fracción NO vendida
+-- 6) recalcular_stock_comprometido  →  MOVIDA (A5, dedupe)
 -- ────────────────────────────────────────────────────────────────
--- Repara el denormalizado stock_comprometido sumando, por insumo, el
--- compromiso VIVO de cada plan activo = cantidad × (raciones - consumidas)/raciones.
-create or replace function public.recalcular_stock_comprometido()
-returns table (insumo_id uuid, stock_comprometido_anterior numeric, stock_comprometido_nuevo numeric)
-language plpgsql
-security invoker
-as $$
-begin
-  return query
-  with totales as (
-    select
-      c.insumo_id,
-      sum(
-        c.cantidad
-        * (p.raciones - coalesce(p.raciones_consumidas, 0))
-        / nullif(p.raciones, 0)
-      ) as total_comprometido
-    from public.cocina_plan_compromisos c
-    join public.cocina_planes_produccion p on p.id = c.plan_id
-    where p.estado in ('pendiente', 'completado')
-    group by c.insumo_id
-  ),
-  updates as (
-    update public.insumos i
-       set stock_comprometido = greatest(0, coalesce(t.total_comprometido, 0))
-      from totales t
-     where i.id = t.insumo_id
-    returning i.id, 0::numeric as anterior, i.stock_comprometido as nuevo
-  ),
-  resets as (
-    update public.insumos i
-       set stock_comprometido = 0
-     where not exists (
-       select 1 from public.cocina_plan_compromisos c
-         join public.cocina_planes_produccion p on p.id = c.plan_id
-        where c.insumo_id = i.id and p.estado in ('pendiente', 'completado')
-     )
-       and coalesce(i.stock_comprometido, 0) <> 0
-    returning i.id, 0::numeric as anterior, 0::numeric as nuevo
-  )
-  select * from updates
-  union all
-  select * from resets;
-end;
-$$;
+-- La definición canónica vive en cocina-recalcular-comprometido.sql. Esa
+-- versión, además de contar la fracción no vendida de planes pendientes y
+-- completados, SOLO escribe cuando el valor cambia de verdad (para no
+-- reescribir la base en cada carga del M5). La versión que estaba aquí era
+-- anterior a esa mejora; se eliminó para no pisarla al reaplicar.
