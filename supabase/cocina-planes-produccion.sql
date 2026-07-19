@@ -143,103 +143,22 @@ end;
 $$;
 
 -- ════════════════════════════════════════════════════════════════
--- 4. RPC: completar_plan_produccion
+-- 4. y 5. RPC: completar_plan_produccion / cancelar_plan_produccion
+--     →  MOVIDAS (A5, dedupe) — ver definiciones canónicas abajo
 -- ════════════════════════════════════════════════════════════════
--- Resta del stock_total los compromisos (la producción consumió la materia
--- prima) Y libera del stock_comprometido (la reserva ya no aplica).
-create or replace function public.completar_plan_produccion(p_plan_id uuid)
-returns void
-language plpgsql
-security invoker
-as $$
-declare
-  v_estado text;
-  v_nombre text;
-  v_comp record;
-begin
-  select estado, receta_nombre into v_estado, v_nombre
-    from public.cocina_planes_produccion where id = p_plan_id;
-  if v_estado is null then
-    raise exception 'Plan no encontrado';
-  end if;
-  if v_estado <> 'pendiente' then
-    raise exception 'Solo se pueden completar planes pendientes (actual: %)', v_estado;
-  end if;
-
-  for v_comp in
-    select insumo_id, cantidad from public.cocina_plan_compromisos where plan_id = p_plan_id
-  loop
-    -- Baja stock_total (físico) y libera comprometido
-    update public.insumos
-       set stock_actual = greatest(0, coalesce(stock_actual, 0) - v_comp.cantidad),
-           stock_comprometido = greatest(0, coalesce(stock_comprometido, 0) - v_comp.cantidad)
-     where id = v_comp.insumo_id;
-
-    -- Registrar dos movimientos: total baja, comprometido baja
-    insert into public.stock_movimientos
-      (insumo_id, tipo, capa, cantidad, motivo, fecha, nota)
-    values
-      (v_comp.insumo_id, 'plan_completado', 'total', -v_comp.cantidad,
-       'Plan completado: ' || v_nombre, current_date,
-       'Plan ' || p_plan_id::text);
-
-    insert into public.stock_movimientos
-      (insumo_id, tipo, capa, cantidad, motivo, fecha, nota)
-    values
-      (v_comp.insumo_id, 'comprometido_out', 'comprometido', -v_comp.cantidad,
-       'Plan completado: ' || v_nombre, current_date,
-       'Plan ' || p_plan_id::text);
-  end loop;
-
-  update public.cocina_planes_produccion
-     set estado = 'completado', completado_at = now()
-   where id = p_plan_id;
-end;
-$$;
-
--- ════════════════════════════════════════════════════════════════
--- 5. RPC: cancelar_plan_produccion
--- ════════════════════════════════════════════════════════════════
--- Solo libera del stock_comprometido (no toca stock_total).
-create or replace function public.cancelar_plan_produccion(p_plan_id uuid)
-returns void
-language plpgsql
-security invoker
-as $$
-declare
-  v_estado text;
-  v_nombre text;
-  v_comp record;
-begin
-  select estado, receta_nombre into v_estado, v_nombre
-    from public.cocina_planes_produccion where id = p_plan_id;
-  if v_estado is null then
-    raise exception 'Plan no encontrado';
-  end if;
-  if v_estado <> 'pendiente' then
-    raise exception 'Solo se pueden cancelar planes pendientes (actual: %)', v_estado;
-  end if;
-
-  for v_comp in
-    select insumo_id, cantidad from public.cocina_plan_compromisos where plan_id = p_plan_id
-  loop
-    update public.insumos
-       set stock_comprometido = greatest(0, coalesce(stock_comprometido, 0) - v_comp.cantidad)
-     where id = v_comp.insumo_id;
-
-    insert into public.stock_movimientos
-      (insumo_id, tipo, capa, cantidad, motivo, fecha, nota)
-    values
-      (v_comp.insumo_id, 'comprometido_out', 'comprometido', -v_comp.cantidad,
-       'Plan cancelado: ' || v_nombre, current_date,
-       'Plan ' || p_plan_id::text);
-  end loop;
-
-  update public.cocina_planes_produccion
-     set estado = 'cancelado', cancelado_at = now()
-   where id = p_plan_id;
-end;
-$$;
+-- Definiciones canónicas (las que corren en la base):
+--   • completar_plan_produccion → cocina-planes-fix-completar.sql
+--       Solo cambia el estado a 'completado'. NO toca el stock: el ingrediente
+--       sigue comprometido hasta venderse o perderse. (La venta descuenta el
+--       crudo del total.)
+--   • cancelar_plan_produccion  → cocina-planes-venta-libera.sql
+--       Libera la FRACCIÓN no vendida del comprometido.
+--
+-- Las versiones que vivían aquí eran las VIEJAS y erróneas, y se eliminaron
+-- para que no pisen a las buenas al reaplicar el repo:
+--   - completar descontaba stock_actual al completar → doble descuento (la
+--     venta vuelve a restar el crudo).
+--   - cancelar liberaba la cantidad COMPLETA (sin fracción) → restaba de más.
 
 -- ════════════════════════════════════════════════════════════════
 -- 6. RPC: delete_plan_produccion  →  MOVIDA (A5, dedupe)
