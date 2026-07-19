@@ -23,60 +23,7 @@ alter table public.ventas
 
 create index if not exists idx_ventas_insumo on public.ventas(insumo_id);
 
--- 3) Descuento de stock: primero la rama de insumo directo, luego la de receta.
-create or replace function public.descontar_stock_por_venta()
-returns trigger language plpgsql as $$
-declare
-  r record;
-begin
-  -- Venta mapeada directo a un insumo (reventa)
-  if new.insumo_id is not null then
-    update public.insumos
-       set stock_actual = greatest(0, stock_actual
-             - coalesce(new.insumo_cantidad, 1) * new.cantidad)
-     where id = new.insumo_id;
-    return new;
-  end if;
-
-  -- Venta vía receta (descuenta los insumos de la receta, con subrecetas)
-  if new.receta_id is null then return new; end if;
-  for r in (
-    select insumo_id, sum(total_cantidad) as total
-    from public.flatten_receta_insumos(new.receta_id, new.cantidad)
-    group by insumo_id
-  ) loop
-    update public.insumos
-    set stock_actual = greatest(0, stock_actual - r.total)
-    where id = r.insumo_id;
-  end loop;
-  return new;
-end;
-$$;
-
--- 4) Reversión (borrar venta → devolver stock), simétrica.
-create or replace function public.revertir_stock_por_venta()
-returns trigger language plpgsql as $$
-declare
-  r record;
-begin
-  if old.insumo_id is not null then
-    update public.insumos
-       set stock_actual = stock_actual
-             + coalesce(old.insumo_cantidad, 1) * old.cantidad
-     where id = old.insumo_id;
-    return old;
-  end if;
-
-  if old.receta_id is null then return old; end if;
-  for r in (
-    select insumo_id, sum(total_cantidad) as total
-    from public.flatten_receta_insumos(old.receta_id, old.cantidad)
-    group by insumo_id
-  ) loop
-    update public.insumos
-    set stock_actual = stock_actual + r.total
-    where id = r.insumo_id;
-  end loop;
-  return old;
-end;
-$$;
+-- 3) y 4) descontar/revertir_stock_por_venta  →  MOVIDAS (A5, dedupe)
+-- Esta era una versión anterior (solo insumo directo + receta, sin extra ni
+-- sustitución). La canónica y completa está en cocina-zzz-motor-canonico.sql.
+-- Aquí se conservan solo las COLUMNAS (arriba), que sí son necesarias.

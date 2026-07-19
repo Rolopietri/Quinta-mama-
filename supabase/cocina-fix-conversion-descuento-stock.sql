@@ -85,58 +85,8 @@ returns numeric language sql immutable as $$
   end;
 $$;
 
--- ─── flatten_receta_insumos con conversión ───────────────────────
-create or replace function public.flatten_receta_insumos(
-  p_receta_id uuid,
-  p_factor numeric default 1,
-  p_depth int default 0
-)
-returns table(insumo_id uuid, total_cantidad numeric)
-language plpgsql
-as $$
-declare
-  r record;
-  porciones_r int;
-  sub_rend numeric;
-  sub_rend_unidad text;
-  sub_factor numeric;
-  v_cant_conv numeric;
-begin
-  if p_depth > 5 then return; end if;
-
-  select porciones into porciones_r from public.recetas where id = p_receta_id;
-  if porciones_r is null or porciones_r = 0 then return; end if;
-
-  for r in (
-    select ri.insumo_id, ri.subreceta_id, ri.cantidad, ri.unidad
-    from public.receta_ingredientes ri
-    where ri.receta_id = p_receta_id
-  ) loop
-    if r.insumo_id is not null then
-      -- Ingrediente directo: convertir a la unidad base del insumo antes de
-      -- emitir el consumo (kg→g, L→ml, etc.).
-      return query
-        select r.insumo_id,
-               (public.convertir_para_costo(r.cantidad, r.unidad, ins.unidad_base)
-                 * p_factor / porciones_r::numeric)::numeric
-          from public.insumos ins
-         where ins.id = r.insumo_id;
-    elsif r.subreceta_id is not null then
-      select rendimiento, rendimiento_unidad
-        into sub_rend, sub_rend_unidad
-        from public.recetas where id = r.subreceta_id;
-
-      if sub_rend is null or sub_rend = 0 then continue; end if;
-
-      -- Convertir la cantidad pedida a la unidad de rendimiento de la
-      -- subreceta antes de calcular cuántos batches hacen falta.
-      v_cant_conv := public.convertir_para_costo(r.cantidad, r.unidad, sub_rend_unidad);
-      sub_factor := (v_cant_conv * p_factor / porciones_r::numeric) / sub_rend;
-
-      return query
-        select fi.insumo_id, fi.total_cantidad
-          from public.flatten_receta_insumos(r.subreceta_id, sub_factor, p_depth + 1) fi;
-    end if;
-  end loop;
-end;
-$$;
+-- ─── flatten_receta_insumos  →  MOVIDA (A5, dedupe) ───────────────
+-- Esta era una versión anterior (con conversión pero SIN el factor de
+-- porciones de subreceta). La canónica está en cocina-zzz-motor-canonico.sql.
+-- Las funciones de unidades de ARRIBA (unidad_norm/dim/factor/convertir_para_costo)
+-- sí son canónicas y se quedan aquí (no están duplicadas).
