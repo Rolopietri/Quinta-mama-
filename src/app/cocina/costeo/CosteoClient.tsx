@@ -454,16 +454,21 @@ function InlinePrecio({
   function commit() {
     setEditing(false);
     const trimmed = text.trim();
+    const mostrado = valor !== null ? valor.toFixed(2) : "";
+    // Si el texto es igual a lo que se mostró, no hubo cambio real → no guardar.
+    // (Antes comparaba el "8.62" mostrado contra el "8.62068" real y "guardaba"
+    //  la versión truncada con solo enfocar/desenfocar el campo.)
+    if (trimmed === mostrado) return;
     if (trimmed === "") {
       if (valor !== null) onSave(null);
       return;
     }
     const n = Number(trimmed);
     if (!Number.isFinite(n) || n < 0) {
-      setText(valor !== null ? valor.toFixed(2) : "");
+      setText(mostrado);
       return;
     }
-    if (n !== valor) onSave(n);
+    onSave(n);
   }
 
   function cancel() {
