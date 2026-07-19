@@ -65,26 +65,22 @@ function todayCaracas(): string {
   return caracas.toISOString().slice(0, 10);
 }
 
-export async function GET(request: Request) {
-  // Vercel Cron envía Authorization: Bearer ${CRON_SECRET}
-  const authHeader = request.headers.get("authorization");
-  const cronSecret = process.env.CRON_SECRET;
-  const isVercelCron =
-    cronSecret && authHeader === `Bearer ${cronSecret}`;
-
-  // Permitir llamada manual también (sin secret) — bajo riesgo (solo escribe tasa)
-  // Si se quiere endurecer en el futuro, exigir el secret.
-  void isVercelCron;
-
+export async function GET() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !anonKey) {
+  // Escribir la tasa con SERVICE-ROLE (clave de servidor, nunca se expone al
+  // navegador). Así podemos bloquear la escritura anónima en RLS y evitar que
+  // alguien fije una tasa falsa con la anon key pública. Fallback a anon si la
+  // service-role aún no está configurada (para no romper el cron/banner antes
+  // de setearla en Vercel). Este endpoint solo escribe la tasa real de
+  // dolarapi, así que llamarlo sin secret es de bajo riesgo.
+  const writeKey =
+    process.env.SUPABASE_SERVICE_ROLE_KEY ??
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !writeKey) {
     return NextResponse.json({ error: "Supabase no configurado" }, { status: 500 });
   }
 
-  // Cliente server con anon key (las políticas RLS permiten insert a authenticated;
-  // si necesitamos forzar inserción incluso sin sesión, usamos service role en el futuro).
-  const sb = createClient(url, anonKey, { auth: { persistSession: false } });
+  const sb = createClient(url, writeKey, { auth: { persistSession: false } });
 
   const [usdBs, eurBs, paralelaBs] = await Promise.all([
     fetchOficial(),
