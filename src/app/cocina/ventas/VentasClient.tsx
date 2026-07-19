@@ -111,12 +111,22 @@ export function VentasClient() {
   async function handleRegistroManual(e: React.FormEvent) {
     e.preventDefault();
     if (!mRecetaId) return;
+    // Validar la cantidad: una venta con cantidad 0/NaN/negativa descontaría
+    // stock incorrectamente.
+    const cant = Number(mCantidad);
+    if (!Number.isFinite(cant) || cant <= 0) {
+      setError("La cantidad debe ser un número mayor a 0.");
+      return;
+    }
+    const precio = mPrecio ? Number(mPrecio) : undefined;
+    if (precio !== undefined && (!Number.isFinite(precio) || precio < 0)) {
+      setError("El precio no puede ser negativo.");
+      return;
+    }
     setError(null);
     setSaving(true);
     try {
       const r = recetas.find((x) => x.id === mRecetaId);
-      const cant = Number(mCantidad);
-      const precio = mPrecio ? Number(mPrecio) : undefined;
       const nueva = await createVenta({
         fecha: mFecha,
         recetaId: mRecetaId,
