@@ -6,34 +6,43 @@ orden de migración numerado. Con el tiempo, **varias funciones quedaron
 definidas en más de un archivo**, con versiones distintas. Como al reaplicar se
 ejecutan en orden alfabético, la versión que "gana" es la del archivo que ordena
 **último** — y en algunos casos esa era una versión **vieja** que degradaba una
-corrección. (Ej.: `descontar_stock_por_venta` bueno vive en
-`cocina-pos-modificador-sustitucion.sql`, pero `cocina-pos-sustitucion-insumo.sql`
-ordena después y lo pisaría.)
+corrección.
 
-## La solución actual
-La **base de producción es la fuente de verdad** (sus funciones fueron
-verificadas). Para que ninguna versión vieja pueda pisar las buenas al reaplicar:
+## La solución (A5, hecho)
+La **base de producción es la fuente de verdad** (sus funciones se verificaron
+con `pg_get_functiondef`). Se consolidó así:
 
-- **`cocina-zzz-motor-canonico.sql`** contiene las definiciones VIVAS y correctas
-  del motor de stock (descontar, revertir, flatten×2, liberar, recommit). El
-  prefijo `zzz-` hace que se aplique **de último** → siempre gana.
-- **`cocina-recalcular-comprometido.sql`** es la canónica de
-  `recalcular_stock_comprometido` (escribe-solo-si-cambia). Como `r` < `z`, el
-  motor-canonico no la redefine.
-- Las funciones de **planes** ya quedaron con una sola definición cada una:
-  - `create_plan_produccion` → `cocina-planes-produccion.sql`
-  - `completar_plan_produccion` → `cocina-planes-fix-completar.sql`
-  - `cancelar_plan_produccion` / `delete_plan_produccion` → `cocina-planes-venta-libera.sql`
+### Motor de stock (descontar / revertir / flatten×2 / liberar / recommit)
+- La versión canónica y correcta vive en **`cocina-zzz-motor-canonico.sql`**.
+  El prefijo `zzz-` hace que se aplique **de último** → siempre gana.
+- `descontar`/`revertir` y `liberar`/`recommit` **también** aparecen (versión
+  vieja) en el archivo que trae su **trigger** (`cocina-ventas.sql` y
+  `cocina-planes-venta-libera.sql`). Eso es **a propósito**: un `CREATE TRIGGER`
+  exige que la función exista al crearse, así que la función va junto a su
+  trigger. Luego `zzz` la sobreescribe con la versión correcta. **No borrar esas
+  copias** — son carga estructural.
+- `flatten_receta_insumos` / `flatten_receta_planes`: solo en `zzz` (no tienen
+  trigger; se llaman en tiempo de ejecución).
+
+### Otras funciones (una sola definición cada una)
+- Unidades (`unidad_norm/dim/factor`, `convertir_para_costo`) →
+  `cocina-fix-conversion-descuento-stock.sql`
+- `recalcular_stock_comprometido` → `cocina-recalcular-comprometido.sql`
+  (escribe-solo-si-cambia)
+- Planes: `create_plan_produccion` → `cocina-planes-produccion.sql`;
+  `completar_plan_produccion` → `cocina-planes-fix-completar.sql`;
+  `cancelar_plan_produccion` / `delete_plan_produccion` →
+  `cocina-planes-venta-libera.sql`
 
 ## Regla de oro
-- **Al reaplicar el repo**, hazlo en orden alfabético; `cocina-zzz-…` va de último
-  y deja las funciones del motor en su versión correcta.
-- **No edites** las definiciones viejas duplicadas en los archivos `cocina-pos-*`,
-  `cocina-ventas.sql`, `cocina-subrecetas.sql`, etc. — están superseded por el
-  motor-canonico. Si necesitas cambiar una función del motor, cámbiala en
-  `cocina-zzz-motor-canonico.sql`.
+- Al reaplicar el repo, hazlo en orden alfabético; `cocina-zzz-…` va de último.
+- Si necesitas cambiar una función del **motor**, cámbiala en
+  `cocina-zzz-motor-canonico.sql` (es la que gana).
+- Las columnas (`alter table … add column`) de los archivos `cocina-pos-*` y
+  `cocina-subrecetas.sql` **sí son necesarias** — solo se quitaron de ahí las
+  funciones duplicadas viejas, no las columnas.
 
-## Pendiente (limpieza futura, sin urgencia)
-Borrar de raíz las definiciones duplicadas viejas de los archivos superseded, y
-migrar todo a una carpeta `migrations/` numerada. La base ya corre las versiones
-correctas, así que esto es higiene, no un bug.
+## Estado
+Duplicación peligrosa: **ninguna**. Las únicas funciones en 2 archivos son las 4
+del motor con trigger (bundle + canónico), que es el patrón correcto. Migrar a
+una carpeta `migrations/` numerada queda como higiene futura, sin urgencia.
