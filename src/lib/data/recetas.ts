@@ -303,7 +303,7 @@ export async function deleteReceta(id: string): Promise<void> {
  * Recursivo: si la subreceta usa otras subrecetas, se calculan también.
  * Protege contra ciclos con un depth limit + set de visitados.
  */
-function costoPorUnidadSubreceta(
+export function costoPorUnidadSubreceta(
   subId: string,
   recetas: Receta[],
   insumos: Insumo[],

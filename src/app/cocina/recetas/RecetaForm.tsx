@@ -14,7 +14,12 @@ import {
   type RecetaIngrediente,
   type Seccion,
 } from "@/lib/types";
-import { createReceta, updateReceta, listRecetas } from "@/lib/data/recetas";
+import {
+  createReceta,
+  updateReceta,
+  listRecetas,
+  costoPorUnidadSubreceta,
+} from "@/lib/data/recetas";
 import { listInsumos } from "@/lib/data/cocina";
 import { getCocinaConfig } from "@/lib/data/cocinaConfig";
 import { extractError } from "@/lib/data/error";
@@ -316,41 +321,20 @@ export function RecetaForm({
     setLineas((prev) => prev.filter((l) => l.key !== key));
   }
 
-  // Cálculo en vivo (insumo del catálogo + subreceta + ad-hoc)
-  // Para subrecetas usamos su costo por unidad base (costo_porPorcion / rendimiento)
-  const costo = useMemo(() => {
-    // Costo por unidad base por subreceta, calculado una vez. Aplicamos
-    // conversión de unidades para que el costo refleje el precio real
-    // incluso si la subreceta declara sus ingredientes en kg y el insumo
-    // está en g (o L↔ml, etc.) — misma lógica que el backend
-    // (recetas.ts → calcularCostoRecetaInterno).
-    const costoUnidadSub = new Map<string, number>();
+  // Costo por unidad base de cada subreceta, con la MISMA función recursiva del
+  // backend (costoPorUnidadSubreceta). Así el costo en vivo incluye subrecetas
+  // anidadas (antes se ignoraban y contaban como $0). Se calcula una sola vez y
+  // se reutiliza en los 3 lugares del form que muestran costo de subrecetas.
+  const costoUnidadSub = useMemo(() => {
+    const m = new Map<string, number>();
     for (const sub of subrecetasDisponibles) {
-      // Rendimiento se interpreta como el TOTAL del batch (ej: 500g = el batch
-      // entero produce 500g). Si no está definido, asumimos 1.
-      const rendEfectivo =
-        sub.rendimiento && sub.rendimiento > 0 ? sub.rendimiento : 1;
-      let totalSub = 0;
-      for (const ing of sub.ingredientes) {
-        if (ing.insumoId) {
-          const ins = insumosMap.get(ing.insumoId);
-          if (ins && ins.precioBaseUsd !== null) {
-            const conv = convertirParaCosto(
-              ing.cantidad,
-              ing.unidad,
-              ins.unidadBase,
-            );
-            const cantBase = conv?.resultado ?? ing.cantidad;
-            totalSub += cantBase * ins.precioBaseUsd;
-          }
-        } else if (ing.costoManualUsd) {
-          totalSub += ing.cantidad * ing.costoManualUsd;
-        }
-      }
-      // costo por unidad = costo total del batch ÷ rendimiento total
-      costoUnidadSub.set(sub.id, totalSub / rendEfectivo);
+      m.set(sub.id, costoPorUnidadSubreceta(sub.id, recetasContexto, insumos));
     }
+    return m;
+  }, [subrecetasDisponibles, recetasContexto, insumos]);
 
+  // Cálculo en vivo del costo de la receta (insumo + subreceta + ad-hoc).
+  const costo = useMemo(() => {
     let total = 0;
     lineas.forEach((l) => {
       const cant = Number(l.cantidad) || 0;
@@ -383,7 +367,7 @@ export function RecetaForm({
     });
     const porc = Number(porciones) || 1;
     return { total, porPorcion: total / porc };
-  }, [lineas, insumosMap, porciones, subrecetasDisponibles, subrecetasMap]);
+  }, [lineas, insumosMap, porciones, costoUnidadSub, subrecetasMap]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -746,29 +730,8 @@ export function RecetaForm({
           </p>
           <div className="max-h-64 overflow-y-auto border border-marfil rounded-lg divide-y divide-marfil">
             {subrecetasDisponibles.map((sub) => {
-              // Costo aproximado por unidad (con conversión de unidades para
-              // ingredientes que están en distinta unidad que su insumo)
-              let tot = 0;
-              for (const ing of sub.ingredientes) {
-                if (ing.insumoId) {
-                  const ins = insumosMap.get(ing.insumoId);
-                  if (ins && ins.precioBaseUsd !== null) {
-                    const c = convertirParaCosto(
-                      ing.cantidad,
-                      ing.unidad,
-                      ins.unidadBase,
-                    );
-                    const cBase = c?.resultado ?? ing.cantidad;
-                    tot += cBase * ins.precioBaseUsd;
-                  }
-                } else if (ing.costoManualUsd) {
-                  tot += ing.cantidad * ing.costoManualUsd;
-                }
-              }
-              const rendEfectivo =
-                sub.rendimiento && sub.rendimiento > 0 ? sub.rendimiento : 1;
-              // costo por unidad = total del batch ÷ rendimiento total
-              const costoUnit = tot / rendEfectivo;
+              // Costo por unidad (recursivo, incluye subrecetas anidadas).
+              const costoUnit = costoUnidadSub.get(sub.id) ?? 0;
               const unidadDisplay = sub.rendimientoUnidad ?? "porción";
               return (
                 <button
@@ -892,35 +855,12 @@ export function RecetaForm({
                 : null;
               const cant = Number(l.cantidad) || 0;
               const manual = Number(l.costoManual) || 0;
-              // Calcular precio por unidad de la subreceta.
-              // FÓRMULA: costo total del batch ÷ rendimiento total del batch.
-              // Ej: aderezo cesar cuesta $6.34 y rinde 500g → $0.01269/g.
-              // Si rendimiento no está definido, asumimos 1 (1 unidad = 1 batch).
-              let subUnitPrice = 0;
-              if (subR) {
-                let tot = 0;
-                for (const sIng of subR.ingredientes) {
-                  if (sIng.insumoId) {
-                    const sIns = insumosMap.get(sIng.insumoId);
-                    if (sIns && sIns.precioBaseUsd !== null) {
-                      const c = convertirParaCosto(
-                        sIng.cantidad,
-                        sIng.unidad,
-                        sIns.unidadBase,
-                      );
-                      const cBase = c?.resultado ?? sIng.cantidad;
-                      tot += cBase * sIns.precioBaseUsd;
-                    }
-                  } else if (sIng.costoManualUsd) {
-                    tot += sIng.cantidad * sIng.costoManualUsd;
-                  }
-                }
-                const rendEfectivo =
-                  subR.rendimiento && subR.rendimiento > 0
-                    ? subR.rendimiento
-                    : 1;
-                subUnitPrice = tot / rendEfectivo;
-              }
+              // Precio por unidad de la subreceta (recursivo, incluye
+              // subrecetas anidadas). Ej: aderezo cesar cuesta $6.34 y rinde
+              // 500g → $0.01269/g.
+              const subUnitPrice = subR
+                ? (costoUnidadSub.get(subR.id) ?? 0)
+                : 0;
               // Calculamos el subtotal usando la misma lógica de conversión
               // que el backend (recetas.ts → calcularCostoRecetaInterno). Si la
               // unidad del ingrediente difiere de la del insumo (o de la
