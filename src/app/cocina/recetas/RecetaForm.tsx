@@ -670,7 +670,7 @@ export function RecetaForm({
                   </span>
                   <input
                     type="number"
-                    step="0.01"
+                    step="0.0001"
                     min="0"
                     placeholder="Ej: 8.62"
                     value={precioSugerido}
