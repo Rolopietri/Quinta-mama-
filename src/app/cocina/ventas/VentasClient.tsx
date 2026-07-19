@@ -136,8 +136,11 @@ export function VentasClient() {
     }
   }
 
+  // Vendibles: no subrecetas y SOLO activas. Una receta desactivada ya no se
+  // ofrece para registrar/clasificar ventas (antes seguía apareciendo y podía
+  // descontar insumos de algo que ya no se vende).
   const recetasVendibles = useMemo(
-    () => recetas.filter((r) => !r.esSubreceta),
+    () => recetas.filter((r) => !r.esSubreceta && r.activo),
     [recetas],
   );
 
