@@ -46,7 +46,7 @@ export default function InventarioHubPage() {
               Cocina · Módulo 5
             </p>
             <h1 className="mt-2 font-cinzel text-2xl sm:text-3xl tracking-[0.12em] uppercase text-cacao">
-              Inventario, Producción y Compras
+              Inventario, Producción, Compras y Ventas
             </h1>
             <p className="mt-3 font-serif italic text-cacao-soft max-w-2xl">
               Centro de control operativo. Stock, registro de pérdidas, ventas

@@ -35,7 +35,7 @@ const modulos: {
   },
   {
     href: "/cocina/inventario",
-    label: "Inventario, Producción y Compras",
+    label: "Inventario, Producción, Compras y Ventas",
     desc: "Stock, pérdidas, ventas Xetux, alertas y pedido sugerido.",
     index: "M5",
   },
