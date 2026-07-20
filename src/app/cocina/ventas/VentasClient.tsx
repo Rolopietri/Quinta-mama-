@@ -359,6 +359,16 @@ export function VentasClient() {
 
   async function confirmarImport() {
     if (!clasif || clasif.length === 0) return;
+    // Seguridad: no se confirma con nada sin clasificar. Si una venta entra
+    // "sin clasificar" registra el ingreso pero NO descuenta stock, y eso
+    // descuadraría el inventario en silencio. Hay que clasificar todo primero.
+    const pendientes = clasif.filter((c) => c.tipo === "sin_clasificar").length;
+    if (pendientes > 0) {
+      setError(
+        `Faltan ${pendientes} ítem(s) por clasificar. Clasifícalos antes de confirmar el importe.`,
+      );
+      return;
+    }
     setError(null);
     setImporting(true);
     try {
@@ -603,7 +613,12 @@ export function VentasClient() {
                 </h3>
                 <button
                   onClick={confirmarImport}
-                  disabled={importing || totalRows === 0}
+                  disabled={importing || totalRows === 0 || sinClasCount > 0}
+                  title={
+                    sinClasCount > 0
+                      ? "Clasifica todos los ítems antes de confirmar"
+                      : undefined
+                  }
                   className="rounded-lg bg-cacao text-white px-4 py-2 text-sm font-medium hover:bg-terracotta disabled:opacity-50"
                 >
                   {importing ? "Importando..." : "Confirmar import →"}
@@ -624,9 +639,11 @@ export function VentasClient() {
               </div>
               {sinClasCount > 0 && (
                 <p className="text-xs text-amber-800 bg-amber-50 ring-1 ring-amber-200 rounded-lg p-2 mb-3 font-serif">
-                  Hay ítems <strong>sin clasificar</strong>. Se importarán como
-                  ingreso pero <strong>sin tocar inventario</strong>. Clasifícalos
-                  para que el sistema los recuerde y no queden como alerta.
+                  Hay <strong>{sinClasCount} ítem(s) sin clasificar</strong>. No
+                  puedes confirmar el importe hasta clasificarlos todos, para que
+                  ninguna venta entre sin descontar su stock. Clasifícalos abajo
+                  (insumo, insumo directo, servicio o consignación) y el botón se
+                  habilitará.
                 </p>
               )}
               <ul className="divide-y divide-marfil text-sm">
