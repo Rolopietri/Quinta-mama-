@@ -445,12 +445,16 @@ function InlinePrecio({
   const [text, setText] = useState(valor !== null ? valor.toFixed(2) : "");
   const [editing, setEditing] = useState(false);
 
-  // Si cambia el valor desde afuera, sincronizar
-  useEffect(() => {
+  // Si cambia el valor desde afuera (y no estás editando), sincronizar el
+  // campo. Se ajusta DURANTE el render —patrón recomendado por React— en vez
+  // de en un efecto, que dispararía renders en cascada.
+  const [prevValor, setPrevValor] = useState(valor);
+  if (valor !== prevValor) {
+    setPrevValor(valor);
     if (!editing) {
       setText(valor !== null ? valor.toFixed(2) : "");
     }
-  }, [valor, editing]);
+  }
 
   function commit() {
     setEditing(false);

@@ -108,6 +108,9 @@ export function PedidoSugeridoClient() {
     const receta = params.get("receta");
     if (!receta) return;
     const raciones = params.get("raciones");
+    // Inicialización única desde la URL al montar (no se puede en useState
+    // inicial porque en SSR no existe window).
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setObjetivos([
       {
         recetaId: receta,

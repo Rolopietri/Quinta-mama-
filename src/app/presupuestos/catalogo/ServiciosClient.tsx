@@ -11,7 +11,6 @@ import {
   type UnidadServicio,
 } from "@/lib/types";
 import {
-  listServicios,
   createServicio,
   updateServicio,
   deleteServicio,
@@ -77,8 +76,9 @@ export function ServiciosClient() {
   }
 
   useEffect(() => {
+    // Carga inicial del catálogo al montar (fetch, no un setState síncrono).
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     reload();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function resetForm() {

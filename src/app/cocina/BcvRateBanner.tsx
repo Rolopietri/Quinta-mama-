@@ -19,6 +19,8 @@ export function BcvRateBanner() {
   }
 
   useEffect(() => {
+    // Carga inicial de la tasa al montar (fetch, no un setState síncrono).
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
   }, []);
 

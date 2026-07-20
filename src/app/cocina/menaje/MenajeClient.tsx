@@ -1338,7 +1338,8 @@ export function MenajeClient() {
               Vas a borrar este movimiento del historial.{" "}
               <span className="text-terracotta">
                 La cantidad NO se restaura automáticamente — si te equivocaste,
-                tendrías que ajustar el stock manualmente desde "Editar item".
+                tendrías que ajustar el stock manualmente desde &ldquo;Editar
+                item&rdquo;.
               </span>
             </p>
             <div className="mt-5 flex gap-2 justify-end">

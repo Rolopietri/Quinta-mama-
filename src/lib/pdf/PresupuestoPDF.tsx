@@ -488,6 +488,7 @@ export function PresupuestoPDF({
     >
       <Page size="LETTER" style={styles.page}>
         <View style={styles.headerRow}>
+          {/* eslint-disable-next-line jsx-a11y/alt-text -- <Image> de @react-pdf/renderer, no es <img> de HTML y no admite alt */}
           <Image style={styles.logo} src={logoSrc} />
           <View style={styles.brandWrap}>
             <Text style={styles.brandWordmark}>LA QUINTA MAMÁ</Text>

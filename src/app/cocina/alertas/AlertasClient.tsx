@@ -119,8 +119,8 @@ export function AlertasClient() {
             {sinMinimo.length} insumos sin mínimo configurado
           </summary>
           <p className="text-xs text-cacao-soft italic font-serif mt-2 mb-3">
-            Estos no entran en alertas. Ve al insumo y define el "Stock mínimo"
-            para activarlas.
+            Estos no entran en alertas. Ve al insumo y define el &ldquo;Stock
+            mínimo&rdquo; para activarlas.
           </p>
           <ul className="text-sm text-cacao-soft space-y-1">
             {sinMinimo.map((i) => (
