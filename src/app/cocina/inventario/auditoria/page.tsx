@@ -10,7 +10,7 @@ export default function AuditoriaStockPage() {
         <section className="mb-8 flex items-end justify-between gap-4 flex-wrap">
           <div>
             <p className="font-display text-[11px] tracking-[0.4em] text-cacao-soft">
-              Módulo 5 · Trazabilidad
+              Módulo 1 · Trazabilidad
             </p>
             <h1 className="mt-2 font-cinzel text-2xl sm:text-3xl tracking-[0.12em] uppercase text-cacao">
               Auditoría de stock
@@ -22,10 +22,10 @@ export default function AuditoriaStockPage() {
             </p>
           </div>
           <Link
-            href="/cocina/inventario"
+            href="/cocina/catalogo"
             className="text-xs uppercase tracking-widest text-cacao-soft hover:text-cacao"
           >
-            ← Volver a M5
+            ← Volver a M1
           </Link>
         </section>
         <AuditoriaClient />

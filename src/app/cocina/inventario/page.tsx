@@ -4,19 +4,9 @@ import { SubHubGrid, type SubModulo } from "../_SubHub";
 
 const SUBMODULOS: SubModulo[] = [
   {
-    href: "/cocina/inventario/stock",
-    label: "Stock y pérdidas",
-    desc: "Stock por insumo + registro de pérdidas, mermas, mal estado y vencimientos.",
-  },
-  {
     href: "/cocina/inventario/planes",
     label: "Planes de producción",
     desc: "Reservá stock por adelantado para producciones planificadas (eventos, batches).",
-  },
-  {
-    href: "/cocina/inventario/auditoria",
-    label: "Auditoría de stock",
-    desc: "Historial automático de cada cambio de stock: cuándo, cuánto y de dónde vino.",
   },
   {
     href: "/cocina/compras",
@@ -27,11 +17,6 @@ const SUBMODULOS: SubModulo[] = [
     href: "/cocina/ventas",
     label: "Ventas",
     desc: "Importar Xetux o registrar manual — descuenta stock automáticamente.",
-  },
-  {
-    href: "/cocina/alertas",
-    label: "Alertas de stock",
-    desc: "Insumos agotados o por debajo del mínimo de compra.",
   },
   {
     href: "/cocina/pedido",
@@ -51,12 +36,12 @@ export default function InventarioHubPage() {
               Cocina · Módulo 5
             </p>
             <h1 className="mt-2 font-cinzel text-2xl sm:text-3xl tracking-[0.12em] uppercase text-cacao">
-              Inventario, Producción, Compras y Ventas
+              Producción, Compras y Ventas
             </h1>
             <p className="mt-3 font-serif italic text-cacao-soft max-w-2xl">
-              Centro de control operativo. Stock, registro de pérdidas, ventas
-              del POS, alertas y pedidos sugeridos — todo lo que cierra el
-              ciclo y vuelve a M1.
+              Centro de operaciones: planes de producción, registro de compras
+              y ventas del POS, y el pedido sugerido. Lo que mueve el
+              inventario que ves en M1.
             </p>
           </div>
           <Link

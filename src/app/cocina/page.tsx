@@ -11,8 +11,8 @@ const modulos: {
 }[] = [
   {
     href: "/cocina/catalogo",
-    label: "Catálogo de Materias Primas",
-    desc: "Insumos y proveedores — el catálogo base que alimenta todo.",
+    label: "Insumos e Inventario",
+    desc: "Insumos, proveedores, stock, pérdidas, auditoría y alertas.",
     index: "M1",
   },
   {
@@ -35,8 +35,8 @@ const modulos: {
   },
   {
     href: "/cocina/inventario",
-    label: "Inventario, Producción, Compras y Ventas",
-    desc: "Stock, pérdidas, compras, ventas Xetux, alertas y pedido sugerido.",
+    label: "Producción, Compras y Ventas",
+    desc: "Planes de producción, compras, ventas Xetux y pedido sugerido.",
     index: "M5",
   },
   {

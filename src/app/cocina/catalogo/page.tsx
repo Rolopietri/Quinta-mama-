@@ -13,6 +13,21 @@ const SUBMODULOS: SubModulo[] = [
     label: "Proveedores",
     desc: "Contactos y modalidades de pago (Bs BCV, paralela, USD efectivo o divisa).",
   },
+  {
+    href: "/cocina/inventario/stock",
+    label: "Stock y pérdidas",
+    desc: "Stock por insumo + registro de pérdidas, mermas, mal estado y vencimientos.",
+  },
+  {
+    href: "/cocina/inventario/auditoria",
+    label: "Auditoría de stock",
+    desc: "Historial automático de cada cambio de stock: cuándo, cuánto y de dónde vino.",
+  },
+  {
+    href: "/cocina/alertas",
+    label: "Alertas de stock",
+    desc: "Insumos agotados o por debajo del mínimo de compra.",
+  },
 ];
 
 export default function CatalogoMateriasPrimasPage() {
@@ -26,12 +41,12 @@ export default function CatalogoMateriasPrimasPage() {
               Cocina · Módulo 1
             </p>
             <h1 className="mt-2 font-cinzel text-2xl sm:text-3xl tracking-[0.12em] uppercase text-cacao">
-              Catálogo de Materias Primas
+              Insumos e Inventario
             </h1>
             <p className="mt-3 font-serif italic text-cacao-soft max-w-2xl">
-              Datos de cada ingrediente: precio, proveedor, modalidad de pago,
-              mínimo de compra. M3 usa estos datos para calcular costos y M5
-              para generar alertas y pedidos sugeridos.
+              Tus ingredientes y proveedores + el estado del inventario: stock,
+              pérdidas, auditoría y alertas. M3 usa estos datos para costear y
+              M5 mueve el inventario con producción, compras y ventas.
             </p>
           </div>
           <Link
