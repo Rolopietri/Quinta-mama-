@@ -999,7 +999,7 @@ function PrecioCelda({
           onClick={abrir}
           className="mt-1 text-[10px] uppercase tracking-widest text-cacao-soft hover:text-cacao underline"
         >
-          Actualizar a hoy
+          Actualizar precio a hoy
         </button>
       )}
     </>
