@@ -880,8 +880,8 @@ function frescuraTexto(nivel: NivelFrescuraPrecio, dias: number | null): string 
   if (nivel === "sin_fecha" || dias === null) return "sin fecha";
   const cuando =
     dias === 0 ? "hoy" : dias === 1 ? "hace 1 día" : `hace ${dias} días`;
-  if (nivel === "viejo") return `⚠ viejo · ${cuando}`;
-  if (nivel === "revisar") return `revisar · ${cuando}`;
+  if (nivel === "viejo") return `⚠ precio viejo · ${cuando}`;
+  if (nivel === "revisar") return `revisar precio · ${cuando}`;
   return cuando;
 }
 
