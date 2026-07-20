@@ -14,12 +14,12 @@ const SUBMODULOS: SubModulo[] = [
     desc: "Contactos y modalidades de pago (Bs BCV, paralela, USD efectivo o divisa).",
   },
   {
-    href: "/cocina/inventario/stock",
+    href: "/cocina/stock",
     label: "Stock y pérdidas",
     desc: "Stock por insumo + registro de pérdidas, mermas, mal estado y vencimientos.",
   },
   {
-    href: "/cocina/inventario/auditoria",
+    href: "/cocina/auditoria",
     label: "Auditoría de stock",
     desc: "Historial automático de cada cambio de stock: cuándo, cuánto y de dónde vino.",
   },
