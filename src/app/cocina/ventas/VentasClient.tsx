@@ -981,7 +981,9 @@ export function VentasClient() {
                               ? "Servicio"
                               : v.tipoItem === "consignacion"
                                 ? "Consignación"
-                                : "Sin clasificar"}
+                                : v.tipoItem === "insumo_directo"
+                                  ? "Insumo directo"
+                                  : "Sin clasificar"}
                           </span>
                         )}
                       </div>
