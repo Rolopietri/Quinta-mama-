@@ -15,6 +15,7 @@ import {
   type Receta,
   type Venta,
 } from "@/lib/types";
+import { pillClass } from "@/lib/ui";
 import { listInsumos } from "@/lib/data/cocina";
 import { listRecetas, calcularCostoReceta } from "@/lib/data/recetas";
 import {
@@ -1453,10 +1454,3 @@ export function InventarioClient() {
   );
 }
 
-function pillClass(active: boolean) {
-  return `px-3 py-1 rounded-full text-[11px] uppercase tracking-widest ring-1 transition-colors ${
-    active
-      ? "bg-cacao text-white ring-cacao"
-      : "bg-white text-cacao-soft ring-marfil hover:bg-marfil-soft"
-  }`;
-}

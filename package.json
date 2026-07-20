@@ -6,7 +6,8 @@
     "dev": "next dev --webpack",
     "build": "next build --webpack",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:unidades": "node scripts/check-unidades.mjs"
   },
   "dependencies": {
     "@react-pdf/renderer": "^4.5.1",

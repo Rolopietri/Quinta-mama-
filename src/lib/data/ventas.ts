@@ -507,46 +507,6 @@ export function parseCSV(content: string): FilaImportada[] {
   return filas;
 }
 
-// Match fuzzy de filas importadas con recetas (por nombre o xetux_nombre)
-export type MatchResult = {
-  fila: FilaImportada;
-  receta?: Receta;
-  matched: boolean;
-};
-
-export function matchVentasConRecetas(
-  filas: FilaImportada[],
-  recetas: Receta[],
-): MatchResult[] {
-  function norm(s: string): string {
-    return s
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[̀-ͯ]/g, "")
-      .replace(/[^a-z0-9]/g, "");
-  }
-  const index: Map<string, Receta> = new Map();
-  for (const r of recetas) {
-    index.set(norm(r.nombre), r);
-    if (r.xetux_nombre) index.set(norm(r.xetux_nombre), r);
-  }
-  return filas.map((f) => {
-    const k = norm(f.nombre);
-    let receta = index.get(k);
-    if (!receta) {
-      // Buscar parcial: alguna receta cuyo nombre normalizado esté contenido
-      for (const r of recetas) {
-        const rn = norm(r.nombre);
-        if (rn.length >= 4 && (k.includes(rn) || rn.includes(k))) {
-          receta = r;
-          break;
-        }
-      }
-    }
-    return { fila: f, receta, matched: !!receta };
-  });
-}
-
 // ─── CLASIFICACIÓN DE ÍTEMS DEL POS (insumo / servicio / consignación) ──────
 
 /** Normaliza un nombre del POS para hacer match (minúsculas, sin acentos ni
@@ -765,12 +725,17 @@ export function clasificarFilas(
     if (receta) return { fila: f, tipo: "insumo" as const, receta };
 
     // 3) Sin clasificar. Sugerencia difusa (no se aplica automáticamente).
+    //    Entre los posibles, se elige el MÁS ESPECÍFICO (nombre más largo que
+    //    coincide), para no sugerir "Café" cuando la fila es "Café con leche".
     let sugerencia: Receta | undefined;
+    let mejorLargo = 0;
     for (const r of recetas) {
       const rn = normPos(r.nombre);
       if (rn.length >= 4 && (k.includes(rn) || rn.includes(k))) {
-        sugerencia = r;
-        break;
+        if (rn.length > mejorLargo) {
+          sugerencia = r;
+          mejorLargo = rn.length;
+        }
       }
     }
     return { fila: f, tipo: "sin_clasificar" as const, sugerencia };

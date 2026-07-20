@@ -241,7 +241,18 @@ export type CompraMenajeInput = {
  * Sube el archivo de factura (si hay) a Supabase Storage y devuelve la URL
  * pública/signed que se guarda en el movimiento.
  */
+const FACTURA_MAX_BYTES = 10 * 1024 * 1024; // 10 MB
+
 async function subirFactura(file: File, itemId: string): Promise<{ url: string; nombre: string }> {
+  // Validación real (el `accept` del input es solo una sugerencia del navegador).
+  const esPdf = file.type === "application/pdf";
+  const esImagen = file.type.startsWith("image/");
+  if (!esPdf && !esImagen) {
+    throw new Error("La factura debe ser un PDF o una imagen.");
+  }
+  if (file.size > FACTURA_MAX_BYTES) {
+    throw new Error("La factura no puede pesar más de 10 MB.");
+  }
   const sb = createSupabaseBrowserClient();
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
   const path = `${itemId}/${Date.now()}_${safeName}`;

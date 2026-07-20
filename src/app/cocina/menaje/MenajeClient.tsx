@@ -8,6 +8,7 @@ import {
   type MenajeItem,
   type MovimientoMenaje,
 } from "@/lib/types";
+import { pillClass } from "@/lib/ui";
 import {
   listMenaje,
   listMovimientosMenaje,
@@ -1613,10 +1614,3 @@ export function MenajeClient() {
   );
 }
 
-function pillClass(active: boolean) {
-  return `px-3 py-1 rounded-full text-[11px] uppercase tracking-widest ring-1 transition-colors ${
-    active
-      ? "bg-cacao text-white ring-cacao"
-      : "bg-white text-cacao-soft ring-marfil hover:bg-marfil-soft"
-  }`;
-}

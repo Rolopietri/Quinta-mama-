@@ -151,7 +151,10 @@ export async function GET(
     const element = PresupuestoPDF({ presupuesto, logoSrc, modo });
     const buffer = await renderToBuffer(element);
 
-    const filename = `${presupuesto.numero}-${modo}.pdf`;
+    const numeroSafe =
+      presupuesto.numero.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "") ||
+      "presupuesto";
+    const filename = `${numeroSafe}-${modo}.pdf`;
     return new NextResponse(new Uint8Array(buffer), {
       status: 200,
       headers: {

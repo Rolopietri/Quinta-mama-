@@ -11,6 +11,7 @@ import {
   type Seccion,
   type RentabilidadReceta,
 } from "@/lib/types";
+import { pillClass } from "@/lib/ui";
 import { listRecetas, calcularCostoReceta } from "@/lib/data/recetas";
 import { listInsumos } from "@/lib/data/cocina";
 import { getCocinaConfig, updateCocinaConfig } from "@/lib/data/cocinaConfig";
@@ -434,13 +435,6 @@ export function RentabilidadClient() {
   );
 }
 
-function pillClass(active: boolean) {
-  return `px-3 py-1 rounded-full text-[11px] uppercase tracking-widest ring-1 transition-colors ${
-    active
-      ? "bg-cacao text-white ring-cacao"
-      : "bg-white text-cacao-soft ring-marfil hover:bg-marfil-soft"
-  }`;
-}
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
@@ -486,6 +480,16 @@ function ConfigEditor({
   const [verde, setVerde] = useState(String(initial.margenVerdeMin));
   const [amarillo, setAmarillo] = useState(String(initial.margenAmarilloMin));
   const [iva, setIva] = useState(String(initial.ivaPorc));
+
+  // El semáforo pinta: margen ≥ verde → verde; ≥ amarillo → amarillo; resto → rojo.
+  // Para que la franja amarilla sea alcanzable, verde tiene que ser ≥ amarillo.
+  // Si se guardaran al revés, "amarillo" nunca se mostraría.
+  const verdeN = Number(verde);
+  const amarilloN = Number(amarillo);
+  const ordenInvalido =
+    Number.isFinite(verdeN) &&
+    Number.isFinite(amarilloN) &&
+    verdeN < amarilloN;
 
   return (
     <div className="space-y-3">
@@ -541,8 +545,15 @@ function ConfigEditor({
             max="100"
             value={amarillo}
             onChange={(e) => setAmarillo(e.target.value)}
-            className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2"
+            className={`mt-1 w-full rounded-lg px-3 py-2 ring-1 ${
+              ordenInvalido ? "ring-terracotta" : "ring-marfil"
+            }`}
           />
+          {ordenInvalido && (
+            <span className="text-[10px] text-terracotta block mt-1">
+              El amarillo no puede ser mayor que el verde.
+            </span>
+          )}
         </label>
         <label className="text-sm text-cacao">
           IVA carta %
@@ -568,7 +579,7 @@ function ConfigEditor({
       <div className="text-right">
         <button
           type="button"
-          disabled={saving}
+          disabled={saving || ordenInvalido}
           onClick={() =>
             onSave({
               foodCostObjetivoPorc: Number(foodCost) || 0,
