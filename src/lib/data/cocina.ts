@@ -135,6 +135,7 @@ type InsumoRow = {
   unidad_base: string;
   precio_compra_usd: number | string | null;
   precio_base_usd: number | string | null;
+  precio_actualizado: string | null;
   stock_actual: number | string;
   stock_comprometido: number | string | null;
   stock_minimo: number | string | null;
@@ -165,6 +166,7 @@ function rowToInsumo(r: InsumoRow): Insumo {
       r.precio_compra_usd === null ? null : Number(r.precio_compra_usd),
     precioBaseUsd:
       r.precio_base_usd === null ? null : Number(r.precio_base_usd),
+    precioActualizado: r.precio_actualizado ?? undefined,
     // Mapeo de las 3 capas de stock. La columna DB se llama `stock_actual`
     // por compatibilidad (no rompemos triggers existentes) pero en código
     // se llama stockTotal. stock_comprometido es columna nueva.
@@ -205,6 +207,7 @@ function rowToInsumo(r: InsumoRow): Insumo {
 export type InsumoInput = Omit<
   Insumo,
   | "id"
+  | "precioActualizado"
   | "ultimaFecha"
   | "ultimaCantidad"
   | "ultimaPrecioUsd"
@@ -300,6 +303,35 @@ export async function deleteInsumo(id: string): Promise<void> {
   const sb = createSupabaseBrowserClient();
   const { error } = await sb.from("insumos").delete().eq("id", id);
   if (error) throw error;
+}
+
+/** Refresca el precio de un insumo al precio de hoy SIN registrar una compra.
+ *  Recalcula el precio por unidad base y estampa `precio_actualizado` con la
+ *  fecha de hoy, para que el costeo deje de marcarlo como viejo. Pensado para
+ *  cuando conoces el precio de mercado actual pero no compraste todavía. */
+export async function actualizarPrecioInsumo(
+  id: string,
+  precioCompraUsd: number,
+  cantidadPorCompra: number,
+): Promise<Insumo> {
+  const sb = createSupabaseBrowserClient();
+  const hoy = new Date().toISOString().slice(0, 10);
+  const precioBase =
+    cantidadPorCompra > 0
+      ? precioCompraUsd / cantidadPorCompra
+      : precioCompraUsd;
+  const { data, error } = await sb
+    .from("insumos")
+    .update({
+      precio_compra_usd: precioCompraUsd,
+      precio_base_usd: precioBase,
+      precio_actualizado: hoy,
+    })
+    .eq("id", id)
+    .select("*")
+    .single();
+  if (error) throw error;
+  return rowToInsumo(data as InsumoRow);
 }
 
 // ─── COMPRAS ─────────────────────────────────────────────────────

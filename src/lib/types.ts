@@ -370,6 +370,11 @@ export type Insumo = {
   unidadBase: string;
   precioCompraUsd: number | null;
   precioBaseUsd: number | null;
+  /** Fecha (YYYY-MM-DD) en que el precio se confirmó por última vez — sea por
+   *  una compra registrada o por un refresco manual ("actualizar a hoy"). Sirve
+   *  para avisar en el costeo cuando un precio quedó viejo. Si es null, se usa
+   *  `ultimaFecha` (fecha de la última compra) como referencia de frescura. */
+  precioActualizado?: string;
   // ── Stock de 3 capas (M5) ─────────────────────────────────────
   /** Stock físico — solo cambia con compras recibidas o pérdidas/mermas.
    *  En DB se persiste como `stock_actual` (no renombramos la columna para
@@ -404,6 +409,33 @@ export type Insumo = {
  *  pedidos sugeridos. */
 export function stockLibre(i: Pick<Insumo, "stockTotal" | "stockComprometido">): number {
   return Math.max(0, i.stockTotal - i.stockComprometido);
+}
+
+// ── Frescura del precio (economía volátil) ──────────────────────────
+// En Venezuela los precios cambian rápido: un precio de hace semanas ya no
+// sirve para costear. Estos umbrales definen cuándo avisar que un precio está
+// viejo. Son globales; si más adelante quieres afinarlos por insumo o hacerlos
+// editables, se mueven a CocinaConfig.
+export const PRECIO_FRESCO_DIAS = 7; // 🟢 hasta 7 días: fresco
+export const PRECIO_VIEJO_DIAS = 14; // 🟡 8–14: revisar · 🔴 >14: viejo
+
+export type NivelFrescuraPrecio = "fresco" | "revisar" | "viejo" | "sin_fecha";
+
+/** Clasifica qué tan viejo es un precio a partir de su fecha (YYYY-MM-DD) y la
+ *  fecha de hoy (YYYY-MM-DD). Devuelve el nivel y los días transcurridos. */
+export function frescuraPrecio(
+  fechaISO: string | null | undefined,
+  hoyISO: string,
+): { nivel: NivelFrescuraPrecio; dias: number | null } {
+  if (!fechaISO) return { nivel: "sin_fecha", dias: null };
+  const f = new Date(fechaISO.slice(0, 10) + "T00:00:00");
+  const hoy = new Date(hoyISO.slice(0, 10) + "T00:00:00");
+  if (Number.isNaN(f.getTime()) || Number.isNaN(hoy.getTime()))
+    return { nivel: "sin_fecha", dias: null };
+  const dias = Math.floor((hoy.getTime() - f.getTime()) / 86_400_000);
+  if (dias <= PRECIO_FRESCO_DIAS) return { nivel: "fresco", dias: Math.max(0, dias) };
+  if (dias <= PRECIO_VIEJO_DIAS) return { nivel: "revisar", dias };
+  return { nivel: "viejo", dias };
 }
 
 export type ModalidadPago =

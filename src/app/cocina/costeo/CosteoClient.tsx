@@ -4,8 +4,10 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   calcRentabilidad,
+  frescuraPrecio,
   precioConIva,
   precioSinIva,
+  PRECIO_VIEJO_DIAS,
   SECCIONES,
   type Receta,
   type Insumo,
@@ -123,6 +125,21 @@ export function CosteoClient() {
     [filas],
   );
 
+  // Insumos cuyo precio ya está viejo (economía volátil): el costeo que ves
+  // puede estar basado en precios desactualizados. La frescura se mide contra
+  // `precioActualizado`; si no existe, contra la fecha de la última compra.
+  const hoy = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const insumosViejos = useMemo(
+    () =>
+      insumos.filter(
+        (i) =>
+          i.precioBaseUsd !== null &&
+          frescuraPrecio(i.precioActualizado ?? i.ultimaFecha, hoy).nivel ===
+            "viejo",
+      ),
+    [insumos, hoy],
+  );
+
   async function handlePrecioChange(recetaId: string, sinIvaUsd: number | null) {
     setError(null);
     try {
@@ -173,6 +190,18 @@ export function CosteoClient() {
       {info && (
         <div className="rounded-lg bg-[#F1F4ED] ring-1 ring-[#C9D6BC] p-3 text-sm text-[#2F4A1F]">
           {info}
+        </div>
+      )}
+
+      {insumosViejos.length > 0 && (
+        <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419]">
+          ⚠️ {insumosViejos.length} insumo
+          {insumosViejos.length === 1 ? "" : "s"} con precio de más de{" "}
+          {PRECIO_VIEJO_DIAS} días. El costeo puede estar desactualizado —{" "}
+          <Link href="/cocina/insumos" className="underline hover:text-cacao">
+            revisá y actualizá precios en el Catálogo
+          </Link>
+          .
         </div>
       )}
 

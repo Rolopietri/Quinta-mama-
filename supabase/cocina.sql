@@ -96,6 +96,7 @@ create table if not exists public.insumos (
   -- Precios en USD (referencia)
   precio_compra_usd numeric(10, 4),      -- precio del empaque de compra
   precio_base_usd numeric(12, 6),        -- precio por unidad base (derivado)
+  precio_actualizado date,               -- última confirmación del precio (compra o refresco manual)
 
   -- Stock
   stock_actual numeric(12, 4) not null default 0,  -- en unidad_base
@@ -283,6 +284,8 @@ begin
       when v_cantidad_por_compra > 0 then v_precio_compra_unit / v_cantidad_por_compra
       else v_precio_compra_unit
     end,
+    -- El precio queda "fresco" a la fecha de la compra (frescura del costeo)
+    precio_actualizado = new.fecha,
 
     proveedor_id = coalesce(new.proveedor_id, proveedor_id)
   where id = new.insumo_id;

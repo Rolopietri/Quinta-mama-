@@ -4,8 +4,10 @@ import { useEffect, useMemo, useState } from "react";
 import {
   CATEGORIAS_INSUMO_SUGERIDAS,
   categoriaInsumoLabel,
+  frescuraPrecio,
   SECCIONES,
   type Insumo,
+  type NivelFrescuraPrecio,
   type Seccion,
   type Proveedor,
 } from "@/lib/types";
@@ -14,6 +16,7 @@ import {
   createInsumo,
   updateInsumo,
   deleteInsumo,
+  actualizarPrecioInsumo,
   listProveedores,
 } from "@/lib/data/cocina";
 import { UnitCalculator } from "@/components/UnitCalculator";
@@ -111,6 +114,8 @@ export function InsumosClient() {
   // true cuando el usuario eligió "➕ Nueva categoría…" en el desplegable.
   const [creandoCategoria, setCreandoCategoria] = useState(false);
   const [pendienteBorrar, setPendienteBorrar] = useState<string | null>(null);
+  // Fecha de hoy (YYYY-MM-DD) para medir la frescura de cada precio.
+  const hoy = useMemo(() => new Date().toISOString().slice(0, 10), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -789,16 +794,16 @@ export function InsumosClient() {
                         <div className="text-xs text-cacao-mute uppercase tracking-widest">
                           Precio
                         </div>
-                        <div className="text-sm text-cacao">
-                          {i.precioCompraUsd !== null
-                            ? `$${i.precioCompraUsd.toFixed(2)} / ${i.unidadCompra}`
-                            : "—"}
-                        </div>
-                        {i.precioBaseUsd !== null && (
-                          <div className="text-xs text-cacao-soft">
-                            ${i.precioBaseUsd.toFixed(5)} / {i.unidadBase}
-                          </div>
-                        )}
+                        <PrecioCelda
+                          insumo={i}
+                          hoy={hoy}
+                          onRefreshed={(upd) =>
+                            setItems((prev) =>
+                              prev.map((x) => (x.id === upd.id ? upd : x)),
+                            )
+                          }
+                          onError={setError}
+                        />
                       </div>
                       <div className="col-span-4 sm:col-span-2">
                         <div className="text-xs text-cacao-mute uppercase tracking-widest">
@@ -855,6 +860,149 @@ export function InsumosClient() {
         onCancel={() => setPendienteBorrar(null)}
       />
     </div>
+  );
+}
+
+function nivelBadgeClass(nivel: NivelFrescuraPrecio): string {
+  switch (nivel) {
+    case "fresco":
+      return "bg-emerald-50 text-emerald-700 ring-emerald-200";
+    case "revisar":
+      return "bg-amber-50 text-amber-800 ring-amber-200";
+    case "viejo":
+      return "bg-[#F9EBE7] text-[#7A2419] ring-[#E8C5BC]";
+    default:
+      return "bg-marfil-soft text-cacao-mute ring-marfil";
+  }
+}
+
+function frescuraTexto(nivel: NivelFrescuraPrecio, dias: number | null): string {
+  if (nivel === "sin_fecha" || dias === null) return "sin fecha";
+  const cuando =
+    dias === 0 ? "hoy" : dias === 1 ? "hace 1 día" : `hace ${dias} días`;
+  if (nivel === "viejo") return `⚠ viejo · ${cuando}`;
+  if (nivel === "revisar") return `revisar · ${cuando}`;
+  return cuando;
+}
+
+/**
+ * Celda de precio con indicador de frescura y refresco rápido. Muestra el
+ * precio del empaque + precio por unidad base, una etiqueta de qué tan viejo
+ * es (verde/amarillo/rojo según los días desde la última confirmación) y un
+ * botón "Actualizar a hoy" que fija el precio de mercado actual SIN registrar
+ * una compra (estampa la fecha de hoy). La frescura se mide contra
+ * `precioActualizado`; si aún no existe, cae a `ultimaFecha` (última compra).
+ */
+function PrecioCelda({
+  insumo,
+  hoy,
+  onRefreshed,
+  onError,
+}: {
+  insumo: Insumo;
+  hoy: string;
+  onRefreshed: (upd: Insumo) => void;
+  onError: (msg: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const fechaPrecio = insumo.precioActualizado ?? insumo.ultimaFecha ?? null;
+  const { nivel, dias } = frescuraPrecio(fechaPrecio, hoy);
+
+  function abrir() {
+    setText(
+      insumo.precioCompraUsd !== null ? String(insumo.precioCompraUsd) : "",
+    );
+    setEditing(true);
+  }
+
+  async function guardar() {
+    const n = Number(text.trim());
+    if (!Number.isFinite(n) || n < 0) {
+      setEditing(false);
+      return;
+    }
+    setSaving(true);
+    try {
+      const upd = await actualizarPrecioInsumo(
+        insumo.id,
+        n,
+        insumo.cantidadPorCompra,
+      );
+      onRefreshed(upd);
+      setEditing(false);
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Error actualizando precio");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <>
+      <div className="text-sm text-cacao">
+        {insumo.precioCompraUsd !== null
+          ? `$${insumo.precioCompraUsd.toFixed(2)} / ${insumo.unidadCompra}`
+          : "—"}
+      </div>
+      {insumo.precioBaseUsd !== null && (
+        <div className="text-xs text-cacao-soft">
+          ${insumo.precioBaseUsd.toFixed(5)} / {insumo.unidadBase}
+        </div>
+      )}
+      {insumo.precioCompraUsd !== null && (
+        <div className="mt-1">
+          <span
+            className={`inline-block text-[10px] uppercase tracking-widest px-2 py-0.5 rounded-full ring-1 ${nivelBadgeClass(nivel)}`}
+          >
+            {frescuraTexto(nivel, dias)}
+          </span>
+        </div>
+      )}
+      {editing ? (
+        <div className="mt-1 flex items-center gap-1">
+          <span className="text-cacao-mute text-xs">$</span>
+          <input
+            type="number"
+            step="0.01"
+            min="0"
+            autoFocus
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") guardar();
+              else if (e.key === "Escape") setEditing(false);
+            }}
+            className="w-20 rounded ring-1 ring-marfil px-2 py-1 text-sm text-right focus:ring-cacao focus:outline-none"
+          />
+          <button
+            type="button"
+            disabled={saving}
+            onClick={guardar}
+            className="text-[10px] uppercase tracking-widest text-emerald-700 hover:text-emerald-800 disabled:opacity-50"
+          >
+            {saving ? "..." : "✓ guardar"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setEditing(false)}
+            className="text-[10px] uppercase tracking-widest text-cacao-mute hover:text-cacao"
+          >
+            ✕
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={abrir}
+          className="mt-1 text-[10px] uppercase tracking-widest text-cacao-soft hover:text-cacao underline"
+        >
+          Actualizar a hoy
+        </button>
+      )}
+    </>
   );
 }
 
