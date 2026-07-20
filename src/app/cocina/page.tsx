@@ -12,7 +12,7 @@ const modulos: {
   {
     href: "/cocina/catalogo",
     label: "Catálogo de Materias Primas",
-    desc: "Insumos, proveedores y compras — el catálogo base que alimenta todo.",
+    desc: "Insumos y proveedores — el catálogo base que alimenta todo.",
     index: "M1",
   },
   {
@@ -36,7 +36,7 @@ const modulos: {
   {
     href: "/cocina/inventario",
     label: "Inventario, Producción, Compras y Ventas",
-    desc: "Stock, pérdidas, ventas Xetux, alertas y pedido sugerido.",
+    desc: "Stock, pérdidas, compras, ventas Xetux, alertas y pedido sugerido.",
     index: "M5",
   },
   {

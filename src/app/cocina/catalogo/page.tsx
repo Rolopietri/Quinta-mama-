@@ -13,11 +13,6 @@ const SUBMODULOS: SubModulo[] = [
     label: "Proveedores",
     desc: "Contactos y modalidades de pago (Bs BCV, paralela, USD efectivo o divisa).",
   },
-  {
-    href: "/cocina/compras",
-    label: "Compras",
-    desc: "Registrar pedidos recibidos — actualiza stock y precio del insumo automáticamente.",
-  },
 ];
 
 export default function CatalogoMateriasPrimasPage() {

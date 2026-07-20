@@ -19,6 +19,11 @@ const SUBMODULOS: SubModulo[] = [
     desc: "Historial automático de cada cambio de stock: cuándo, cuánto y de dónde vino.",
   },
   {
+    href: "/cocina/compras",
+    label: "Compras",
+    desc: "Registrar pedidos recibidos — actualiza stock y precio del insumo automáticamente.",
+  },
+  {
     href: "/cocina/ventas",
     label: "Ventas",
     desc: "Importar Xetux o registrar manual — descuenta stock automáticamente.",
