@@ -29,6 +29,10 @@ type FormState = {
   precioTotalUsd: string;
   precioTotalBs: string;
   tasaBcvUsada: string;
+  // IVA: "con" = el monto ya lo incluye (se guarda tal cual);
+  // "sin" = el monto es la base y el sistema le suma el IVA para el costo real.
+  ivaModo: "con" | "sin";
+  ivaPorc: string;
   notas: string;
 };
 
@@ -52,6 +56,8 @@ const emptyForm: FormState = {
   precioTotalUsd: "",
   precioTotalBs: "",
   tasaBcvUsada: "",
+  ivaModo: "con",
+  ivaPorc: "16",
   notas: "",
 };
 
@@ -112,6 +118,22 @@ export function ComprasClient() {
     [form.modalidadPago],
   );
 
+  // Factor de IVA: 1 si el monto ya lo incluye ("con"); 1 + tasa/100 si hay que
+  // sumárselo ("sin"). El total con IVA es lo que realmente se pagó y lo que
+  // alimenta el costo del insumo.
+  const factorIva =
+    form.ivaModo === "sin" ? 1 + (Number(form.ivaPorc) || 0) / 100 : 1;
+  const montoBase = pagaEnBs
+    ? Number(form.precioTotalBs) || 0
+    : Number(form.precioTotalUsd) || 0;
+  const montoConIva = montoBase * factorIva;
+  const tasaNum = Number(form.tasaBcvUsada) || 0;
+  const totalUsdConIva = pagaEnBs
+    ? tasaNum > 0
+      ? montoConIva / tasaNum
+      : 0
+    : montoConIva;
+
   // Contenido del empaque del insumo elegido (unidades base por unidad de compra).
   const cantPorCompra = insumoSeleccionado?.cantidadPorCompra ?? 0;
 
@@ -155,17 +177,29 @@ export function ComprasClient() {
     if (!form.insumoId || !form.fecha || !form.cantidad) return;
     setError(null);
 
-    let precioUsd = Number(form.precioTotalUsd) || 0;
+    // Si el monto se ingresó "sin IVA", le sumamos el IVA para guardar el total
+    // real pagado (que es el que cuenta para el costo del insumo).
+    let precioUsd = (Number(form.precioTotalUsd) || 0) * factorIva;
     let precioBs: number | undefined;
     let tasaUsada: number | undefined;
 
     if (pagaEnBs) {
-      precioBs = Number(form.precioTotalBs) || 0;
+      precioBs = (Number(form.precioTotalBs) || 0) * factorIva;
       tasaUsada = Number(form.tasaBcvUsada) || 0;
       if (precioBs > 0 && tasaUsada > 0) {
         precioUsd = precioBs / tasaUsada;
       }
     }
+
+    // Dejamos constancia en las notas de que el IVA se agregó (así el historial
+    // explica por qué el total no coincide con el monto base de la factura).
+    const notaIva =
+      form.ivaModo === "sin"
+        ? `IVA ${Number(form.ivaPorc) || 0}% agregado`
+        : null;
+    const notasFinal = [form.notas.trim() || null, notaIva]
+      .filter(Boolean)
+      .join(" · ");
 
     const input = {
       insumoId: form.insumoId,
@@ -176,7 +210,7 @@ export function ComprasClient() {
       precioTotalBs: precioBs,
       tasaBcvUsada: tasaUsada,
       modalidadPago: form.modalidadPago,
-      notas: form.notas.trim() || undefined,
+      notas: notasFinal || undefined,
     };
     try {
       const nueva = await createCompra(input);
@@ -360,6 +394,55 @@ export function ComprasClient() {
             </select>
           </label>
 
+          <div className="text-sm text-cacao">
+            ¿El monto lleva IVA?
+            <div className="mt-1 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setForm({ ...form, ivaModo: "con" })}
+                className={
+                  form.ivaModo === "con"
+                    ? "rounded-lg bg-cacao text-white px-3 py-2 text-sm font-medium"
+                    : "rounded-lg ring-1 ring-marfil px-3 py-2 text-sm text-cacao hover:bg-marfil-soft"
+                }
+              >
+                Con IVA
+              </button>
+              <button
+                type="button"
+                onClick={() => setForm({ ...form, ivaModo: "sin" })}
+                className={
+                  form.ivaModo === "sin"
+                    ? "rounded-lg bg-cacao text-white px-3 py-2 text-sm font-medium"
+                    : "rounded-lg ring-1 ring-marfil px-3 py-2 text-sm text-cacao hover:bg-marfil-soft"
+                }
+              >
+                Sin IVA (+{Number(form.ivaPorc) || 0}%)
+              </button>
+              {form.ivaModo === "sin" && (
+                <label className="flex items-center gap-1.5 text-xs text-cacao-mute">
+                  IVA
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={form.ivaPorc}
+                    onChange={(e) =>
+                      setForm({ ...form, ivaPorc: e.target.value })
+                    }
+                    className="w-16 rounded-lg ring-1 ring-marfil px-2 py-1.5 text-sm text-cacao"
+                  />
+                  %
+                </label>
+              )}
+            </div>
+            <span className="text-xs text-cacao-mute block mt-1">
+              {form.ivaModo === "con"
+                ? "El monto ya incluye el IVA — se guarda tal cual."
+                : "El sistema le suma el IVA al monto para calcular el costo real."}
+            </span>
+          </div>
+
           {pagaEnBs ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <label className="text-sm text-cacao">
@@ -392,16 +475,20 @@ export function ComprasClient() {
                 <span className="text-xs text-cacao-mute block mt-1">
                   Equivalente USD:{" "}
                   <span className="text-cacao font-medium">
-                    $
-                    {form.precioTotalBs && form.tasaBcvUsada
-                      ? (
-                          Number(form.precioTotalBs) /
-                          Number(form.tasaBcvUsada)
-                        ).toFixed(2)
-                      : "0.00"}
+                    ${totalUsdConIva.toFixed(2)}
                   </span>
                 </span>
               </label>
+              {form.ivaModo === "sin" && montoBase > 0 && (
+                <p className="sm:col-span-2 text-[11px] text-cacao-mute -mt-1">
+                  Base Bs {montoBase.toFixed(2)} + IVA{" "}
+                  {Number(form.ivaPorc) || 0}% ={" "}
+                  <span className="text-cacao font-medium">
+                    Bs {montoConIva.toFixed(2)}
+                  </span>{" "}
+                  (total que se guarda)
+                </p>
+              )}
             </div>
           ) : (
             <label className="text-sm text-cacao block">
@@ -417,6 +504,16 @@ export function ComprasClient() {
                 }
                 className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2"
               />
+              {form.ivaModo === "sin" && montoBase > 0 && (
+                <span className="text-xs text-cacao-mute block mt-1">
+                  Base ${montoBase.toFixed(2)} + IVA {Number(form.ivaPorc) || 0}%
+                  ={" "}
+                  <span className="text-cacao font-medium">
+                    ${montoConIva.toFixed(2)}
+                  </span>{" "}
+                  (total que se guarda)
+                </span>
+              )}
             </label>
           )}
 
