@@ -421,8 +421,9 @@ function Section({
                   <div className="font-medium text-cacao">{ev.titulo}</div>
                   <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
                     <span
-                      className={`px-2 py-0.5 rounded-full ring-1 ${e.color}`}
+                      className={`px-2 py-0.5 rounded-full ring-1 inline-flex items-center gap-1.5 ${e.color}`}
                     >
+                      <span className={`inline-block w-2 h-2 rounded-full ${e.dot}`} />
                       {e.label}
                     </span>
                     {ev.horario && (

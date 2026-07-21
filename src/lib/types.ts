@@ -55,18 +55,18 @@ export type Evento = {
   notas?: string;
 };
 
-export const ESTADOS_TAREA: { value: EstadoTarea; label: string; color: string }[] = [
-  { value: "pendiente", label: "⚪ Pendiente", color: "bg-stone-100 text-stone-700 ring-stone-200" },
-  { value: "en_proceso", label: "🟡 En proceso", color: "bg-amber-50 text-amber-800 ring-amber-200" },
-  { value: "urgente", label: "🔴 Urgente", color: "bg-red-50 text-red-800 ring-red-200" },
-  { value: "bloqueado", label: "🚫 Bloqueado", color: "bg-pink-50 text-pink-800 ring-pink-200" },
-  { value: "completado", label: "🟢 Completado", color: "bg-emerald-50 text-emerald-800 ring-emerald-200" },
+export const ESTADOS_TAREA: { value: EstadoTarea; label: string; color: string; dot: string }[] = [
+  { value: "pendiente", label: "Pendiente", color: "bg-stone-100 text-stone-700 ring-stone-200", dot: "bg-stone-400" },
+  { value: "en_proceso", label: "En proceso", color: "bg-amber-50 text-amber-800 ring-amber-200", dot: "bg-amber-500" },
+  { value: "urgente", label: "Urgente", color: "bg-red-50 text-red-800 ring-red-200", dot: "bg-red-500" },
+  { value: "bloqueado", label: "Bloqueado", color: "bg-pink-50 text-pink-800 ring-pink-200", dot: "bg-pink-500" },
+  { value: "completado", label: "Completado", color: "bg-emerald-50 text-emerald-800 ring-emerald-200", dot: "bg-emerald-500" },
 ];
 
-export const PRIORIDADES: { value: Prioridad; label: string }[] = [
-  { value: "alta", label: "🔴 Alta" },
-  { value: "media", label: "🟡 Media" },
-  { value: "baja", label: "🟢 Baja" },
+export const PRIORIDADES: { value: Prioridad; label: string; dot: string }[] = [
+  { value: "alta", label: "Alta", dot: "bg-red-500" },
+  { value: "media", label: "Media", dot: "bg-amber-500" },
+  { value: "baja", label: "Baja", dot: "bg-emerald-500" },
 ];
 
 export const AREAS: Area[] = [
@@ -81,11 +81,11 @@ export const AREAS: Area[] = [
   "Admin",
 ];
 
-export const ESTADOS_EVENTO: { value: EstadoEvento; label: string; color: string }[] = [
-  { value: "por_confirmar", label: "🟡 Por confirmar", color: "bg-amber-50 text-amber-800 ring-amber-200" },
-  { value: "confirmado", label: "🟢 Confirmado", color: "bg-emerald-50 text-emerald-800 ring-emerald-200" },
-  { value: "cancelado", label: "❌ Cancelado", color: "bg-stone-100 text-stone-600 ring-stone-200" },
-  { value: "realizado", label: "✅ Realizado", color: "bg-blue-50 text-blue-800 ring-blue-200" },
+export const ESTADOS_EVENTO: { value: EstadoEvento; label: string; color: string; dot: string }[] = [
+  { value: "por_confirmar", label: "Por confirmar", color: "bg-amber-50 text-amber-800 ring-amber-200", dot: "bg-amber-500" },
+  { value: "confirmado", label: "Confirmado", color: "bg-emerald-50 text-emerald-800 ring-emerald-200", dot: "bg-emerald-500" },
+  { value: "cancelado", label: "Cancelado", color: "bg-stone-100 text-stone-600 ring-stone-200", dot: "bg-stone-400" },
+  { value: "realizado", label: "Realizado", color: "bg-blue-50 text-blue-800 ring-blue-200", dot: "bg-blue-500" },
 ];
 
 // ────────────────────────────────────────────────────────────────
@@ -115,9 +115,9 @@ export function faseLabel(f: string): string {
 export type EstatusActividad = "pendiente" | "hecho" | "omitido";
 
 export const ESTATUS_ACTIVIDAD: { value: EstatusActividad; label: string; color: string }[] = [
-  { value: "pendiente", label: "⏳ Pendiente", color: "bg-stone-100 text-stone-700 ring-stone-200" },
-  { value: "hecho", label: "✅ Hecho", color: "bg-emerald-50 text-emerald-800 ring-emerald-200" },
-  { value: "omitido", label: "⏭ Omitido", color: "bg-stone-100 text-stone-500 ring-stone-200" },
+  { value: "pendiente", label: "Pendiente", color: "bg-stone-100 text-stone-700 ring-stone-200" },
+  { value: "hecho", label: "Hecho", color: "bg-emerald-50 text-emerald-800 ring-emerald-200" },
+  { value: "omitido", label: "Omitido", color: "bg-stone-100 text-stone-500 ring-stone-200" },
 ];
 
 export type EventoTarea = {
@@ -416,8 +416,8 @@ export function stockLibre(i: Pick<Insumo, "stockTotal" | "stockComprometido">):
 // sirve para costear. Estos umbrales definen cuándo avisar que un precio está
 // viejo. Son globales; si más adelante quieres afinarlos por insumo o hacerlos
 // editables, se mueven a CocinaConfig.
-export const PRECIO_FRESCO_DIAS = 7; // 🟢 hasta 7 días: fresco
-export const PRECIO_VIEJO_DIAS = 14; // 🟡 8–14: revisar · 🔴 >14: viejo
+export const PRECIO_FRESCO_DIAS = 7; // hasta 7 días: fresco
+export const PRECIO_VIEJO_DIAS = 14; // 8–14: revisar · >14: viejo
 
 export type NivelFrescuraPrecio = "fresco" | "revisar" | "viejo" | "sin_fecha";
 
@@ -546,17 +546,17 @@ export const ESTADOS_INVENTARIO: {
 }[] = [
   {
     value: "disponible",
-    label: "🟢 Disponible",
+    label: "Disponible",
     color: "bg-emerald-50 text-emerald-800 ring-emerald-200",
   },
   {
     value: "mantenimiento",
-    label: "🟡 Mantenimiento",
+    label: "Mantenimiento",
     color: "bg-amber-50 text-amber-800 ring-amber-200",
   },
   {
     value: "agotado",
-    label: "🔴 Agotado",
+    label: "Agotado",
     color: "bg-red-50 text-red-800 ring-red-200",
   },
 ];

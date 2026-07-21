@@ -145,8 +145,9 @@ export function EventoDetailClient({ id }: { id: string }) {
           </p>
           <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
             <span
-              className={`px-2.5 py-0.5 rounded-full ring-1 ${estado.color}`}
+              className={`px-2.5 py-0.5 rounded-full ring-1 inline-flex items-center gap-1.5 ${estado.color}`}
             >
+              <span className={`inline-block w-2 h-2 rounded-full ${estado.dot}`} />
               {estado.label}
             </span>
             {evento.horario && (
