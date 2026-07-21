@@ -109,6 +109,39 @@ export async function listVentas(limit = 100): Promise<Venta[]> {
   return (data as Row[]).map(rowToVenta);
 }
 
+/**
+ * Historial por DÍAS COMPLETOS: trae todas las ventas de las `dias` fechas más
+ * recientes, sin cortar ningún día por la mitad. A diferencia de un tope de
+ * filas (que puede dejar una fecha incompleta en el borde), aquí cada fecha que
+ * aparece trae todos sus ítems — así el total por día del historial es fiel.
+ */
+export async function listVentasDiasCompletos(dias = 30): Promise<Venta[]> {
+  const sb = createSupabaseBrowserClient();
+  // Paso 1: derivar las fechas distintas más recientes (columna liviana).
+  const { data: fechasRows, error: e1 } = await sb
+    .from("ventas")
+    .select("fecha")
+    .eq("es_merma", false)
+    .order("fecha", { ascending: false })
+    .limit(2000);
+  if (e1) throw e1;
+  const fechas = Array.from(
+    new Set((fechasRows as { fecha: string }[]).map((r) => r.fecha)),
+  );
+  if (fechas.length === 0) return [];
+  // La fecha de corte es la n-ésima más reciente; traemos todo desde ahí.
+  const corte = fechas[Math.min(dias, fechas.length) - 1];
+  const { data, error } = await sb
+    .from("ventas")
+    .select("*")
+    .eq("es_merma", false)
+    .gte("fecha", corte)
+    .order("fecha", { ascending: false })
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return (data as Row[]).map(rowToVenta);
+}
+
 /** Solo mermas de producción (pérdidas internas de algo pre-producido). */
 export async function listMermas(limit = 200): Promise<Venta[]> {
   const sb = createSupabaseBrowserClient();

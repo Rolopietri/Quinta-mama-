@@ -12,7 +12,7 @@ import type {
 import { listRecetas } from "@/lib/data/recetas";
 import { listProveedores, listInsumos } from "@/lib/data/cocina";
 import {
-  listVentas,
+  listVentasDiasCompletos,
   createVenta,
   createVentasBatch,
   deleteVenta,
@@ -99,7 +99,7 @@ export function VentasClient() {
       try {
         const [r, v, c, p, ins] = await Promise.all([
           listRecetas(),
-          listVentas(50),
+          listVentasDiasCompletos(30),
           listClasificacion(),
           listProveedores(),
           listInsumos(),
