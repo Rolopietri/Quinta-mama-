@@ -63,10 +63,10 @@ export const ESTADOS_TAREA: { value: EstadoTarea; label: string; color: string; 
   { value: "completado", label: "Completado", color: "bg-emerald-50 text-emerald-800 ring-emerald-200", dot: "bg-emerald-500" },
 ];
 
-export const PRIORIDADES: { value: Prioridad; label: string; dot: string }[] = [
-  { value: "alta", label: "Alta", dot: "bg-red-500" },
-  { value: "media", label: "Media", dot: "bg-amber-500" },
-  { value: "baja", label: "Baja", dot: "bg-emerald-500" },
+export const PRIORIDADES: { value: Prioridad; label: string; color: string; dot: string }[] = [
+  { value: "alta", label: "Alta", color: "bg-red-50 text-red-800 ring-red-200", dot: "bg-red-500" },
+  { value: "media", label: "Media", color: "bg-amber-50 text-amber-800 ring-amber-200", dot: "bg-amber-500" },
+  { value: "baja", label: "Baja", color: "bg-emerald-50 text-emerald-800 ring-emerald-200", dot: "bg-emerald-500" },
 ];
 
 export const AREAS: Area[] = [

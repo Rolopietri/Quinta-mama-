@@ -347,7 +347,7 @@ export function TareasClient() {
                         </span>
                       )}
                       {pr && (
-                        <span className="px-2 py-0.5 rounded-full bg-marfil-light text-cacao ring-1 ring-marfil inline-flex items-center gap-1.5">
+                        <span className={`px-2 py-0.5 rounded-full ring-1 inline-flex items-center gap-1.5 ${pr.color}`}>
                           <span className={`inline-block w-2 h-2 rounded-full ${pr.dot}`} />
                           {pr.label}
                         </span>
