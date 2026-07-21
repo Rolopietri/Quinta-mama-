@@ -24,6 +24,7 @@ type FormState = {
   proveedorId: string;
   fecha: string;
   cantidad: string;
+  cantidadBase: string;
   modalidadPago: ModalidadPago;
   precioTotalUsd: string;
   precioTotalBs: string;
@@ -35,11 +36,18 @@ function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }
 
+/** Formatea una cantidad evitando artefactos de coma flotante (ej. 349.9999). */
+function fmtQty(n: number): string {
+  if (!Number.isFinite(n) || n < 0) return "";
+  return String(Number(n.toFixed(4)));
+}
+
 const emptyForm: FormState = {
   insumoId: "",
   proveedorId: "",
   fecha: todayISO(),
   cantidad: "1",
+  cantidadBase: "",
   modalidadPago: "divisa",
   precioTotalUsd: "",
   precioTotalBs: "",
@@ -103,6 +111,44 @@ export function ComprasClient() {
       form.modalidadPago === "paralela",
     [form.modalidadPago],
   );
+
+  // Contenido del empaque del insumo elegido (unidades base por unidad de compra).
+  const cantPorCompra = insumoSeleccionado?.cantidadPorCompra ?? 0;
+
+  // Mostrar el 2do campo (unidad base) solo si aporta algo: hay conversión y no
+  // es idéntico a la unidad de compra (ej. "unidad" con contenido 1).
+  const mostrarBase =
+    !!insumoSeleccionado &&
+    cantPorCompra > 0 &&
+    !!insumoSeleccionado.unidadBase &&
+    !(
+      insumoSeleccionado.unidadBase === insumoSeleccionado.unidadCompra &&
+      cantPorCompra === 1
+    );
+
+  // Al escribir en un campo, se convierte y llena el otro (ida y vuelta).
+  function onCantidadCompra(v: string) {
+    const n = Number(v);
+    setForm((f) => ({
+      ...f,
+      cantidad: v,
+      cantidadBase:
+        cantPorCompra > 0 && v.trim() !== "" && Number.isFinite(n)
+          ? fmtQty(n * cantPorCompra)
+          : "",
+    }));
+  }
+  function onCantidadBase(v: string) {
+    const n = Number(v);
+    setForm((f) => ({
+      ...f,
+      cantidadBase: v,
+      cantidad:
+        cantPorCompra > 0 && v.trim() !== "" && Number.isFinite(n)
+          ? fmtQty(n / cantPorCompra)
+          : "",
+    }));
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -198,9 +244,20 @@ export function ComprasClient() {
               <select
                 required
                 value={form.insumoId}
-                onChange={(e) =>
-                  setForm({ ...form, insumoId: e.target.value })
-                }
+                onChange={(e) => {
+                  const nuevoId = e.target.value;
+                  const ins = insumos.find((i) => i.id === nuevoId);
+                  const cpc = ins?.cantidadPorCompra ?? 0;
+                  const n = Number(form.cantidad);
+                  setForm({
+                    ...form,
+                    insumoId: nuevoId,
+                    cantidadBase:
+                      cpc > 0 && form.cantidad.trim() !== "" && Number.isFinite(n)
+                        ? fmtQty(n * cpc)
+                        : "",
+                  });
+                }}
                 className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2 bg-white"
               >
                 <option value="">— Selecciona insumo —</option>
@@ -230,36 +287,62 @@ export function ComprasClient() {
             </label>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <label className="text-sm text-cacao">
-              Fecha
-              <input
-                type="date"
-                required
-                value={form.fecha}
-                onChange={(e) => setForm({ ...form, fecha: e.target.value })}
-                className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2"
-              />
-            </label>
-            <label className="text-sm text-cacao">
-              Cantidad{" "}
-              {insumoSeleccionado && (
-                <span className="text-xs text-cacao-mute">
-                  (en {insumoSeleccionado.unidadCompra})
+          <label className="text-sm text-cacao block">
+            Fecha
+            <input
+              type="date"
+              required
+              value={form.fecha}
+              onChange={(e) => setForm({ ...form, fecha: e.target.value })}
+              className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2"
+            />
+          </label>
+
+          <div className="text-sm text-cacao">
+            Cantidad comprada
+            <div className="mt-1 grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <input
+                  type="number"
+                  step="0.0001"
+                  min="0"
+                  required
+                  placeholder="0"
+                  value={form.cantidad}
+                  onChange={(e) => onCantidadCompra(e.target.value)}
+                  className="w-full rounded-lg ring-1 ring-marfil px-3 py-2"
+                />
+                <span className="text-xs text-cacao-mute block mt-0.5">
+                  en{" "}
+                  {insumoSeleccionado
+                    ? insumoSeleccionado.unidadCompra
+                    : "unidad de compra"}
                 </span>
+              </div>
+              {mostrarBase && (
+                <div>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    placeholder="0"
+                    value={form.cantidadBase}
+                    onChange={(e) => onCantidadBase(e.target.value)}
+                    className="w-full rounded-lg ring-1 ring-marfil px-3 py-2"
+                  />
+                  <span className="text-xs text-cacao-mute block mt-0.5">
+                    o en {insumoSeleccionado?.unidadBase} (más preciso)
+                  </span>
+                </div>
               )}
-              <input
-                type="number"
-                step="0.0001"
-                min="0"
-                required
-                value={form.cantidad}
-                onChange={(e) =>
-                  setForm({ ...form, cantidad: e.target.value })
-                }
-                className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2"
-              />
-            </label>
+            </div>
+            {mostrarBase && (
+              <p className="text-[11px] text-cacao-mute mt-1.5">
+                Llena el que prefieras — se convierten solos (1{" "}
+                {insumoSeleccionado?.unidadCompra} = {fmtQty(cantPorCompra)}{" "}
+                {insumoSeleccionado?.unidadBase}).
+              </p>
+            )}
           </div>
 
           <label className="text-sm text-cacao block">
