@@ -18,6 +18,7 @@ import {
   deleteInsumo,
   actualizarPrecioInsumo,
   listProveedores,
+  createProveedor,
 } from "@/lib/data/cocina";
 import { UnitCalculator } from "@/components/UnitCalculator";
 import { UnidadSelect } from "@/components/UnidadSelect";
@@ -114,6 +115,10 @@ export function InsumosClient() {
   const [form, setForm] = useState<FormState>({ ...emptyForm });
   // true cuando el usuario eligió "+ Nueva categoría…" en el desplegable.
   const [creandoCategoria, setCreandoCategoria] = useState(false);
+  // Alta de proveedor en línea desde el desplegable "Proveedor" del form.
+  const [creandoProveedor, setCreandoProveedor] = useState(false);
+  const [nuevoProveedor, setNuevoProveedor] = useState("");
+  const [guardandoProveedor, setGuardandoProveedor] = useState(false);
   const [pendienteBorrar, setPendienteBorrar] = useState<string | null>(null);
   // Fecha de hoy (YYYY-MM-DD) para medir la frescura de cada precio.
   const hoy = useMemo(() => new Date().toISOString().slice(0, 10), []);
@@ -145,13 +150,48 @@ export function InsumosClient() {
   function resetForm() {
     setForm({ ...emptyForm });
     setCreandoCategoria(false);
+    setCreandoProveedor(false);
+    setNuevoProveedor("");
     setEditingId(null);
     setAdding(false);
+  }
+
+  // Da de alta un proveedor mínimo (solo nombre) desde el form de insumo y lo
+  // deja seleccionado. Los medios de pago y contacto se completan luego en el
+  // módulo de Proveedores.
+  async function agregarProveedor() {
+    const nombre = nuevoProveedor.trim();
+    if (!nombre) return;
+    setGuardandoProveedor(true);
+    setError(null);
+    try {
+      const nuevo = await createProveedor({
+        nombre,
+        aceptaBsBcvDolar: false,
+        aceptaBsBcvEuro: false,
+        aceptaBsParalela: false,
+        aceptaUsdEfectivo: false,
+        aceptaUsdDivisa: false,
+        activo: true,
+      });
+      setProveedores((prev) =>
+        [...prev, nuevo].sort((a, b) => a.nombre.localeCompare(b.nombre)),
+      );
+      setForm((f) => ({ ...f, proveedorId: nuevo.id }));
+      setCreandoProveedor(false);
+      setNuevoProveedor("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error creando proveedor");
+    } finally {
+      setGuardandoProveedor(false);
+    }
   }
 
   function startEdit(ins: Insumo) {
     setEditingId(ins.id);
     setCreandoCategoria(false);
+    setCreandoProveedor(false);
+    setNuevoProveedor("");
     setForm({
       nombre: ins.nombre,
       categoria: ins.categoria,
@@ -168,6 +208,13 @@ export function InsumosClient() {
       notas: ins.notas ?? "",
     });
     setAdding(true);
+    // El form vive arriba de la lista; si editas un insumo que está más abajo,
+    // parecería que el botón "no hace nada". Llevamos la vista al form.
+    requestAnimationFrame(() => {
+      document
+        .getElementById("insumo-form")
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
   }
 
   // Cambia la unidad en que se carga el stock (base ↔ unidad de compra),
@@ -407,6 +454,7 @@ export function InsumosClient() {
 
       {adding && (
         <form
+          id="insumo-form"
           onSubmit={handleSubmit}
           className="mb-5 rounded-2xl bg-white ring-1 ring-marfil p-5 space-y-3"
         >
@@ -480,10 +528,17 @@ export function InsumosClient() {
             <label className="text-sm text-cacao">
               Proveedor
               <select
-                value={form.proveedorId}
-                onChange={(e) =>
-                  setForm({ ...form, proveedorId: e.target.value })
-                }
+                value={creandoProveedor ? "__nuevo__" : form.proveedorId}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === "__nuevo__") {
+                    setCreandoProveedor(true);
+                    setNuevoProveedor("");
+                  } else {
+                    setCreandoProveedor(false);
+                    setForm({ ...form, proveedorId: v });
+                  }
+                }}
                 className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2 bg-white"
               >
                 <option value="">— Ninguno —</option>
@@ -492,7 +547,36 @@ export function InsumosClient() {
                     {p.nombre}
                   </option>
                 ))}
+                <option value="__nuevo__">+ Nuevo proveedor…</option>
               </select>
+              {creandoProveedor && (
+                <div className="mt-2 flex gap-2">
+                  <input
+                    type="text"
+                    value={nuevoProveedor}
+                    onChange={(e) => setNuevoProveedor(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        agregarProveedor();
+                      }
+                    }}
+                    placeholder="Nombre del proveedor nuevo"
+                    autoFocus
+                    autoCapitalize="words"
+                    spellCheck={false}
+                    className="flex-1 rounded-lg ring-1 ring-marfil px-3 py-2"
+                  />
+                  <button
+                    type="button"
+                    onClick={agregarProveedor}
+                    disabled={guardandoProveedor || !nuevoProveedor.trim()}
+                    className="shrink-0 rounded-lg bg-cacao text-white px-3 py-2 text-sm font-medium hover:bg-terracotta transition-colors disabled:opacity-50"
+                  >
+                    {guardandoProveedor ? "Guardando…" : "Agregar"}
+                  </button>
+                </div>
+              )}
             </label>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
