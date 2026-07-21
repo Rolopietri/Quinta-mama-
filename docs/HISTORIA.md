@@ -131,7 +131,7 @@ Lucía envió un documento de requerimientos de 6 páginas describiendo un siste
 - **Seed precargado con ~50 insumos** del Excel "Costos cafetería" de Lucía (café, lácteos, frutas, panadería, proteínas, bebidas, desechables)
 - **Multi-moneda:** USD como referencia, Bs con tasa BCV/euro/paralela almacenadas por compra
 - **Vercel Cron diario** (9am Caracas) que trae tasa BCV oficial desde `ve.dolarapi.com`
-- **Cron BCV — seguridad (M9, CERRADO jul 2026):** al inicio el cron escribía con la anon key (RLS permitía anon insert solo en `tasa_bcv`). Como la anon key es pública (va en el bundle), se blindó: ahora el cron escribe con la **service_role** (`SUPABASE_SERVICE_ROLE_KEY` en Vercel, secreta — con la nueva `sb_secret_…` de Supabase) y se quitaron las políticas de escritura anónima (`tasa_anon_insert` / `tasa_anon_update`). Anon solo puede **leer** (`tasa_anon_select`). Ver `cocina-fix-cron-rls.sql` y `src/app/api/cron/bcv/route.ts`.
+- **Bug:** el cron usa anon key pero RLS exigía authenticated → fix `cocina-fix-cron-rls.sql` que permite anon insert solo a `tasa_bcv`
 - **Triggers SQL** automáticos: al insertar compra → actualiza stock + rota últimas 2 compras + actualiza precio. Al cambiar precio → registra en historial.
 - **Aclaración importante con Rodrigo:** no son 2 locales, es 1 local con 2 secciones operativas (Cafetín + Comedor)
 
@@ -195,7 +195,7 @@ Lucía envió un documento de requerimientos de 6 páginas describiendo un siste
 | `@react-pdf/renderer` en vez de Puppeteer | Más liviano, React puro, sin headless Chrome |
 | Fuentes locales en `/public/fonts/` | URLs de Google Fonts cambian de versión, rompen el PDF |
 | Logo en PNG además de SVG | react-pdf no rasteriza SVG complejo bien |
-| Service-role para cron BCV (M9, cerrado) | La anon key es pública → cualquiera podría fijar una tasa falsa y descuadrar los precios en Bs. El cron escribe con service_role (secreta, en Vercel); anon solo lee |
+| Anon key para cron BCV | Más simple que service_role, RLS permite solo `tasa_bcv` |
 | Texto negro (no cacao marrón) | Decisión editorial: más legible, más Soho House |
 | `cocina_config` como singleton (id=1) | Mejor que key/value, queries más simples |
 | Ingredientes ad-hoc con `costo_manual_usd` | Permite costear líneas libres sin forzar a crear insumo |
@@ -227,7 +227,7 @@ Todos viven en `supabase/`. Aplicar en este orden si se rehace la BD:
 | 1 | `schema.sql` | tareas, eventos, función `set_updated_at` | ✅ |
 | 2 | `presupuestos.sql` | presupuestos, presupuesto_items, secuencia numeración | ✅ |
 | 3 | `cocina.sql` | proveedores, insumos, compras, tasa_bcv, historial precios + seed ~50 insumos | ✅ |
-| 4 | `cocina-fix-cron-rls.sql` | RLS de `tasa_bcv`: bloquea escritura anónima, deja solo lectura anónima — el cron escribe con service_role (M9, cerrado) | ✅ |
+| 4 | `cocina-fix-cron-rls.sql` | políticas RLS para que el cron pueda escribir `tasa_bcv` | ✅ |
 | 5 | `cocina-recetas.sql` | recetas, receta_ingredientes + seed 11 recetas reales | ✅ |
 | 6 | `cocina-recetas-costo-manual.sql` | columna `costo_manual_usd` en ingredientes ad-hoc | ✅ |
 | 7 | `cocina-config.sql` | singleton de parámetros de rentabilidad | ✅ |
