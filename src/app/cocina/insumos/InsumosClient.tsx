@@ -909,6 +909,14 @@ function PrecioCelda({
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState("");
   const [saving, setSaving] = useState(false);
+  const [justSaved, setJustSaved] = useState(false);
+
+  // Confirmación breve "✓ Precio actualizado" que se desvanece sola.
+  useEffect(() => {
+    if (!justSaved) return;
+    const t = setTimeout(() => setJustSaved(false), 2500);
+    return () => clearTimeout(t);
+  }, [justSaved]);
 
   const fechaPrecio = insumo.precioActualizado ?? insumo.ultimaFecha ?? null;
   const { nivel, dias } = frescuraPrecio(fechaPrecio, hoy);
@@ -935,6 +943,7 @@ function PrecioCelda({
       );
       onRefreshed(upd);
       setEditing(false);
+      setJustSaved(true);
     } catch (e) {
       onError(e instanceof Error ? e.message : "Error actualizando precio");
     } finally {
@@ -996,6 +1005,10 @@ function PrecioCelda({
             ✕
           </button>
         </div>
+      ) : justSaved ? (
+        <span className="mt-1 inline-block text-[10px] uppercase tracking-widest text-emerald-700">
+          ✓ Precio actualizado
+        </span>
       ) : (
         <button
           type="button"
