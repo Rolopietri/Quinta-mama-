@@ -543,19 +543,52 @@ export function InsumosClient() {
                 unidadesExtra={unidadesSistema.base}
                 value={form.unidadBase}
                 onChange={(v) => {
-                  const nuevoRatio = ratioEsperado(form.unidadCompra, v);
+                  const oldBase = form.unidadBase;
+                  const factor =
+                    oldBase && v && oldBase !== v && areCompatible(oldBase, v)
+                      ? convert(1, oldBase, v)
+                      : null;
                   const cantActual = Number(form.cantidadPorCompra);
-                  const debeAutocompletar =
-                    nuevoRatio !== null &&
-                    (form.cantidadPorCompra === "" ||
-                      form.cantidadPorCompra === "1" ||
-                      !Number.isFinite(cantActual));
+                  const esDefault =
+                    form.cantidadPorCompra === "" ||
+                    form.cantidadPorCompra === "1" ||
+                    !Number.isFinite(cantActual);
+
+                  // Cambio a unidad compatible (g↔kg, ml↔L) con valores reales:
+                  // convertir stock, mínimo y contenido para que la cantidad
+                  // física NO cambie (ej. 500 g → 0.5 kg).
+                  if (factor !== null && !esDefault) {
+                    const conv = (s: string) => {
+                      if (s.trim() === "") return s;
+                      const n = Number(s);
+                      if (!Number.isFinite(n)) return s;
+                      return String(Math.round(n * factor * 10000) / 10000);
+                    };
+                    setForm({
+                      ...form,
+                      unidadBase: v,
+                      cantidadPorCompra: conv(form.cantidadPorCompra),
+                      stockTotal:
+                        form.stockUnidad === "base"
+                          ? conv(form.stockTotal)
+                          : form.stockTotal,
+                      stockMinimo:
+                        form.stockUnidad === "base"
+                          ? conv(form.stockMinimo)
+                          : form.stockMinimo,
+                    });
+                    return;
+                  }
+
+                  // Si el contenido estaba en default, autocompletar el ratio.
+                  const nuevoRatio = ratioEsperado(form.unidadCompra, v);
                   setForm({
                     ...form,
                     unidadBase: v,
-                    cantidadPorCompra: debeAutocompletar
-                      ? String(nuevoRatio)
-                      : form.cantidadPorCompra,
+                    cantidadPorCompra:
+                      nuevoRatio !== null && esDefault
+                        ? String(nuevoRatio)
+                        : form.cantidadPorCompra,
                   });
                 }}
                 className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2 bg-white"
