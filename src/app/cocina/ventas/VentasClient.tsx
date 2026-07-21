@@ -17,6 +17,7 @@ import {
   createVentasBatch,
   deleteVenta,
   parseCSV,
+  valoresMonto,
   clasificarFilas,
   listClasificacion,
   upsertClasificacion,
@@ -84,6 +85,10 @@ export function VentasClient() {
   const [iFecha, setIFecha] = useState(todayISO());
   const [csvText, setCsvText] = useState("");
   const [clasif, setClasif] = useState<ClasificItem[] | null>(null);
+  // Cómo interpretar la columna de dinero del CSV: total de línea o precio
+  // unitario. Se inicializa con la adivinanza del parser y el usuario la puede
+  // cambiar en el preview (viéndolo reflejado en los totales antes de confirmar).
+  const [montoEsTotal, setMontoEsTotal] = useState(true);
   const [clasifs, setClasifs] = useState<PosClasificacion[]>([]);
   const [importing, setImporting] = useState(false);
   const [pendienteBorrar, setPendienteBorrar] = useState<string | null>(null);
@@ -178,6 +183,8 @@ export function VentasClient() {
         setClasif(null);
         return;
       }
+      // Arrancamos con la interpretación que adivinó el parser (la del CSV).
+      setMontoEsTotal(filas[0]?.montoEsTotal ?? true);
       setClasif(clasificarFilas(filas, recetasVendibles, clasifs, insumos));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error parseando CSV");
@@ -390,13 +397,15 @@ export function VentasClient() {
       const batch = nuevoBatchId();
       // Se registran TODAS las filas. Los que no son insumo van sin receta
       // (receta_id null) → no descuentan stock, pero sí registran el ingreso.
-      const ventasInput = clasif.map((c) => ({
+      const ventasInput = clasif.map((c) => {
+        const { total, precioUnitario } = valoresMonto(c.fila, montoEsTotal);
+        return {
         fecha: iFecha,
         recetaId: c.tipo === "insumo" && c.receta ? c.receta.id : undefined,
         recetaNombre: c.receta?.nombre ?? c.insumo?.nombre ?? c.fila.nombre,
         cantidad: c.fila.cantidad,
-        precioUnitarioUsd: c.fila.precioUnitario,
-        totalUsd: c.fila.total,
+        precioUnitarioUsd: precioUnitario,
+        totalUsd: total,
         fuente: "xetux_csv" as const,
         batchId: batch,
         tipoItem: c.tipo,
@@ -420,7 +429,8 @@ export function VentasClient() {
             : undefined,
         swapToInsumoId:
           c.tipo === "insumo" ? c.clasif?.swapToInsumoId : undefined,
-      }));
+        };
+      });
       const created = await createVentasBatch(ventasInput);
       setVentas((prev) => [...created, ...prev]);
       setCsvText("");
@@ -681,8 +691,44 @@ export function VentasClient() {
                   habilitará.
                 </p>
               )}
+              <div className="mb-3 rounded-lg bg-marfil-soft ring-1 ring-marfil p-3">
+                <p className="text-xs text-cacao font-medium mb-1">
+                  La columna de dinero del archivo es…
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setMontoEsTotal(true)}
+                    className={
+                      montoEsTotal
+                        ? "rounded-lg bg-cacao text-white px-3 py-1.5 text-xs font-medium"
+                        : "rounded-lg ring-1 ring-marfil bg-white px-3 py-1.5 text-xs text-cacao hover:bg-white"
+                    }
+                  >
+                    Total de línea (venta neta)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMontoEsTotal(false)}
+                    className={
+                      !montoEsTotal
+                        ? "rounded-lg bg-cacao text-white px-3 py-1.5 text-xs font-medium"
+                        : "rounded-lg ring-1 ring-marfil bg-white px-3 py-1.5 text-xs text-cacao hover:bg-white"
+                    }
+                  >
+                    Precio por unidad
+                  </button>
+                </div>
+                <p className="text-[11px] text-cacao-mute mt-1.5">
+                  Revisa los totales de abajo y elige el que cuadre con tu
+                  reporte. En el &ldquo;detallado por producto&rdquo; de Xetux es{" "}
+                  <strong>total de línea</strong>.
+                </p>
+              </div>
               <ul className="divide-y divide-marfil text-sm">
-                {clasif.map((c, i) => (
+                {clasif.map((c, i) => {
+                  const mv = valoresMonto(c.fila, montoEsTotal);
+                  return (
                   <li
                     key={i}
                     className={`py-2 grid grid-cols-12 gap-2 items-center ${
@@ -694,12 +740,12 @@ export function VentasClient() {
                       ×{c.fila.cantidad}
                     </div>
                     <div className="col-span-2 text-cacao-soft text-xs">
-                      {c.fila.total != null ? (
+                      {mv.total != null ? (
                         <>
-                          ${c.fila.total.toFixed(2)}
-                          {c.fila.precioUnitario != null && (
+                          ${mv.total.toFixed(2)}
+                          {mv.precioUnitario != null && (
                             <span className="block text-[10px] text-cacao-mute">
-                              ${c.fila.precioUnitario.toFixed(2)} c/u
+                              ${mv.precioUnitario.toFixed(2)} c/u
                             </span>
                           )}
                         </>
@@ -793,7 +839,8 @@ export function VentasClient() {
                       )}
                     </div>
                   </li>
-                ))}
+                  );
+                })}
               </ul>
             </section>
           )}
