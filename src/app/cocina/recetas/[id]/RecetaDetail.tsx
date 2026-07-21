@@ -399,11 +399,22 @@ export function RecetaDetail({ id }: { id: string }) {
                         : "text-terracotta"
                   }`}
                 >
-                  {rent.semaforo === "verde"
-                    ? "🟢 Saludable"
-                    : rent.semaforo === "amarillo"
-                      ? "🟡 Aceptable"
-                      : "🔴 Bajo margen"}
+                  <span className="inline-flex items-center gap-1.5">
+                    <span
+                      className={`inline-block w-2 h-2 rounded-full ${
+                        rent.semaforo === "verde"
+                          ? "bg-emerald-500"
+                          : rent.semaforo === "amarillo"
+                            ? "bg-amber-500"
+                            : "bg-terracotta"
+                      }`}
+                    />
+                    {rent.semaforo === "verde"
+                      ? "Saludable"
+                      : rent.semaforo === "amarillo"
+                        ? "Aceptable"
+                        : "Bajo margen"}
+                  </span>
                 </div>
               </div>
             </div>

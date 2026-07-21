@@ -25,10 +25,10 @@ import {
 type FilterSemaforo = "todos" | "verde" | "amarillo" | "rojo" | "sin_precio";
 
 const SEMAFORO_LABEL: Record<RentabilidadReceta["semaforo"], string> = {
-  verde: "🟢 Verde",
-  amarillo: "🟡 Amarillo",
-  rojo: "🔴 Rojo",
-  sin_precio: "⚪ Sin precio",
+  verde: "Verde",
+  amarillo: "Amarillo",
+  rojo: "Rojo",
+  sin_precio: "Sin precio",
 };
 
 const SEMAFORO_CLASS: Record<RentabilidadReceta["semaforo"], string> = {
@@ -275,10 +275,10 @@ export function RentabilidadClient() {
       {stats && (
         <section className="grid grid-cols-2 sm:grid-cols-5 gap-3">
           <StatCard label="Total" value={stats.total} accent="bg-marfil-soft" />
-          <StatCard label="🟢 Verde" value={stats.verde} accent="bg-emerald-50" />
-          <StatCard label="🟡 Amarillo" value={stats.amarillo} accent="bg-amber-50" />
-          <StatCard label="🔴 Rojo" value={stats.rojo} accent="bg-red-50" />
-          <StatCard label="⚪ Sin precio" value={stats.sin} accent="bg-stone-50" />
+          <StatCard label="Verde" value={stats.verde} accent="bg-emerald-50" dot="bg-emerald-500" />
+          <StatCard label="Amarillo" value={stats.amarillo} accent="bg-amber-50" dot="bg-amber-500" />
+          <StatCard label="Rojo" value={stats.rojo} accent="bg-red-50" dot="bg-red-500" />
+          <StatCard label="Sin precio" value={stats.sin} accent="bg-stone-50" dot="bg-stone-400" />
         </section>
       )}
 
@@ -451,14 +451,17 @@ function StatCard({
   label,
   value,
   accent,
+  dot,
 }: {
   label: string;
   value: number;
   accent: string;
+  dot?: string;
 }) {
   return (
     <div className={`rounded-2xl p-4 ring-1 ring-marfil ${accent}`}>
-      <div className="text-[10px] uppercase tracking-widest text-cacao-mute">
+      <div className="text-[10px] uppercase tracking-widest text-cacao-mute flex items-center gap-1.5">
+        {dot && <span className={`inline-block w-2 h-2 rounded-full ${dot}`} />}
         {label}
       </div>
       <div className="text-2xl font-cinzel text-cacao mt-1">{value}</div>

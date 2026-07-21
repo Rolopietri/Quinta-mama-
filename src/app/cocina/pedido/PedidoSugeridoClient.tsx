@@ -491,7 +491,7 @@ export function PedidoSugeridoClient() {
         <div className="rounded-2xl bg-white ring-1 ring-marfil p-8 text-center text-cacao-soft">
           {objetivos.length === 0
             ? "Agrega recetas arriba para ver qué insumos comprar."
-            : "Con el stock actual, alcanza para preparar todo. No hace falta comprar nada. 🟢"}
+            : "Con el stock actual, alcanza para preparar todo. No hace falta comprar nada."}
         </div>
       ) : (
         <section className="space-y-4">
