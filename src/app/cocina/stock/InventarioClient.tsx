@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { WarningIcon } from "@/components/icons";
 import {
   SECCIONES,
   TIPOS_PERDIDA,
@@ -824,7 +825,8 @@ export function InventarioClient() {
             onClick={openMerma}
             className="w-full rounded-xl ring-1 ring-marfil py-2.5 text-sm text-cacao-soft hover:bg-marfil-soft hover:text-cacao transition-colors"
           >
-            ⚠ Registrar merma de producción (por receta)
+            <WarningIcon className="inline size-3.5 align-[-0.15em] mr-1" />
+            Registrar merma de producción (por receta)
           </button>
           {produccionPorReceta.length === 0 ? (
             <p className="text-xs text-cacao-soft italic font-serif py-1">

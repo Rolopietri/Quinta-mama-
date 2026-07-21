@@ -31,6 +31,7 @@ import {
 import { stockLibre } from "@/lib/types";
 import { normalizarBusqueda } from "@/lib/text";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { WarningIcon } from "@/components/icons";
 
 /**
  * Cuántas unidadBase hay en 1 unidadCompra cuando son convertibles.
@@ -111,7 +112,7 @@ export function InsumosClient() {
   const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>({ ...emptyForm });
-  // true cuando el usuario eligió "➕ Nueva categoría…" en el desplegable.
+  // true cuando el usuario eligió "+ Nueva categoría…" en el desplegable.
   const [creandoCategoria, setCreandoCategoria] = useState(false);
   const [pendienteBorrar, setPendienteBorrar] = useState<string | null>(null);
   // Fecha de hoy (YYYY-MM-DD) para medir la frescura de cada precio.
@@ -443,7 +444,7 @@ export function InsumosClient() {
                     {categoriaInsumoLabel(c)}
                   </option>
                 ))}
-                <option value="__nueva__">➕ Nueva categoría…</option>
+                <option value="__nueva__">+ Nueva categoría…</option>
               </select>
               {creandoCategoria && (
                 <input
@@ -779,7 +780,8 @@ export function InsumosClient() {
                               title={`Revisar unidades: 1 ${canonica(i.unidadCompra)} debería ser ${formatN(problemaUnidades.esperado)} ${canonica(i.unidadBase)} (tiene ${formatN(i.cantidadPorCompra)})`}
                               className="ml-2 text-[10px] uppercase tracking-widest text-amber-800 bg-amber-50 ring-1 ring-amber-200 rounded-full px-2 py-0.5 hover:bg-amber-100"
                             >
-                              ⚠ revisar unidades
+                              <WarningIcon className="inline size-3 align-[-0.1em] mr-0.5" />
+                              revisar unidades
                             </button>
                           )}
                         </div>
@@ -880,7 +882,7 @@ function frescuraTexto(nivel: NivelFrescuraPrecio, dias: number | null): string 
   if (nivel === "sin_fecha" || dias === null) return "sin fecha";
   const cuando =
     dias === 0 ? "hoy" : dias === 1 ? "hace 1 día" : `hace ${dias} días`;
-  if (nivel === "viejo") return `⚠ precio viejo · ${cuando}`;
+  if (nivel === "viejo") return `precio viejo · ${cuando}`;
   if (nivel === "revisar") return `revisar precio · ${cuando}`;
   return cuando;
 }
@@ -1049,7 +1051,8 @@ function UnidadesHint({
     return (
       <div className="mt-2 rounded-lg ring-1 ring-amber-200 bg-amber-50 p-2.5 text-xs text-amber-900 flex items-start justify-between gap-3">
         <span>
-          ⚠ <strong>Revisar:</strong> 1 {uc} = {formatN(esperado)} {ub}, así
+          <WarningIcon className="inline size-3.5 align-[-0.15em] mr-1" />
+          <strong>Revisar:</strong> 1 {uc} = {formatN(esperado)} {ub}, así
           que la cantidad por compra debería ser{" "}
           <strong>{formatN(esperado)}</strong> (tienes{" "}
           <strong>{formatN(cant)}</strong>). Si no lo corriges, el precio por{" "}

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { WarningIcon } from "@/components/icons";
 import {
   calcRentabilidad,
   frescuraPrecio,
@@ -195,7 +196,8 @@ export function CosteoClient() {
 
       {insumosViejos.length > 0 && (
         <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419]">
-          ⚠️ {insumosViejos.length} insumo
+          <WarningIcon className="inline size-3.5 align-[-0.15em] mr-1" />
+          {insumosViejos.length} insumo
           {insumosViejos.length === 1 ? "" : "s"} con precio de más de{" "}
           {PRECIO_VIEJO_DIAS} días. El costeo puede estar desactualizado —{" "}
           <Link href="/cocina/insumos" className="underline hover:text-cacao">

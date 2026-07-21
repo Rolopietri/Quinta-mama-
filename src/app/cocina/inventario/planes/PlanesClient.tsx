@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { CalendarIcon, CartIcon } from "@/components/icons";
+import { CalendarIcon, CartIcon, WarningIcon } from "@/components/icons";
 import {
   ESTADOS_PLAN_PRODUCCION,
   stockLibre,
@@ -564,7 +564,8 @@ export function PlanesClient() {
               </ul>
               {previewWarnings.length > 0 && (
                 <div className="text-xs text-terracotta mt-2">
-                  ⚠ No tenés stock libre suficiente para{" "}
+                  <WarningIcon className="inline size-3.5 align-[-0.15em] mr-1" />
+                  No tenés stock libre suficiente para{" "}
                   {previewWarnings.length} ingrediente
                   {previewWarnings.length === 1 ? "" : "s"}. Podes crear el
                   plan igual — el stock comprometido va a quedar mayor al total

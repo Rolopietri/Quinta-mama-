@@ -75,25 +75,25 @@ export const SAMPLE_TAREAS: Tarea[] = [
 export const SAMPLE_EVENTOS: Evento[] = [
   {
     id: "ev-1",
-    titulo: "🛍️ Pop Up Cocol's Choices + Port de Bras",
+    titulo: "Pop Up Cocol's Choices + Port de Bras",
     fecha: "2026-05-29",
     estado: "por_confirmar",
   },
   {
     id: "ev-2",
-    titulo: "🌸 Taller Arreglos Florales — AP Flora",
+    titulo: "Taller Arreglos Florales — AP Flora",
     fecha: "2026-05-06",
     estado: "realizado",
   },
   {
     id: "ev-3",
-    titulo: "🛍️ Pop Up Costaiia",
+    titulo: "Pop Up Costaiia",
     fecha: "2026-05-09",
     estado: "por_confirmar",
   },
   {
     id: "ev-4",
-    titulo: "🎉 Evento del 30 de mayo",
+    titulo: "Evento del 30 de mayo",
     fecha: "2026-05-30",
     estado: "confirmado",
     notas: "Evento más importante del mes",

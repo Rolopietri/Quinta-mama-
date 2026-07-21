@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { WarningIcon } from "@/components/icons";
 import {
   CATEGORIAS_RECETA,
   SECCIONES,
@@ -1032,7 +1033,8 @@ export function RecetaForm({
                   )}
                   {mostrarWarning && conversionInfo && (
                     <div className="text-[11px] text-terracotta pl-1">
-                      ⚠ &ldquo;{l.unidad}&rdquo; y &ldquo;
+                      <WarningIcon className="inline size-3.5 align-[-0.15em] mr-1" />
+                      &ldquo;{l.unidad}&rdquo; y &ldquo;
                       {conversionInfo.unidadDestino}&rdquo; no son convertibles.
                       El costo asume misma unidad — revisa para evitar errores.
                     </div>
