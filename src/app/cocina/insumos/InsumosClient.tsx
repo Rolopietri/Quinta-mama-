@@ -954,7 +954,8 @@ function PrecioCelda({
           ${insumo.precioBaseUsd.toFixed(5)} / {insumo.unidadBase}
         </div>
       )}
-      {insumo.precioCompraUsd !== null && nivel !== "sin_fecha" && (
+      {insumo.precioCompraUsd !== null &&
+        (nivel === "revisar" || nivel === "viejo") && (
         <div className="mt-1">
           <span
             className={`inline-block text-[10px] uppercase tracking-widest px-2 py-0.5 rounded-full ring-1 ${nivelBadgeClass(nivel)}`}

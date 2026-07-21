@@ -416,8 +416,8 @@ export function stockLibre(i: Pick<Insumo, "stockTotal" | "stockComprometido">):
 // sirve para costear. Estos umbrales definen cuándo avisar que un precio está
 // viejo. Son globales; si más adelante quieres afinarlos por insumo o hacerlos
 // editables, se mueven a CocinaConfig.
-export const PRECIO_FRESCO_DIAS = 7; // hasta 7 días: fresco
-export const PRECIO_VIEJO_DIAS = 14; // 8–14: revisar · >14: viejo
+export const PRECIO_FRESCO_DIAS = 45; // hasta 45 días: fresco (no se muestra)
+export const PRECIO_VIEJO_DIAS = 90; // 46–90: revisar · >90: viejo
 
 export type NivelFrescuraPrecio = "fresco" | "revisar" | "viejo" | "sin_fecha";
 
