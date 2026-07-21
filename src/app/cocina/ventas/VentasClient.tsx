@@ -25,6 +25,16 @@ import {
 } from "@/lib/data/ventas";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { normalizarBusqueda } from "@/lib/text";
+import { CalendarIcon, ChevronIcon } from "@/components/icons";
+
+/** Fecha larga en español para los encabezados de grupo (ej. "21 jul 2026"). */
+function fmtFecha(fecha: string): string {
+  return new Date(fecha + "T00:00").toLocaleDateString("es-VE", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
 
 // ID de lote (batch) para agrupar las ventas de un mismo import. Debe ser un
 // UUID válido porque la columna ventas.batch_id es de tipo uuid.
@@ -77,6 +87,11 @@ export function VentasClient() {
   const [clasifs, setClasifs] = useState<PosClasificacion[]>([]);
   const [importing, setImporting] = useState(false);
   const [pendienteBorrar, setPendienteBorrar] = useState<string | null>(null);
+  // Colapsables del historial (por fecha). Guardamos solo las fechas que el
+  // usuario abrió/cerró a mano; por defecto se abre la más reciente.
+  const [gruposAbiertos, setGruposAbiertos] = useState<Record<string, boolean>>(
+    {},
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -425,6 +440,26 @@ export function VentasClient() {
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error eliminando");
     }
+  }
+
+  // Agrupa las ventas por fecha, conservando el orden (más recientes primero).
+  // Cada grupo trae su total en USD para el encabezado.
+  const ventasPorFecha = useMemo(() => {
+    const map = new Map<string, Venta[]>();
+    for (const v of ventas) {
+      const arr = map.get(v.fecha);
+      if (arr) arr.push(v);
+      else map.set(v.fecha, [v]);
+    }
+    return Array.from(map.entries()).map(([fecha, items]) => ({
+      fecha,
+      items,
+      totalUsd: items.reduce((s, v) => s + (v.totalUsd ?? 0), 0),
+    }));
+  }, [ventas]);
+
+  function toggleGrupo(fecha: string, abiertoAhora: boolean) {
+    setGruposAbiertos((prev) => ({ ...prev, [fecha]: !abiertoAhora }));
   }
 
   const insumoCount =
@@ -976,60 +1011,87 @@ export function VentasClient() {
               </p>
             </div>
           ) : (
-            <div className="rounded-2xl bg-white ring-1 ring-marfil overflow-hidden">
-              <ul className="divide-y divide-marfil">
-                {ventas.map((v) => (
-                  <li
-                    key={v.id}
-                    className="p-4 flex flex-wrap items-start justify-between gap-3"
-                  >
-                    <div className="min-w-0">
-                      <div className="font-medium text-cacao flex items-center gap-2 flex-wrap">
-                        {v.recetaNombre}
-                        {v.tipoItem && v.tipoItem !== "insumo" && (
-                          <span
-                            className={`text-[10px] px-2 py-0.5 rounded-full ring-1 ${
-                              v.tipoItem === "sin_clasificar"
-                                ? "bg-amber-50 text-amber-800 ring-amber-300"
-                                : "bg-sky-50 text-sky-800 ring-sky-200"
-                            }`}
+            <div className="rounded-2xl bg-white ring-1 ring-marfil overflow-hidden divide-y divide-marfil">
+              {ventasPorFecha.map((grupo, idx) => {
+                const abierto = gruposAbiertos[grupo.fecha] ?? idx === 0;
+                return (
+                  <div key={grupo.fecha}>
+                    <button
+                      type="button"
+                      onClick={() => toggleGrupo(grupo.fecha, abierto)}
+                      aria-expanded={abierto}
+                      className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-marfil-soft transition-colors"
+                    >
+                      <ChevronIcon
+                        className={`size-4 text-cacao-mute transition-transform ${
+                          abierto ? "rotate-90" : ""
+                        }`}
+                      />
+                      <CalendarIcon className="size-4 text-cacao-mute" />
+                      <span className="font-medium text-cacao">
+                        {fmtFecha(grupo.fecha)}
+                      </span>
+                      <span className="text-xs text-cacao-mute">
+                        {grupo.items.length}{" "}
+                        {grupo.items.length === 1 ? "venta" : "ventas"}
+                      </span>
+                      <span className="ml-auto text-sm text-cacao font-medium">
+                        ${grupo.totalUsd.toFixed(2)}
+                      </span>
+                    </button>
+                    {abierto && (
+                      <ul className="divide-y divide-marfil border-t border-marfil">
+                        {grupo.items.map((v) => (
+                          <li
+                            key={v.id}
+                            className="p-4 pl-11 flex flex-wrap items-start justify-between gap-3"
                           >
-                            {v.tipoItem === "servicio"
-                              ? "Servicio"
-                              : v.tipoItem === "consignacion"
-                                ? "Consignación"
-                                : v.tipoItem === "insumo_directo"
-                                  ? "Insumo directo"
-                                  : "Sin clasificar"}
-                          </span>
-                        )}
-                      </div>
-                      <div className="text-xs text-cacao-soft mt-0.5">
-                        {new Date(v.fecha + "T00:00").toLocaleDateString(
-                          "es-VE",
-                          { day: "numeric", month: "short", year: "numeric" },
-                        )}
-                        {" · "}
-                        {v.fuente === "xetux_csv"
-                          ? "Importado Xetux"
-                          : "Manual"}
-                      </div>
-                    </div>
-                    <div className="text-right shrink-0">
-                      <div className="text-cacao font-medium">
-                        {v.cantidad}× ·{" "}
-                        {v.totalUsd ? `$${v.totalUsd.toFixed(2)}` : ""}
-                      </div>
-                      <button
-                        onClick={() => setPendienteBorrar(v.id)}
-                        className="mt-1 text-[10px] uppercase tracking-widest text-cacao-mute hover:text-terracotta"
-                      >
-                        Borrar
-                      </button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
+                            <div className="min-w-0">
+                              <div className="font-medium text-cacao flex items-center gap-2 flex-wrap">
+                                {v.recetaNombre}
+                                {v.tipoItem && v.tipoItem !== "insumo" && (
+                                  <span
+                                    className={`text-[10px] px-2 py-0.5 rounded-full ring-1 ${
+                                      v.tipoItem === "sin_clasificar"
+                                        ? "bg-amber-50 text-amber-800 ring-amber-300"
+                                        : "bg-sky-50 text-sky-800 ring-sky-200"
+                                    }`}
+                                  >
+                                    {v.tipoItem === "servicio"
+                                      ? "Servicio"
+                                      : v.tipoItem === "consignacion"
+                                        ? "Consignación"
+                                        : v.tipoItem === "insumo_directo"
+                                          ? "Insumo directo"
+                                          : "Sin clasificar"}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-xs text-cacao-soft mt-0.5">
+                                {v.fuente === "xetux_csv"
+                                  ? "Importado Xetux"
+                                  : "Manual"}
+                              </div>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <div className="text-cacao font-medium">
+                                {v.cantidad}× ·{" "}
+                                {v.totalUsd ? `$${v.totalUsd.toFixed(2)}` : ""}
+                              </div>
+                              <button
+                                onClick={() => setPendienteBorrar(v.id)}
+                                className="mt-1 text-[10px] uppercase tracking-widest text-cacao-mute hover:text-terracotta"
+                              >
+                                Borrar
+                              </button>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
