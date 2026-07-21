@@ -113,3 +113,13 @@ export function CartIcon(props: SVGProps<SVGSVGElement>) {
     </Svg>
   );
 }
+
+/** Chevron para desplegar/colapsar. Apunta a la derecha; rótalo con CSS
+ *  (ej. `rotate-90`) para el estado abierto. */
+export function ChevronIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Svg {...props}>
+      <path d="M9 6l6 6-6 6" />
+    </Svg>
+  );
+}

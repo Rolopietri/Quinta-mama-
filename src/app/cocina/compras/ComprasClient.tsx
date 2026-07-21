@@ -18,6 +18,7 @@ import {
   getTasaBcvActual,
 } from "@/lib/data/cocina";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { CalendarIcon, ChevronIcon } from "@/components/icons";
 
 type FormState = {
   insumoId: string;
@@ -46,6 +47,15 @@ function fmtQty(n: number): string {
   return String(Number(n.toFixed(4)));
 }
 
+/** Fecha larga en español para los encabezados de grupo (ej. "21 jul 2026"). */
+function fmtFecha(fecha: string): string {
+  return new Date(fecha + "T00:00").toLocaleDateString("es-VE", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
 const emptyForm: FormState = {
   insumoId: "",
   proveedorId: "",
@@ -71,6 +81,12 @@ export function ComprasClient() {
   const [adding, setAdding] = useState(false);
   const [form, setForm] = useState<FormState>({ ...emptyForm });
   const [pendienteBorrar, setPendienteBorrar] = useState<string | null>(null);
+  // Estado de los colapsables del historial (por fecha). Guardamos solo las
+  // fechas que el usuario abrió/cerró a mano; por defecto se abre la más
+  // reciente (índice 0) y el resto queda colapsado.
+  const [gruposAbiertos, setGruposAbiertos] = useState<Record<string, boolean>>(
+    {},
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -170,6 +186,26 @@ export function ComprasClient() {
           ? fmtQty(n / cantPorCompra)
           : "",
     }));
+  }
+
+  // Agrupa las compras por fecha, conservando el orden (más recientes primero,
+  // como vienen de la lista). Cada grupo trae su total en USD para el encabezado.
+  const gruposPorFecha = useMemo(() => {
+    const map = new Map<string, Compra[]>();
+    for (const c of compras) {
+      const arr = map.get(c.fecha);
+      if (arr) arr.push(c);
+      else map.set(c.fecha, [c]);
+    }
+    return Array.from(map.entries()).map(([fecha, items]) => ({
+      fecha,
+      items,
+      totalUsd: items.reduce((s, c) => s + c.precioTotalUsd, 0),
+    }));
+  }, [compras]);
+
+  function toggleGrupo(fecha: string, abiertoAhora: boolean) {
+    setGruposAbiertos((prev) => ({ ...prev, [fecha]: !abiertoAhora }));
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -554,67 +590,97 @@ export function ComprasClient() {
           </p>
         </div>
       ) : (
-        <div className="rounded-2xl bg-white ring-1 ring-marfil overflow-hidden">
-          <ul className="divide-y divide-marfil">
-            {compras.map((c) => {
-              const insumo = insumos.find((i) => i.id === c.insumoId);
-              const proveedor = proveedores.find((p) => p.id === c.proveedorId);
-              const modalidad = MODALIDADES_PAGO.find(
-                (m) => m.value === c.modalidadPago,
-              );
-              return (
-                <li
-                  key={c.id}
-                  className="p-4 flex flex-wrap items-start gap-4 justify-between"
+        <div className="rounded-2xl bg-white ring-1 ring-marfil overflow-hidden divide-y divide-marfil">
+          {gruposPorFecha.map((grupo, idx) => {
+            const abierto = gruposAbiertos[grupo.fecha] ?? idx === 0;
+            return (
+              <div key={grupo.fecha}>
+                <button
+                  type="button"
+                  onClick={() => toggleGrupo(grupo.fecha, abierto)}
+                  aria-expanded={abierto}
+                  className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-marfil-soft transition-colors"
                 >
-                  <div className="min-w-0 flex-1">
-                    <div className="font-medium text-cacao">
-                      {insumo?.nombre ?? "Insumo eliminado"}
-                    </div>
-                    <div className="text-xs text-cacao-soft mt-0.5">
-                      {new Date(c.fecha + "T00:00").toLocaleDateString(
-                        "es-VE",
-                        {
-                          day: "numeric",
-                          month: "short",
-                          year: "numeric",
-                        },
-                      )}
-                      {proveedor && ` · ${proveedor.nombre}`}
-                      {modalidad && ` · ${modalidad.label}`}
-                    </div>
-                    {c.notas && (
-                      <div className="text-xs text-cacao-soft italic mt-1 font-serif">
-                        {c.notas}
-                      </div>
-                    )}
-                  </div>
-                  <div className="text-right shrink-0">
-                    <div className="text-cacao font-medium">
-                      ${c.precioTotalUsd.toFixed(2)}
-                    </div>
-                    {c.precioTotalBs && (
-                      <div className="text-xs text-cacao-soft">
-                        Bs {c.precioTotalBs.toFixed(2)}
-                        {c.tasaBcvUsada
-                          ? ` · tasa ${c.tasaBcvUsada.toFixed(2)}`
-                          : ""}
-                      </div>
-                    )}
-                    <div className="text-xs text-cacao-mute">
-                      {c.cantidad} × {insumo?.unidadCompra ?? ""}
-                    </div>
-                    <button
-                      onClick={() => setPendienteBorrar(c.id)}
-                      className="mt-1 text-[10px] uppercase tracking-widest text-cacao-mute hover:text-terracotta"
-                    >
-                      Borrar
-                    </button>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
+                  <ChevronIcon
+                    className={`size-4 text-cacao-mute transition-transform ${
+                      abierto ? "rotate-90" : ""
+                    }`}
+                  />
+                  <CalendarIcon className="size-4 text-cacao-mute" />
+                  <span className="font-medium text-cacao">
+                    {fmtFecha(grupo.fecha)}
+                  </span>
+                  <span className="text-xs text-cacao-mute">
+                    {grupo.items.length}{" "}
+                    {grupo.items.length === 1 ? "compra" : "compras"}
+                  </span>
+                  <span className="ml-auto text-sm text-cacao font-medium">
+                    ${grupo.totalUsd.toFixed(2)}
+                  </span>
+                </button>
+                {abierto && (
+                  <ul className="divide-y divide-marfil border-t border-marfil">
+                    {grupo.items.map((c) => {
+                      const insumo = insumos.find((i) => i.id === c.insumoId);
+                      const proveedor = proveedores.find(
+                        (p) => p.id === c.proveedorId,
+                      );
+                      const modalidad = MODALIDADES_PAGO.find(
+                        (m) => m.value === c.modalidadPago,
+                      );
+                      const meta = [proveedor?.nombre, modalidad?.label]
+                        .filter(Boolean)
+                        .join(" · ");
+                      return (
+                        <li
+                          key={c.id}
+                          className="p-4 pl-11 flex flex-wrap items-start gap-4 justify-between"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="font-medium text-cacao">
+                              {insumo?.nombre ?? "Insumo eliminado"}
+                            </div>
+                            {meta && (
+                              <div className="text-xs text-cacao-soft mt-0.5">
+                                {meta}
+                              </div>
+                            )}
+                            {c.notas && (
+                              <div className="text-xs text-cacao-soft italic mt-1 font-serif">
+                                {c.notas}
+                              </div>
+                            )}
+                          </div>
+                          <div className="text-right shrink-0">
+                            <div className="text-cacao font-medium">
+                              ${c.precioTotalUsd.toFixed(2)}
+                            </div>
+                            {c.precioTotalBs && (
+                              <div className="text-xs text-cacao-soft">
+                                Bs {c.precioTotalBs.toFixed(2)}
+                                {c.tasaBcvUsada
+                                  ? ` · tasa ${c.tasaBcvUsada.toFixed(2)}`
+                                  : ""}
+                              </div>
+                            )}
+                            <div className="text-xs text-cacao-mute">
+                              {c.cantidad} × {insumo?.unidadCompra ?? ""}
+                            </div>
+                            <button
+                              onClick={() => setPendienteBorrar(c.id)}
+                              className="mt-1 text-[10px] uppercase tracking-widest text-cacao-mute hover:text-terracotta"
+                            >
+                              Borrar
+                            </button>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 
