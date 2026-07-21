@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { MailIcon } from "@/components/icons";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
 export function LoginForm() {
@@ -58,7 +59,9 @@ export function LoginForm() {
   if (status === "sent") {
     return (
       <div className="rounded-2xl bg-emerald-50 ring-1 ring-emerald-200 p-6 text-center">
-        <div className="text-3xl mb-2">📬</div>
+        <div className="mb-2 flex justify-center text-emerald-700">
+          <MailIcon className="size-8" />
+        </div>
         <h2 className="font-semibold text-stone-900">Revisa tu correo</h2>
         <p className="mt-2 text-sm text-stone-700">
           Te enviamos un enlace mágico a <span className="font-medium">{email}</span>.

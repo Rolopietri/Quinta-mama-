@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { CalendarIcon, SaveIcon } from "@/components/icons";
 import type {
   Receta,
   Insumo,
@@ -331,7 +332,12 @@ export function PedidoSugeridoClient() {
                       </span>
                     </div>
                     <div className="text-xs text-cacao-soft mt-0.5">
-                      {fechaFmt && <span>📅 {fechaFmt} · </span>}
+                      {fechaFmt && (
+                        <span>
+                          <CalendarIcon className="inline size-3.5 align-[-0.15em] mr-1" />
+                          {fechaFmt} ·{" "}
+                        </span>
+                      )}
                       {pg.recetas.length} receta
                       {pg.recetas.length === 1 ? "" : "s"}
                     </div>
@@ -480,7 +486,8 @@ export function PedidoSugeridoClient() {
               onClick={abrirModalGuardar}
               className="ml-auto text-xs uppercase tracking-widest rounded-lg bg-cacao text-white px-3 py-1.5 hover:bg-terracotta"
             >
-              💾 Guardar pedido
+              <SaveIcon className="inline size-3.5 align-[-0.15em] mr-1.5" />
+              Guardar pedido
             </button>
           )}
         </div>

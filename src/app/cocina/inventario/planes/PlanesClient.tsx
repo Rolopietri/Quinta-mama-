@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { CalendarIcon, CartIcon } from "@/components/icons";
 import {
   ESTADOS_PLAN_PRODUCCION,
   stockLibre,
@@ -300,7 +301,14 @@ export function PlanesClient() {
             </div>
             <div className="text-xs text-cacao-soft mt-1">
               Creado {creadoFmt}
-              {fechaFmt && <span> · 📅 objetivo {fechaFmt}</span>} ·{" "}
+              {fechaFmt && (
+                <span>
+                  {" · "}
+                  <CalendarIcon className="inline size-3.5 align-[-0.15em]" />{" "}
+                  objetivo {fechaFmt}
+                </span>
+              )}{" "}
+              ·{" "}
               {p.compromisos.length} ingrediente
               {p.compromisos.length === 1 ? "" : "s"}
             </div>
@@ -344,7 +352,8 @@ export function PlanesClient() {
                   href={`/cocina/pedido?plan=${p.id}&receta=${p.recetaId}&raciones=${p.raciones}`}
                   className="text-[10px] uppercase tracking-widest px-3 py-1 rounded-full ring-1 ring-marfil text-cacao-soft hover:bg-marfil-soft"
                 >
-                  🛒 Generar pedido
+                  <CartIcon className="inline size-3.5 align-[-0.15em] mr-1" />
+                  Generar pedido
                 </Link>
                 <button
                   type="button"

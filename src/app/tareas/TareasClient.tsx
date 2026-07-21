@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { CalendarIcon } from "@/components/icons";
 import {
   ESTADOS_TAREA,
   PRIORIDADES,
@@ -357,7 +358,7 @@ export function TareasClient() {
                       )}
                       {t.fechaLimite && (
                         <span className="text-cacao-soft">
-                          · 📅 {new Date(t.fechaLimite + "T00:00").toLocaleDateString("es-VE", { day: "numeric", month: "short" })}
+                          · <CalendarIcon className="inline size-3.5 align-[-0.15em]" /> {new Date(t.fechaLimite + "T00:00").toLocaleDateString("es-VE", { day: "numeric", month: "short" })}
                         </span>
                       )}
                     </div>

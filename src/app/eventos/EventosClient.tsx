@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { ClockIcon, PinIcon, UsersIcon } from "@/components/icons";
 import {
   ESTADOS_EVENTO,
   type Evento,
@@ -427,11 +428,15 @@ function Section({
                       {e.label}
                     </span>
                     {ev.horario && (
-                      <span className="text-cacao-soft">🕐 {ev.horario}</span>
+                      <span className="text-cacao-soft inline-flex items-center gap-1">
+                        <ClockIcon className="size-3.5" />
+                        {ev.horario}
+                      </span>
                     )}
                     {ev.ubicacion && (
-                      <span className="text-cacao-soft">
-                        📍 {ev.ubicacion}
+                      <span className="text-cacao-soft inline-flex items-center gap-1">
+                        <PinIcon className="size-3.5" />
+                        {ev.ubicacion}
                       </span>
                     )}
                     {ev.cliente && (
@@ -439,8 +444,8 @@ function Section({
                     )}
                     {ev.cantidadPersonas !== undefined &&
                       ev.cantidadPersonas > 0 && (
-                        <span className="text-cacao-soft">
-                          · 👥 {ev.cantidadPersonas} pers.
+                        <span className="text-cacao-soft inline-flex items-center gap-1">
+                          · <UsersIcon className="size-3.5" /> {ev.cantidadPersonas} pers.
                         </span>
                       )}
                     {p && p.total > 0 && (

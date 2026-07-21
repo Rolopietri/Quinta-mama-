@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { CalendarIcon, ClockIcon, PinIcon, UsersIcon } from "@/components/icons";
 import {
   ESTADOS_EVENTO,
   FASES_EVENTO,
@@ -151,18 +152,24 @@ export function EventoDetailClient({ id }: { id: string }) {
               {estado.label}
             </span>
             {evento.horario && (
-              <span className="text-cacao-soft">🕐 {evento.horario}</span>
+              <span className="text-cacao-soft inline-flex items-center gap-1">
+                <ClockIcon className="size-3.5" />
+                {evento.horario}
+              </span>
             )}
             {evento.ubicacion && (
-              <span className="text-cacao-soft">📍 {evento.ubicacion}</span>
+              <span className="text-cacao-soft inline-flex items-center gap-1">
+                <PinIcon className="size-3.5" />
+                {evento.ubicacion}
+              </span>
             )}
             {evento.cliente && (
               <span className="text-cacao-soft">· {evento.cliente}</span>
             )}
             {evento.cantidadPersonas !== undefined &&
               evento.cantidadPersonas > 0 && (
-                <span className="text-cacao-soft">
-                  · 👥 {evento.cantidadPersonas} personas
+                <span className="text-cacao-soft inline-flex items-center gap-1">
+                  · <UsersIcon className="size-3.5" /> {evento.cantidadPersonas} personas
                 </span>
               )}
           </div>
@@ -680,8 +687,8 @@ function ChecklistTab({
                       <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-cacao-soft mt-0.5">
                         {t.responsable && <span>{t.responsable}</span>}
                         {t.fechaLimite && (
-                          <span>
-                            📅{" "}
+                          <span className="inline-flex items-center gap-1">
+                            <CalendarIcon className="size-3.5" />
                             {new Date(
                               t.fechaLimite + "T00:00",
                             ).toLocaleDateString("es-VE", {
@@ -990,7 +997,12 @@ function CronogramaTab({
                     </div>
                     <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-cacao-soft mt-0.5">
                       {a.responsable && <span>{a.responsable}</span>}
-                      {a.ubicacion && <span>📍 {a.ubicacion}</span>}
+                      {a.ubicacion && (
+                        <span className="inline-flex items-center gap-1">
+                          <PinIcon className="size-3.5" />
+                          {a.ubicacion}
+                        </span>
+                      )}
                     </div>
                     {a.observaciones && (
                       <div className="text-xs text-cacao-soft italic font-serif mt-1">

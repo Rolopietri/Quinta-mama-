@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { DocIcon, PaperclipIcon } from "@/components/icons";
 import {
   TIPOS_BAJA_MENAJE,
   CATEGORIAS_MENAJE_SUGERIDAS,
@@ -605,7 +606,8 @@ export function MenajeClient() {
         onClick={abrirLista}
         className="w-full rounded-xl ring-1 ring-cacao text-cacao py-2.5 font-medium hover:bg-marfil-soft transition-colors"
       >
-        📄 Lista de menaje para evento (PDF)
+        <DocIcon className="inline size-4 align-[-0.2em] mr-1.5" />
+        Lista de menaje para evento (PDF)
       </button>
 
       {/* Nuevo item */}
@@ -957,7 +959,8 @@ export function MenajeClient() {
                                           }
                                           className="text-[10px] uppercase tracking-widest text-cacao underline hover:text-terracotta mt-1"
                                         >
-                                          📎 Ver factura
+                                          <PaperclipIcon className="inline size-3.5 align-[-0.15em] mr-1" />
+                                          Ver factura
                                           {m.facturaNombre && (
                                             <span className="ml-1 text-cacao-mute lowercase tracking-normal italic">
                                               ({m.facturaNombre})
