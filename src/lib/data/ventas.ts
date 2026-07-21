@@ -442,7 +442,11 @@ export function calcularPedidoSugerido(
 export type FilaImportada = {
   nombre: string;
   cantidad: number;
-  precio?: number;
+  /** Precio de UNA unidad. */
+  precioUnitario?: number;
+  /** Total de la línea (todas las unidades). En el "detallado por producto" de
+   *  Xetux esto es la columna VENTA NETA (total del producto en el período). */
+  total?: number;
 };
 
 /** Parsea un número respetando separadores de miles/decimal en cualquier
@@ -514,9 +518,19 @@ export function parseCSV(content: string): FilaImportada[] {
   const colCantidad = headers.findIndex((h) =>
     /cantidad|unidades|qty|cant\.|piezas/i.test(h),
   );
-  const colPrecio = headers.findIndex((h) =>
-    /precio|importe|monto|total|subtotal/i.test(h),
-  );
+
+  // Distinguir columna de precio UNITARIO vs TOTAL de línea. El reporte de
+  // Xetux ("detallado por producto") NO trae precio unitario: la columna de
+  // dinero es "Venta Neta", que es el TOTAL del producto en el período. Antes
+  // se tomaba esa columna como precio unitario y se multiplicaba por la
+  // cantidad → totales inflados (25 aguas se veían como 25×total).
+  const esUnitario = (h: string) =>
+    /unitario|unit\.|\bp\.?\s*u\.?\b|pvp|c\/u|precio\s+de\s+venta/i.test(h);
+  const esTotalLinea = (h: string) =>
+    /venta\s*neta|importe|subtotal|\btotal\b|monto|precio/i.test(h);
+
+  const colPrecioUnit = headers.findIndex((h) => esUnitario(h));
+  const colTotal = headers.findIndex((h) => esTotalLinea(h) && !esUnitario(h));
 
   if (colNombre === -1 || colCantidad === -1) {
     throw new Error(
@@ -530,12 +544,25 @@ export function parseCSV(content: string): FilaImportada[] {
     const nombre = (cells[colNombre] ?? "").trim();
     const cant = parseNumeroLocale(cells[colCantidad] ?? "");
     if (!nombre || isNaN(cant) || cant <= 0) continue;
-    let precio: number | undefined;
-    if (colPrecio !== -1) {
-      const p = parseNumeroLocale(cells[colPrecio] ?? "");
-      if (!isNaN(p)) precio = p;
+
+    let precioUnitario: number | undefined;
+    let total: number | undefined;
+    if (colPrecioUnit !== -1) {
+      // Hay columna de precio unitario explícita → el total es precio × cantidad.
+      const pu = parseNumeroLocale(cells[colPrecioUnit] ?? "");
+      if (!isNaN(pu)) {
+        precioUnitario = pu;
+        total = pu * cant;
+      }
+    } else if (colTotal !== -1) {
+      // Solo hay total de línea (caso Xetux) → el unitario es total ÷ cantidad.
+      const t = parseNumeroLocale(cells[colTotal] ?? "");
+      if (!isNaN(t)) {
+        total = t;
+        precioUnitario = cant > 0 ? t / cant : undefined;
+      }
     }
-    filas.push({ nombre, cantidad: cant, precio });
+    filas.push({ nombre, cantidad: cant, precioUnitario, total });
   }
   return filas;
 }

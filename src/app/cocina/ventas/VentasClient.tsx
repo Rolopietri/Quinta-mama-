@@ -395,8 +395,8 @@ export function VentasClient() {
         recetaId: c.tipo === "insumo" && c.receta ? c.receta.id : undefined,
         recetaNombre: c.receta?.nombre ?? c.insumo?.nombre ?? c.fila.nombre,
         cantidad: c.fila.cantidad,
-        precioUnitarioUsd: c.fila.precio,
-        totalUsd: c.fila.precio ? c.fila.cantidad * c.fila.precio : undefined,
+        precioUnitarioUsd: c.fila.precioUnitario,
+        totalUsd: c.fila.total,
         fuente: "xetux_csv" as const,
         batchId: batch,
         tipoItem: c.tipo,
@@ -694,7 +694,18 @@ export function VentasClient() {
                       ×{c.fila.cantidad}
                     </div>
                     <div className="col-span-2 text-cacao-soft text-xs">
-                      {c.fila.precio ? `$${c.fila.precio.toFixed(2)}` : ""}
+                      {c.fila.total != null ? (
+                        <>
+                          ${c.fila.total.toFixed(2)}
+                          {c.fila.precioUnitario != null && (
+                            <span className="block text-[10px] text-cacao-mute">
+                              ${c.fila.precioUnitario.toFixed(2)} c/u
+                            </span>
+                          )}
+                        </>
+                      ) : (
+                        ""
+                      )}
                     </div>
                     <div className="col-span-5 flex flex-wrap gap-1 justify-end items-center">
                       {c.tipo === "insumo" ? (
