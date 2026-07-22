@@ -94,13 +94,20 @@ $$;
 -- 3) COSMÉTICO · normalizar el snapshot cuando la unidad es la MISMA escrita
 --    distinto (ej. "unid" vs "unidades"): el valor no cambia, solo la etiqueta.
 --    Se restringe a la misma dimensión para NO tocar cruces peso↔volumen.
+-- Normaliza cuando el valor NO cambia (misma unidad escrita distinto, ej.
+-- unid/unidades), pero NUNCA cuando son dos unidades conocidas de dimensión
+-- distinta (g vs L) — ese caso es un cruce real que se resuelve a mano.
 update public.cocina_plan_compromisos c
 set unidad_base = i.unidad_base
 from public.insumos i
 where c.insumo_id = i.id
   and public.unidad_norm(c.unidad_base) is distinct from public.unidad_norm(i.unidad_base)
   and abs(public.convertir_para_costo(c.cantidad, c.unidad_base, i.unidad_base) - c.cantidad) <= 0.00005
-  and public.unidad_dim(c.unidad_base) is not distinct from public.unidad_dim(i.unidad_base);
+  and not (
+    public.unidad_factor(c.unidad_base) is not null
+    and public.unidad_factor(i.unidad_base) is not null
+    and public.unidad_dim(c.unidad_base) is distinct from public.unidad_dim(i.unidad_base)
+  );
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 4) BLINDAJE A FUTURO · trigger: al cambiar la unidad_base de un insumo, si
