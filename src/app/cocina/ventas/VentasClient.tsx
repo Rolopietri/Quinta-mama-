@@ -91,6 +91,7 @@ export function VentasClient() {
   const [montoEsTotal, setMontoEsTotal] = useState(true);
   const [clasifs, setClasifs] = useState<PosClasificacion[]>([]);
   const [importing, setImporting] = useState(false);
+  const [leyendoArchivo, setLeyendoArchivo] = useState(false);
   const [pendienteBorrar, setPendienteBorrar] = useState<string | null>(null);
   // Colapsables del historial (por fecha). Guardamos solo las fechas que el
   // usuario abrió/cerró a mano; por defecto se abre la más reciente.
@@ -174,10 +175,10 @@ export function VentasClient() {
     [recetas],
   );
 
-  function parsear() {
+  function parsear(texto?: string) {
     setError(null);
     try {
-      const filas = parseCSV(csvText);
+      const filas = parseCSV(texto ?? csvText);
       if (filas.length === 0) {
         setError("No se pudo leer ninguna fila del archivo.");
         setClasif(null);
@@ -601,9 +602,10 @@ export function VentasClient() {
               Importar cierre de Xetux
             </h2>
             <p className="text-xs text-cacao-soft italic font-serif">
-              Exporta el cierre diario de Xetux como CSV. Pega el contenido aquí
-              o sube el archivo. El sistema busca columnas con encabezados
-              tipo <strong>Producto</strong> y <strong>Cantidad</strong>.
+              Sube el archivo de Xetux tal cual — acepta <strong>Excel</strong>{" "}
+              (.xls/.xlsx) o CSV, y lo analiza solo. También puedes pegar el
+              contenido. El sistema busca columnas tipo{" "}
+              <strong>Producto</strong> y <strong>Cantidad</strong>.
             </p>
             <label className="text-sm text-cacao block">
               Fecha de la venta
@@ -615,13 +617,43 @@ export function VentasClient() {
               />
             </label>
             <label className="text-sm text-cacao block">
-              Archivo CSV
+              Archivo de Xetux (Excel .xls/.xlsx o CSV)
               <input
                 type="file"
-                accept=".csv,text/csv"
-                onChange={(e) => {
+                accept=".csv,text/csv,.xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                onChange={async (e) => {
                   const f = e.target.files?.[0];
                   if (!f) return;
+                  setError(null);
+                  const nombre = f.name.toLowerCase();
+                  const esExcel =
+                    nombre.endsWith(".xls") || nombre.endsWith(".xlsx");
+                  if (esExcel) {
+                    // Excel → lo convertimos a CSV en el servidor y analizamos.
+                    setLeyendoArchivo(true);
+                    try {
+                      const res = await fetch("/api/xls-to-csv", {
+                        method: "POST",
+                        body: await f.arrayBuffer(),
+                      });
+                      if (!res.ok) {
+                        const j = await res.json().catch(() => ({}));
+                        throw new Error(j.error ?? "No pude leer el Excel.");
+                      }
+                      const csv = await res.text();
+                      setCsvText(csv);
+                      parsear(csv);
+                    } catch (err) {
+                      setError(
+                        err instanceof Error
+                          ? err.message
+                          : "Error leyendo el Excel.",
+                      );
+                    } finally {
+                      setLeyendoArchivo(false);
+                    }
+                    return;
+                  }
                   const reader = new FileReader();
                   reader.onload = () => {
                     const t = reader.result;
@@ -631,6 +663,11 @@ export function VentasClient() {
                 }}
                 className="mt-1 block text-sm text-cacao-soft"
               />
+              {leyendoArchivo && (
+                <span className="mt-1 block text-xs text-cacao-mute">
+                  Leyendo Excel…
+                </span>
+              )}
             </label>
             <label className="text-sm text-cacao block">
               O pega el contenido directo
@@ -645,7 +682,7 @@ export function VentasClient() {
             <div className="text-right">
               <button
                 type="button"
-                onClick={parsear}
+                onClick={() => parsear()}
                 disabled={!csvText.trim()}
                 className="rounded-lg bg-cacao text-white px-4 py-2 font-medium hover:bg-terracotta disabled:opacity-50"
               >
