@@ -96,19 +96,6 @@ export type VentaInput = {
   swapToInsumoId?: string;
 };
 
-export async function listVentas(limit = 100): Promise<Venta[]> {
-  const sb = createSupabaseBrowserClient();
-  const { data, error } = await sb
-    .from("ventas")
-    .select("*")
-    .eq("es_merma", false) // las mermas no son ventas — se excluyen del historial
-    .order("fecha", { ascending: false })
-    .order("created_at", { ascending: false })
-    .limit(limit);
-  if (error) throw error;
-  return (data as Row[]).map(rowToVenta);
-}
-
 /**
  * Historial por DÍAS COMPLETOS: trae todas las ventas de las `dias` fechas más
  * recientes, sin cortar ningún día por la mitad. A diferencia de un tope de
