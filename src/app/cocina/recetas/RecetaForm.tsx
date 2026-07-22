@@ -630,6 +630,25 @@ export function RecetaForm({
             />
           </label>
         </div>
+        {esSubreceta &&
+          (() => {
+            const rN = Number(rendimiento);
+            const pN = Number(porciones);
+            if (!(rN > 0) || !(pN > 0)) return null;
+            const pp = rN / pN;
+            return (
+              <p className="text-xs text-cacao-soft italic font-serif">
+                Cada porción de esta subreceta = {formatCantConv(rN)} ÷ {pN} ={" "}
+                <strong className="not-italic text-cacao">
+                  {formatCantConv(pp)} {rendimientoUnidad}
+                </strong>
+                . Para que su plan de producción baje{" "}
+                <strong className="not-italic text-cacao">1 por venta</strong>,
+                los platos que la usen deberían llevar ~{formatCantConv(pp)}{" "}
+                {rendimientoUnidad}.
+              </p>
+            );
+          })()}
         <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
           <label className="text-sm text-cacao">
             Tiempo prep (min)
@@ -921,6 +940,32 @@ export function RecetaForm({
                 !conversionInfo.compatibles &&
                 dimension(l.unidad) !== "desconocida" &&
                 dimension(conversionInfo.unidadDestino) !== "desconocida";
+
+              // Aviso de "raciones por venta": si esta línea usa una subreceta
+              // con plan de producción, cuánto baja su plan cada vez que se
+              // vende 1 de esta receta. Ideal = un número redondo (típicamente
+              // 1). Un decimal cercano a 1 (ej. 0,98) suele ser un desajuste
+              // entre el gramaje del plato y las porciones de la subreceta.
+              let subPorPorcion: number | null = null;
+              let racionesPorVenta: number | null = null;
+              if (subR && subR.rendimiento && subR.porciones && cant > 0) {
+                subPorPorcion = subR.rendimiento / subR.porciones;
+                const porcThis = Number(porciones) || 1;
+                const convSub = convertirParaCosto(
+                  cant,
+                  l.unidad,
+                  subR.rendimientoUnidad ?? l.unidad,
+                );
+                const cantSub = convSub?.resultado ?? cant;
+                if (subPorPorcion > 0 && porcThis > 0) {
+                  racionesPorVenta = cantSub / porcThis / subPorPorcion;
+                }
+              }
+              const racionDesajustada =
+                racionesPorVenta !== null &&
+                racionesPorVenta > 0.5 &&
+                racionesPorVenta < 1.5 &&
+                Math.abs(racionesPorVenta - 1) > 0.01;
               return (
                 <div
                   key={l.key}
@@ -1037,6 +1082,28 @@ export function RecetaForm({
                       &ldquo;{l.unidad}&rdquo; y &ldquo;
                       {conversionInfo.unidadDestino}&rdquo; no son convertibles.
                       El costo asume misma unidad — revisa para evitar errores.
+                    </div>
+                  )}
+                  {racionesPorVenta !== null && subPorPorcion !== null && (
+                    <div
+                      className={`text-[11px] pl-1 ${
+                        racionDesajustada
+                          ? "text-terracotta"
+                          : "text-cacao-soft italic font-serif"
+                      }`}
+                    >
+                      {racionDesajustada && (
+                        <WarningIcon className="inline size-3.5 align-[-0.15em] mr-1" />
+                      )}
+                      1 porción de {subR?.nombre} ≈{" "}
+                      {formatCantConv(subPorPorcion)}{" "}
+                      {subR?.rendimientoUnidad ?? ""} · su plan baja ≈{" "}
+                      <strong className="not-italic">
+                        {formatCantConv(racionesPorVenta)}
+                      </strong>{" "}
+                      por venta
+                      {racionDesajustada &&
+                        " — debería ser 1; ajusta el gramaje o las porciones de la subreceta"}
                     </div>
                   )}
                 </div>
