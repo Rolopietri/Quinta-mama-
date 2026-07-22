@@ -91,5 +91,62 @@ end;
 $$;
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- 3) Recalcular ya, para que el stock_comprometido de cada insumo quede al día.
+-- 3) COSMÉTICO · normalizar el snapshot cuando la unidad es la MISMA escrita
+--    distinto (ej. "unid" vs "unidades"): el valor no cambia, solo la etiqueta.
+--    Se restringe a la misma dimensión para NO tocar cruces peso↔volumen.
+update public.cocina_plan_compromisos c
+set unidad_base = i.unidad_base
+from public.insumos i
+where c.insumo_id = i.id
+  and public.unidad_norm(c.unidad_base) is distinct from public.unidad_norm(i.unidad_base)
+  and abs(public.convertir_para_costo(c.cantidad, c.unidad_base, i.unidad_base) - c.cantidad) <= 0.00005
+  and public.unidad_dim(c.unidad_base) is not distinct from public.unidad_dim(i.unidad_base);
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 4) BLINDAJE A FUTURO · trigger: al cambiar la unidad_base de un insumo, si
+--    tiene compromisos, se convierten automáticamente (misma dimensión) y se
+--    recalcula su stock_comprometido en el acto. Vive en la base de datos, así
+--    que aplica venga el cambio de la app o del editor SQL.
+create or replace function public.sync_compromisos_al_cambiar_unidad()
+returns trigger language plpgsql as $$
+begin
+  -- Solo actuar si de verdad cambió la unidad base.
+  if public.unidad_norm(new.unidad_base) is distinct from public.unidad_norm(old.unidad_base) then
+
+    -- (a) Convertir los compromisos de este insumo a la nueva unidad, solo cuando
+    --     es una conversión real del mismo tipo (peso↔peso, volumen↔volumen).
+    --     Los cruces de dimensión (g→L) NO se tocan: dependen de densidad y hay
+    --     que resolverlos a mano.
+    update public.cocina_plan_compromisos c
+    set cantidad    = round(public.convertir_para_costo(c.cantidad, c.unidad_base, new.unidad_base)::numeric, 4),
+        unidad_base = new.unidad_base
+    where c.insumo_id = new.id
+      and abs(public.convertir_para_costo(c.cantidad, c.unidad_base, new.unidad_base) - c.cantidad) > 0.00005;
+
+    -- (b) Recalcular el stock_comprometido de ESTE insumo desde sus compromisos
+    --     vivos (planes pendiente/completado con raciones por consumir).
+    new.stock_comprometido := coalesce((
+      select sum(
+        public.convertir_para_costo(c.cantidad, c.unidad_base, new.unidad_base)
+        * (p.raciones - coalesce(p.raciones_consumidas, 0))::numeric
+        / nullif(p.raciones, 0)
+      )
+      from public.cocina_plan_compromisos c
+      join public.cocina_planes_produccion p on p.id = c.plan_id
+      where c.insumo_id = new.id
+        and p.estado in ('pendiente', 'completado')
+        and coalesce(p.raciones_consumidas, 0) < p.raciones
+    ), 0);
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists insumos_sync_compromisos_unidad on public.insumos;
+create trigger insumos_sync_compromisos_unidad
+  before update on public.insumos
+  for each row execute function public.sync_compromisos_al_cambiar_unidad();
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 5) Recalcular ya, para que el stock_comprometido de cada insumo quede al día.
 select * from public.recalcular_stock_comprometido();
