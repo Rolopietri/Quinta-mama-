@@ -271,8 +271,13 @@ export function RecetaDetail({ id }: { id: string }) {
         <h2 className="font-display text-xs tracking-[0.3em] uppercase text-cacao-mute mb-3">
           Ingredientes
         </h2>
-        <ul className="divide-y divide-marfil">
-          {ordenarPorCantidadDesc(lineas).map((i) => (
+        {(() => {
+          // Insumos ordenados por cantidad (mayor a menor); las subrecetas van
+          // aparte, en su propio grupo abajo, para no romper ese orden.
+          const ordenadas = ordenarPorCantidadDesc(lineas);
+          const insumosOrd = ordenadas.filter((l) => !l.subrecetaId);
+          const subrecetasOrd = ordenadas.filter((l) => l.subrecetaId);
+          const renderLinea = (i: (typeof lineas)[number]) => (
             <li
               key={i.id}
               className="py-2 grid grid-cols-12 gap-2 items-baseline"
@@ -285,11 +290,7 @@ export function RecetaDetail({ id }: { id: string }) {
                     · {i.observaciones}
                   </span>
                 )}
-                {i.subrecetaId ? (
-                  <span className="ml-2 text-[10px] uppercase tracking-widest text-cacao-mute">
-                    (sub-receta)
-                  </span>
-                ) : !i.insumoId ? (
+                {!i.subrecetaId && !i.insumoId ? (
                   <span className="ml-2 text-[10px] uppercase tracking-widest text-cacao-mute">
                     (ad-hoc)
                   </span>
@@ -304,8 +305,25 @@ export function RecetaDetail({ id }: { id: string }) {
                   : ""}
               </div>
             </li>
-          ))}
-        </ul>
+          );
+          return (
+            <>
+              <ul className="divide-y divide-marfil">
+                {insumosOrd.map(renderLinea)}
+              </ul>
+              {subrecetasOrd.length > 0 && (
+                <div className="mt-4">
+                  <h3 className="font-display text-[10px] tracking-[0.3em] uppercase text-cacao-mute mb-1">
+                    Sub-recetas
+                  </h3>
+                  <ul className="divide-y divide-marfil">
+                    {subrecetasOrd.map(renderLinea)}
+                  </ul>
+                </div>
+              )}
+            </>
+          );
+        })()}
         <div className="mt-4 border-t border-marfil pt-3 text-right space-y-1">
           <div className="text-sm text-cacao-soft">
             Costo total: <span className="text-cacao">${total.toFixed(3)}</span>
