@@ -338,14 +338,18 @@ export function VentasClient() {
 
   async function confirmarRecetaMap() {
     if (!recetaMapItem || !rmRecetaSel) return;
-    // La sustitución solo aplica si se eligieron ambos insumos.
-    const swapOk = !!rmSwapFrom && !!rmSwapTo;
+    // Modificador sobre la receta base:
+    //   • swap_from + swap_to → sustituir un insumo por otro.
+    //   • swap_from sin swap_to → QUITAR ese insumo (ej. "sin pesto").
+    // El swap_to solo tiene sentido si además se eligió el insumo a quitar.
+    const from = rmSwapFrom || undefined;
+    const to = from ? rmSwapTo || undefined : undefined;
     await reclasificar(recetaMapItem, "insumo", {
       recetaId: rmRecetaSel,
       extraRecetaId: rmExtraPapas && papasReceta ? papasReceta.id : undefined,
       extraCantidad: rmExtraPapas ? 1 : undefined,
-      swapFromInsumoId: swapOk ? rmSwapFrom : undefined,
-      swapToInsumoId: swapOk ? rmSwapTo : undefined,
+      swapFromInsumoId: from,
+      swapToInsumoId: to,
     });
     setRecetaMapItem(null);
   }
@@ -759,8 +763,10 @@ export function VentasClient() {
                           <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200">
                             → {c.receta?.nombre ?? "insumo"}
                             {c.extraReceta ? ` + ${c.extraReceta.nombre}` : ""}
-                            {c.swapFrom && c.swapTo
-                              ? ` (${c.swapFrom.nombre}→${c.swapTo.nombre})`
+                            {c.swapFrom
+                              ? c.swapTo
+                                ? ` (${c.swapFrom.nombre}→${c.swapTo.nombre})`
+                                : ` (sin ${c.swapFrom.nombre})`
                               : ""}
                           </span>
                           <button
@@ -1371,15 +1377,16 @@ export function VentasClient() {
               </label>
             )}
 
-            {/* Sustitución de insumo (ej. leche entera → almendras) */}
+            {/* Quitar o sustituir un insumo (ej. "sin pesto" o leche → almendras) */}
             <div className="mt-4 rounded-lg ring-1 ring-marfil p-3">
               <p className="text-sm text-cacao font-medium">
-                Sustituir un insumo{" "}
+                Quitar o sustituir un insumo{" "}
                 <span className="text-cacao-mute font-normal">(opcional)</span>
               </p>
               <p className="text-[11px] text-cacao-soft mb-2">
-                Usa la misma receta pero cambia un insumo por otro, en la misma
-                cantidad. Ej.: leche entera → leche de almendras.
+                Usa la misma receta pero quita un insumo, o cámbialo por otro.
+                Elige el insumo a quitar; si además pones un reemplazo, lo
+                sustituye. Ej.: <b>sin pesto</b>, o leche entera → almendras.
               </p>
               <div className="flex items-center gap-2">
                 <select
@@ -1387,7 +1394,7 @@ export function VentasClient() {
                   onChange={(e) => setRmSwapFrom(e.target.value)}
                   className="flex-1 rounded-lg ring-1 ring-marfil px-2 py-1.5 text-sm bg-white"
                 >
-                  <option value="">— Insumo de la receta —</option>
+                  <option value="">— Insumo a quitar / cambiar —</option>
                   {insumos
                     .filter((i) => i.activo)
                     .map((i) => (
@@ -1400,9 +1407,10 @@ export function VentasClient() {
                 <select
                   value={rmSwapTo}
                   onChange={(e) => setRmSwapTo(e.target.value)}
-                  className="flex-1 rounded-lg ring-1 ring-marfil px-2 py-1.5 text-sm bg-white"
+                  disabled={!rmSwapFrom}
+                  className="flex-1 rounded-lg ring-1 ring-marfil px-2 py-1.5 text-sm bg-white disabled:opacity-50"
                 >
-                  <option value="">— Reemplazo —</option>
+                  <option value="">— Reemplazo (vacío = quitar) —</option>
                   {insumos
                     .filter((i) => i.activo)
                     .map((i) => (
@@ -1412,9 +1420,21 @@ export function VentasClient() {
                     ))}
                 </select>
               </div>
-              {(rmSwapFrom || rmSwapTo) && !(rmSwapFrom && rmSwapTo) && (
-                <p className="text-[11px] text-terracotta mt-1">
-                  Elige ambos insumos para aplicar la sustitución.
+              {rmSwapFrom && (
+                <p className="text-[11px] text-cacao-soft mt-1">
+                  {rmSwapTo ? (
+                    <>
+                      Se cambiará{" "}
+                      <b>{insumos.find((i) => i.id === rmSwapFrom)?.nombre}</b> →{" "}
+                      <b>{insumos.find((i) => i.id === rmSwapTo)?.nombre}</b>.
+                    </>
+                  ) : (
+                    <>
+                      Se quitará{" "}
+                      <b>{insumos.find((i) => i.id === rmSwapFrom)?.nombre}</b> de
+                      la receta (no se descuenta).
+                    </>
+                  )}
                 </p>
               )}
             </div>
