@@ -717,10 +717,15 @@ export function InsumosClient() {
               />
               {/* Selector de unidad para cargar el stock: base o unidad de
                   compra (ej. botellas). Va DEBAJO del input para no desalinear
-                  el campo respecto a los demás de la fila. Solo aparece cuando
-                  hay conversión (cantidad por compra distinta de 1). */}
+                  el campo respecto a los demás de la fila. Aparece siempre que
+                  haya una conversión real: unidades distintas o empaque > 1. Se
+                  oculta solo cuando compra y base son la misma unidad 1:1 (ej.
+                  kg→kg), donde alternar no cambiaría nada. */}
               {Number(form.cantidadPorCompra) > 0 &&
-                Number(form.cantidadPorCompra) !== 1 && (
+                !(
+                  form.unidadBase === form.unidadCompra &&
+                  Number(form.cantidadPorCompra) === 1
+                ) && (
                   <div className="mt-1 flex flex-wrap items-center gap-1 text-[11px]">
                     <span className="text-cacao-mute">Contar en:</span>
                     <button

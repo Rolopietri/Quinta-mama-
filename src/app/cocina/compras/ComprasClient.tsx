@@ -19,6 +19,7 @@ import {
 } from "@/lib/data/cocina";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { CalendarIcon, ChevronIcon } from "@/components/icons";
+import { displayCantidad } from "@/lib/units";
 
 type FormState = {
   insumoId: string;
@@ -665,6 +666,21 @@ export function ComprasClient() {
                             )}
                             <div className="text-xs text-cacao-mute">
                               {c.cantidad} × {insumo?.unidadCompra ?? ""}
+                              {insumo &&
+                                insumo.cantidadPorCompra > 0 &&
+                                insumo.unidadBase &&
+                                !(
+                                  insumo.unidadBase === insumo.unidadCompra &&
+                                  insumo.cantidadPorCompra === 1
+                                ) && (
+                                  <>
+                                    {" · "}
+                                    {displayCantidad(
+                                      c.cantidad * insumo.cantidadPorCompra,
+                                      insumo.unidadBase,
+                                    )}
+                                  </>
+                                )}
                             </div>
                             <button
                               onClick={() => setPendienteBorrar(c.id)}
