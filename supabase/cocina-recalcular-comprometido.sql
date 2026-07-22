@@ -30,15 +30,19 @@ begin
     -- Reserva viva por insumo: solo lo que falta por vender/perder de cada plan
     -- pendiente o completado. Un plan completado sigue reservando hasta que su
     -- producto se venda o se registre como pérdida (sube raciones_consumidas).
+    -- BLINDAJE: se convierte el compromiso (snapshot de unidad) a la unidad
+    -- ACTUAL del insumo, para que aunque cambie la unidad base del insumo el
+    -- total se calcule bien (ver cocina-fix-compromisos-unidad.sql).
     select
       c.insumo_id,
       sum(
-        c.cantidad
+        public.convertir_para_costo(c.cantidad, c.unidad_base, i.unidad_base)
         * (p.raciones - coalesce(p.raciones_consumidas, 0))::numeric
         / nullif(p.raciones, 0)
       ) as total_comprometido
     from public.cocina_plan_compromisos c
     join public.cocina_planes_produccion p on p.id = c.plan_id
+    join public.insumos i on i.id = c.insumo_id
     where p.estado in ('pendiente', 'completado')
       and coalesce(p.raciones_consumidas, 0) < p.raciones
     group by c.insumo_id

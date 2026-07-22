@@ -56,6 +56,12 @@ begin
       from public.flatten_receta_insumos(new.receta_id, new.cantidad)
       group by insumo_id
     ) loop
+      -- "Sin X": swap_from SIN swap_to → se quita ese insumo (no se descuenta).
+      if new.swap_from_insumo_id is not null
+         and r.insumo_id = new.swap_from_insumo_id
+         and new.swap_to_insumo_id is null then
+        continue;
+      end if;
       v_target := case
         when new.swap_from_insumo_id is not null
          and r.insumo_id = new.swap_from_insumo_id
@@ -74,6 +80,12 @@ begin
         new.extra_receta_id, new.cantidad * coalesce(new.extra_cantidad, 1))
       group by insumo_id
     ) loop
+      -- "Sin X": swap_from SIN swap_to → se quita ese insumo (no se descuenta).
+      if new.swap_from_insumo_id is not null
+         and r.insumo_id = new.swap_from_insumo_id
+         and new.swap_to_insumo_id is null then
+        continue;
+      end if;
       v_target := case
         when new.swap_from_insumo_id is not null
          and r.insumo_id = new.swap_from_insumo_id
@@ -118,6 +130,13 @@ begin
       from public.flatten_receta_insumos(old.receta_id, old.cantidad)
       group by insumo_id
     ) loop
+      -- "Sin X": swap_from SIN swap_to → se quitó ese insumo (nunca se descontó,
+      -- así que no se repone).
+      if old.swap_from_insumo_id is not null
+         and r.insumo_id = old.swap_from_insumo_id
+         and old.swap_to_insumo_id is null then
+        continue;
+      end if;
       v_target := case
         when old.swap_from_insumo_id is not null
          and r.insumo_id = old.swap_from_insumo_id
@@ -136,6 +155,13 @@ begin
         old.extra_receta_id, old.cantidad * coalesce(old.extra_cantidad, 1))
       group by insumo_id
     ) loop
+      -- "Sin X": swap_from SIN swap_to → se quitó ese insumo (nunca se descontó,
+      -- así que no se repone).
+      if old.swap_from_insumo_id is not null
+         and r.insumo_id = old.swap_from_insumo_id
+         and old.swap_to_insumo_id is null then
+        continue;
+      end if;
       v_target := case
         when old.swap_from_insumo_id is not null
          and r.insumo_id = old.swap_from_insumo_id

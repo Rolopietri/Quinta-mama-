@@ -233,6 +233,25 @@ Todos viven en `supabase/`. Aplicar en este orden si se rehace la BD:
 | 7 | `cocina-config.sql` | singleton de parámetros de rentabilidad | ✅ |
 | 8 | `cocina-ventas.sql` | ventas + `xetux_nombre` en recetas + 2 triggers de stock | ✅ |
 
+**Migraciones posteriores (feature/fix).** Además de las 8 de arriba hay ~34 más
+(POS, subrecetas, planes de producción, motor canónico, fixes de unidad/precio).
+Reglas para un rebuild correcto — el **orden cronológico de commits reproduce
+exactamente la base en vivo**:
+
+- Primero los esquemas base (`cocina.sql`, `cocina-recetas.sql`,
+  `cocina-subrecetas.sql`, `cocina-ventas.sql`, `cocina-planes-produccion.sql`…),
+  luego POS/fixes.
+- `cocina-fix-conversion-descuento-stock.sql` (funciones de unidad:
+  `convertir_para_costo`, `unidad_norm/dim/factor`) antes de lo que las use.
+- **`cocina-zzz-motor-canonico.sql` se aplica de ÚLTIMO** entre las que definen
+  triggers de stock: es la **fuente única** de
+  `descontar_stock_por_venta` / `revertir_stock_por_venta` /
+  `liberar_comprometido_por_venta` / `recommit_comprometido_por_venta` /
+  `flatten_receta_*` (incluye subrecetas y "sin X"). Los archivos que antes las
+  definían quedan como marcadores "MOVIDA".
+- El comprometido se recalcula con `recalcular_stock_comprometido`
+  (`cocina-recalcular-comprometido.sql`, blindada para convertir unidades).
+
 **Nunca asumir que el usuario ya corrió una migración nueva.** Cuando se crea SQL nuevo, recordarle explícitamente que la corra en SQL Editor.
 
 ---
