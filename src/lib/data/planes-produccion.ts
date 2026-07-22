@@ -181,6 +181,22 @@ export async function cancelarPlanProduccion(planId: string): Promise<void> {
   if (error) throw error;
 }
 
+/** Ajusta un plan completado (raciones y consumidas); el motor recalcula el
+ *  stock físico y el comprometido acorde. */
+export async function ajustarPlanCompletado(
+  planId: string,
+  raciones: number,
+  racionesConsumidas: number,
+): Promise<void> {
+  const sb = createSupabaseBrowserClient();
+  const { error } = await sb.rpc("ajustar_plan_completado", {
+    p_plan_id: planId,
+    p_raciones: raciones,
+    p_raciones_consumidas: racionesConsumidas,
+  });
+  if (error) throw error;
+}
+
 export async function deletePlanProduccion(planId: string): Promise<void> {
   const sb = createSupabaseBrowserClient();
   const { error } = await sb.rpc("delete_plan_produccion", {

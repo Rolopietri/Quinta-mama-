@@ -18,6 +18,7 @@ import {
   completarPlanProduccion,
   cancelarPlanProduccion,
   deletePlanProduccion,
+  ajustarPlanCompletado,
   previewConsumo,
 } from "@/lib/data/planes-produccion";
 import { extractError } from "@/lib/data/error";
@@ -45,6 +46,44 @@ export function PlanesClient() {
     | null
   >(null);
   const [actionRunning, setActionRunning] = useState(false);
+
+  // Ajuste de un plan completado (raciones / consumidas)
+  const [ajustePlan, setAjustePlan] = useState<PlanProduccion | null>(null);
+  const [ajusteRaciones, setAjusteRaciones] = useState("");
+  const [ajusteConsumidas, setAjusteConsumidas] = useState("");
+  const [ajusteRunning, setAjusteRunning] = useState(false);
+
+  function abrirAjuste(p: PlanProduccion) {
+    setAjustePlan(p);
+    setAjusteRaciones(String(p.raciones));
+    setAjusteConsumidas(String(p.racionesConsumidas));
+  }
+
+  async function guardarAjuste() {
+    if (!ajustePlan) return;
+    const r = Number(ajusteRaciones);
+    const c = Number(ajusteConsumidas);
+    if (!Number.isFinite(r) || r <= 0) {
+      setError("Las raciones deben ser un número mayor a 0.");
+      return;
+    }
+    if (!Number.isFinite(c) || c < 0 || c > r) {
+      setError("Las consumidas deben estar entre 0 y las raciones.");
+      return;
+    }
+    setAjusteRunning(true);
+    setError(null);
+    try {
+      await ajustarPlanCompletado(ajustePlan.id, r, c);
+      await reload();
+      setInfo("Plan ajustado. Stock y comprometido recalculados.");
+      setAjustePlan(null);
+    } catch (e) {
+      setError(extractError(e, "Error ajustando el plan"));
+    } finally {
+      setAjusteRunning(false);
+    }
+  }
 
   // Vista de la lista: agrupada por receta (default) o lista cronológica
   const [vista, setVista] = useState<"receta" | "cronologico">("receta");
@@ -371,8 +410,18 @@ export function PlanesClient() {
                 </button>
               </>
             )}
-            {/* Un plan completado no se puede borrar: solo se vende o se
-                pierde. Sus insumos ya son producto y no vuelven a crudo. */}
+            {/* Un plan completado no se puede borrar (sus insumos ya son
+                producto), pero SÍ se puede ajustar: cambiar raciones/consumidas
+                cuando afinas una receta y el mismo lote rinde distinto. */}
+            {(p.estado === "completado" || p.estado === "vendido") && (
+              <button
+                type="button"
+                onClick={() => abrirAjuste(p)}
+                className="text-[10px] uppercase tracking-widest px-3 py-1 rounded-full ring-1 ring-marfil text-cacao-soft hover:bg-marfil-soft"
+              >
+                ✎ Ajustar
+              </button>
+            )}
             {p.estado !== "completado" && (
               <button
                 type="button"
@@ -763,6 +812,93 @@ export function PlanesClient() {
                     : confirmAction.type === "cancelar"
                       ? "Sí, cancelar"
                       : "Sí, borrar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Ajustar plan completado */}
+      {ajustePlan && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-cacao/40 backdrop-blur-sm"
+          onClick={() => !ajusteRunning && setAjustePlan(null)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="rounded-2xl bg-white ring-1 ring-marfil p-6 max-w-md w-full shadow-xl"
+          >
+            <h2 className="font-cinzel text-xl tracking-[0.08em] text-cacao">
+              Ajustar plan completado
+            </h2>
+            <p className="mt-2 text-sm text-cacao-soft font-serif">
+              <strong className="text-cacao">{ajustePlan.recetaNombre}</strong>.
+              Cambia cuántas porciones rinde el lote y cuántas ya se consumieron
+              — el sistema recalcula solo el stock físico y el comprometido.
+            </p>
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              <label className="text-sm text-cacao">
+                Raciones (rinde)
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={ajusteRaciones}
+                  onChange={(e) => setAjusteRaciones(e.target.value)}
+                  className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2"
+                />
+              </label>
+              <label className="text-sm text-cacao">
+                Ya consumidas
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={ajusteConsumidas}
+                  onChange={(e) => setAjusteConsumidas(e.target.value)}
+                  className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2"
+                />
+              </label>
+            </div>
+            {(() => {
+              const r = Number(ajusteRaciones);
+              const c = Number(ajusteConsumidas);
+              const porVender =
+                Number.isFinite(r) && Number.isFinite(c)
+                  ? Math.max(0, r - c)
+                  : null;
+              return porVender !== null ? (
+                <p className="mt-2 text-xs text-cacao-soft">
+                  Quedarían{" "}
+                  <strong className="text-cacao">
+                    {Number(porVender.toFixed(2))}
+                  </strong>{" "}
+                  por vender (reservadas en el comprometido).
+                </p>
+              ) : null;
+            })()}
+            <p className="mt-3 text-[11px] text-cacao-mute">
+              Si cambiaste el tamaño de la porción y ya habías vendido a la
+              porción vieja, dale un vistazo al stock con un conteo por si acaso.
+            </p>
+            <div className="mt-5 flex gap-2 justify-end">
+              <button
+                type="button"
+                onClick={() => setAjustePlan(null)}
+                disabled={ajusteRunning}
+                className="rounded-xl ring-1 ring-marfil px-4 py-2 text-cacao hover:bg-marfil-soft disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={guardarAjuste}
+                disabled={ajusteRunning}
+                className="rounded-xl bg-cacao text-white px-4 py-2 font-medium hover:bg-terracotta disabled:opacity-50"
+              >
+                {ajusteRunning ? "Guardando..." : "Guardar ajuste"}
               </button>
             </div>
           </div>
