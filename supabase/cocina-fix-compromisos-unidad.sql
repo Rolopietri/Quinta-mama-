@@ -17,9 +17,14 @@
 -- Idempotente — se puede correr varias veces sin daño.
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- 1) DATOS · convertir los compromisos cuya unidad snapshot ya no coincide con
---    la del insumo. convertir_para_costo cae al valor crudo si las unidades no
---    son convertibles (unidades custom), así que no rompe esos casos.
+-- 1) DATOS · convertir SOLO los compromisos donde la conversión es matemática-
+--    mente segura: mismo tipo de unidad (peso↔peso, volumen↔volumen), donde
+--    convertir_para_costo realmente cambia el número (ej. g→kg ÷1000).
+--    Se EXCLUYE a propósito:
+--      • unidades iguales escritas distinto (unid/unidades) → el valor no cambia,
+--        no hace falta tocarlas.
+--      • conversiones entre dimensiones distintas (g→L) → dependen de densidad,
+--        no se pueden convertir solas; se resuelven a mano.
 update public.cocina_plan_compromisos c
 set cantidad    = round(
                     public.convertir_para_costo(c.cantidad, c.unidad_base, i.unidad_base)::numeric,
@@ -28,7 +33,9 @@ set cantidad    = round(
     unidad_base = i.unidad_base
 from public.insumos i
 where c.insumo_id = i.id
-  and public.unidad_norm(c.unidad_base) is distinct from public.unidad_norm(i.unidad_base);
+  and abs(
+        public.convertir_para_costo(c.cantidad, c.unidad_base, i.unidad_base) - c.cantidad
+      ) > 0.00005;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 2) BLINDAJE · recalcular_stock_comprometido convierte el compromiso al vuelo.
