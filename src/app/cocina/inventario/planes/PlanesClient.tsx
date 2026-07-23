@@ -85,8 +85,8 @@ export function PlanesClient() {
     }
   }
 
-  // Vista de la lista: agrupada por receta (default) o lista cronológica
-  const [vista, setVista] = useState<"receta" | "cronologico">("receta");
+  // Vista de la lista: cronológica (default) o agrupada por receta
+  const [vista, setVista] = useState<"receta" | "cronologico">("cronologico");
   const [mostrarCerrados, setMostrarCerrados] = useState(false);
 
   async function reload() {
@@ -649,8 +649,8 @@ export function PlanesClient() {
         <div className="flex gap-2">
           {(
             [
-              ["receta", "Por receta"],
               ["cronologico", "Cronológico"],
+              ["receta", "Por receta"],
             ] as const
           ).map(([value, label]) => (
             <button
