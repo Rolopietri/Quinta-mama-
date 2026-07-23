@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { CalendarIcon, SaveIcon } from "@/components/icons";
+import { CalendarIcon, ChevronIcon, SaveIcon } from "@/components/icons";
 import type {
   Receta,
   Insumo,
@@ -35,6 +35,8 @@ export function PedidoSugeridoClient() {
   const [info, setInfo] = useState<string | null>(null);
 
   const [objetivos, setObjetivos] = useState<Objetivo[]>([]);
+  // Cuál pedido guardado está desplegado (mostrando sus recetas e insumos).
+  const [pedidoExpandido, setPedidoExpandido] = useState<string | null>(null);
   const [planes, setPlanes] = useState<PlanProduccion[]>([]);
   /** Modo manual: comparar contra el stock FÍSICO (total), ignorando TODO lo
    *  reservado por planes. Para pedidos armados a mano. */
@@ -231,7 +233,18 @@ export function PedidoSugeridoClient() {
     }
   }
 
-  // ── Cargar pedido guardado en el form ─────────────────────
+  // Insumos (lista de compra) de un pedido guardado, recalculados contra el
+  // stock actual — igual que la calculadora, pero sin cargarlo al form.
+  function itemsDePedido(pg: PedidoCocina) {
+    const validos = pg.recetas
+      .filter((r) => r.recetaId && r.raciones > 0)
+      .map((r) => ({ recetaId: r.recetaId!, raciones: r.raciones }));
+    if (validos.length === 0)
+      return [] as ReturnType<typeof calcularPedidoSugerido>["items"];
+    return calcularPedidoSugerido(validos, recetas, insumos, proveedores).items;
+  }
+
+  // ── Cargar pedido guardado en el form (para editarlo) ─────
   function cargarPedido(pg: PedidoCocina) {
     const nuevosObjetivos: Objetivo[] = pg.recetas
       .filter((r) => r.recetaId) // solo las que siguen existiendo
@@ -313,6 +326,8 @@ export function PedidoSugeridoClient() {
                     { weekday: "short", day: "numeric", month: "short" },
                   )
                 : null;
+              const expandido = pedidoExpandido === pg.id;
+              const itemsPg = expandido ? itemsDePedido(pg) : [];
               return (
                 <li
                   key={pg.id}
@@ -320,41 +335,49 @@ export function PedidoSugeridoClient() {
                     pg.estado !== "pendiente" ? "opacity-60" : ""
                   }`}
                 >
-                  <div className="col-span-12 sm:col-span-6 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-cacao font-medium">
-                        {pg.nombre}
+                  {/* Encabezado: toda el área es un toggle para desplegar */}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setPedidoExpandido(expandido ? null : pg.id)
+                    }
+                    className="col-span-12 sm:col-span-6 min-w-0 text-left flex items-start gap-2"
+                    aria-expanded={expandido}
+                  >
+                    <ChevronIcon
+                      className={`size-4 mt-1 shrink-0 text-cacao-mute transition-transform ${
+                        expandido ? "rotate-90" : ""
+                      }`}
+                    />
+                    <span className="min-w-0">
+                      <span className="flex items-center gap-2 flex-wrap">
+                        <span className="text-cacao font-medium">
+                          {pg.nombre}
+                        </span>
+                        <span
+                          className={`text-[10px] uppercase tracking-widest px-2 py-0.5 rounded-full ring-1 ${est.color}`}
+                        >
+                          {est.label}
+                        </span>
                       </span>
-                      <span
-                        className={`text-[10px] uppercase tracking-widest px-2 py-0.5 rounded-full ring-1 ${est.color}`}
-                      >
-                        {est.label}
+                      <span className="block text-xs text-cacao-soft mt-0.5">
+                        {fechaFmt && (
+                          <span>
+                            <CalendarIcon className="inline size-3.5 align-[-0.15em] mr-1" />
+                            {fechaFmt} ·{" "}
+                          </span>
+                        )}
+                        {pg.recetas.length} receta
+                        {pg.recetas.length === 1 ? "" : "s"}
                       </span>
-                    </div>
-                    <div className="text-xs text-cacao-soft mt-0.5">
-                      {fechaFmt && (
-                        <span>
-                          <CalendarIcon className="inline size-3.5 align-[-0.15em] mr-1" />
-                          {fechaFmt} ·{" "}
+                      {pg.nota && (
+                        <span className="block text-xs text-cacao-soft italic font-serif mt-1">
+                          {pg.nota}
                         </span>
                       )}
-                      {pg.recetas.length} receta
-                      {pg.recetas.length === 1 ? "" : "s"}
-                    </div>
-                    {pg.nota && (
-                      <div className="text-xs text-cacao-soft italic font-serif mt-1">
-                        {pg.nota}
-                      </div>
-                    )}
-                  </div>
+                    </span>
+                  </button>
                   <div className="col-span-12 sm:col-span-6 flex flex-wrap gap-1.5 sm:justify-end">
-                    <button
-                      type="button"
-                      onClick={() => cargarPedido(pg)}
-                      className="text-[10px] uppercase tracking-widest px-3 py-1 rounded-full bg-cacao text-white hover:bg-terracotta"
-                    >
-                      Cargar
-                    </button>
                     {pg.estado === "pendiente" && (
                       <button
                         type="button"
@@ -381,6 +404,78 @@ export function PedidoSugeridoClient() {
                       Borrar
                     </button>
                   </div>
+
+                  {/* Panel desplegado: recetas + lista de compra recalculada */}
+                  {expandido && (
+                    <div className="col-span-12 mt-1 rounded-xl bg-marfil-soft/60 ring-1 ring-marfil p-3 space-y-3">
+                      <div>
+                        <div className="font-display text-[10px] tracking-[0.25em] uppercase text-cacao-mute mb-1.5">
+                          Recetas
+                        </div>
+                        <ul className="space-y-0.5">
+                          {pg.recetas.map((r) => (
+                            <li
+                              key={r.id}
+                              className="text-xs text-cacao-soft flex justify-between gap-3"
+                            >
+                              <span className={r.recetaId ? "" : "italic"}>
+                                {r.recetaNombre}
+                                {!r.recetaId && " (borrada)"}
+                              </span>
+                              <span className="text-cacao tabular-nums">
+                                {r.raciones} rac.
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+
+                      <div>
+                        <div className="font-display text-[10px] tracking-[0.25em] uppercase text-cacao-mute mb-1.5">
+                          Insumos a comprar{" "}
+                          <span className="text-cacao-soft normal-case tracking-normal font-serif italic">
+                            (vs. stock actual)
+                          </span>
+                        </div>
+                        {itemsPg.length === 0 ? (
+                          <p className="text-xs text-cacao-soft italic font-serif">
+                            No falta nada — el stock cubre estas raciones.
+                          </p>
+                        ) : (
+                          <ul className="space-y-1">
+                            {itemsPg.map((it) => (
+                              <li
+                                key={it.insumoId}
+                                className="text-xs flex justify-between gap-3"
+                              >
+                                <span className="text-cacao">
+                                  {it.insumoNombre}
+                                  <span className="text-cacao-mute">
+                                    {" "}
+                                    · falta {it.faltante.toFixed(2)}{" "}
+                                    {it.unidadBase}
+                                  </span>
+                                </span>
+                                <span className="text-cacao tabular-nums whitespace-nowrap">
+                                  {it.empaquesNecesarios}× {it.unidadCompra}
+                                  {it.precioCompraUsd !== null &&
+                                    ` · $${it.costoTotalEstimado.toFixed(2)}`}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => cargarPedido(pg)}
+                        className="text-[10px] uppercase tracking-widest px-3 py-1 rounded-full ring-1 ring-marfil text-cacao-soft hover:bg-white"
+                      >
+                        ✎ Editar en la calculadora
+                      </button>
+                    </div>
+                  )}
                 </li>
               );
             })}
