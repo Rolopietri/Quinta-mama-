@@ -1,0 +1,1449 @@
+/* ============================================================
+   Sitio público de Quinta Mamá — estilos aislados.
+   Todo va bajo `.qm-root` para no interferir con la app interna.
+   Tokens y composición validados en el prototipo (ver 02-TOKENS).
+   ============================================================ */
+
+.qm-root {
+  --marfil: #e3dcd2;
+  --marfil-cl: #efeae3;
+  --marfil-b: #ebe0d6;
+  --cacao: #6b3319;
+  --terracota: #9f3e2e;
+  --oliva: #608955;
+  --azul: #89afbb;
+  --oliva-t: #416138;
+  --azul-t: #3c6572;
+  --tinta: #2e1a10;
+  --hueco: #f4efe8;
+
+  /* Las fuentes las inyecta next/font (ver layout). */
+  --serif: var(--font-serif), Georgia, serif;
+  --sans: var(--font-sans), "Alte Haas Grotesk", "Helvetica Neue", sans-serif;
+  --display: var(--font-display), Georgia, serif;
+
+  --nav-h: 76px;
+  --nav-mini: 54px;
+
+  background: var(--marfil);
+  color: var(--cacao);
+  font-family: var(--sans);
+  font-weight: 300;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+  width: 100%;
+  box-sizing: border-box;
+}
+.qm-root *,
+.qm-root *::before,
+.qm-root *::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+.qm-root img,
+.qm-root svg {
+  max-width: 100%;
+}
+.qm-root .wrap,
+.qm-root .grid,
+.qm-root .evt,
+.qm-root .hist,
+.qm-root .pdis-grid,
+.qm-root .muro-logos {
+  min-width: 0;
+}
+.qm-root ::selection {
+  background: var(--terracota);
+  color: var(--marfil);
+}
+
+/* ============ NAV ============ */
+.qm-root .nav {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 120;
+  height: var(--nav-h);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 clamp(20px, 4vw, 60px);
+  transition:
+    transform 0.44s cubic-bezier(0.22, 0.61, 0.36, 1),
+    height 0.42s cubic-bezier(0.22, 0.61, 0.36, 1),
+    background 0.5s ease,
+    border-color 0.5s ease,
+    color 0.5s ease,
+    box-shadow 0.5s ease;
+  border-bottom: 1px solid transparent;
+  color: var(--marfil);
+}
+.qm-root .nav.solid {
+  background: rgba(235, 224, 214, 0.95);
+  backdrop-filter: blur(16px);
+  border-bottom: 1px solid rgba(107, 51, 25, 0.16);
+  color: var(--cacao);
+}
+.qm-root .nav.mini {
+  height: var(--nav-mini);
+  box-shadow: 0 1px 12px rgba(46, 26, 16, 0.07);
+}
+.qm-root .nav.oculto {
+  transform: translateY(-102%);
+  pointer-events: none;
+}
+.qm-root .nav.mini .logo .isoW {
+  width: 23px;
+  height: 23px;
+  flex: 0 0 23px;
+}
+.qm-root .nav.mini .logo .estd {
+  opacity: 0;
+  height: 0;
+  margin: 0;
+  overflow: hidden;
+}
+.qm-root .nav.mini .logo .q,
+.qm-root .nav.mini .logo .m {
+  font-size: 11.5px;
+}
+.qm-root .logo .isoW,
+.qm-root .logo .estd,
+.qm-root .logo .q,
+.qm-root .logo .m {
+  transition:
+    width 0.42s cubic-bezier(0.22, 0.61, 0.36, 1),
+    height 0.42s cubic-bezier(0.22, 0.61, 0.36, 1),
+    font-size 0.42s cubic-bezier(0.22, 0.61, 0.36, 1),
+    opacity 0.3s ease,
+    flex-basis 0.42s;
+}
+
+/* menú de escritorio */
+.qm-root .menu {
+  display: flex;
+  list-style: none;
+  gap: 30px;
+  align-items: center;
+}
+.qm-root .menu a {
+  position: relative;
+  text-decoration: none;
+  color: inherit;
+  font-family: var(--sans);
+  font-weight: 400;
+  font-size: 10.5px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+.qm-root .menu a::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -6px;
+  height: 1px;
+  background: currentColor;
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 0.34s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+.qm-root .menu a.activo::after,
+.qm-root .menu a:hover::after {
+  transform: scaleX(1);
+}
+.qm-root .burger {
+  display: none;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  width: 26px;
+  height: 18px;
+  position: relative;
+}
+.qm-root .burger span {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1.5px;
+  background: currentColor;
+  transition: 0.3s;
+}
+.qm-root .burger span:nth-child(1) {
+  top: 0;
+}
+.qm-root .burger span:nth-child(2) {
+  top: 50%;
+  transform: translateY(-50%);
+}
+.qm-root .burger span:nth-child(3) {
+  bottom: 0;
+}
+
+/* ---- barra de pilares (patrón Soho House): solo palabras, deslizable ---- */
+.qm-root .pilares {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 121;
+  display: none;
+  background: var(--marfil-b);
+  border-bottom: 1px solid rgba(107, 51, 25, 0.12);
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  transform: translateY(-102%);
+  transition: transform 0.44s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+.qm-root .pilares.visible {
+  /* El prototipo dejaba `display:none` y solo reponía transform, así que la
+     barra nunca llegaba a verse. La reponemos: es el comportamiento que
+     describe el brief (relevo del header en móvil, patrón Soho House). */
+  display: block;
+  transform: none;
+}
+.qm-root .pilares::-webkit-scrollbar {
+  display: none;
+}
+.qm-root .pilares ul {
+  display: flex;
+  list-style: none;
+  gap: 0;
+  padding: 0 18px;
+  min-width: max-content;
+}
+.qm-root .pilares a {
+  display: block;
+  padding: 17px 15px 15px;
+  text-decoration: none;
+  color: var(--cacao);
+  font-family: var(--sans);
+  font-weight: 400;
+  font-size: 17px;
+  letter-spacing: -0.005em;
+  text-transform: none;
+  white-space: nowrap;
+  position: relative;
+  opacity: 0.72;
+  transition: opacity 0.3s;
+}
+.qm-root .pilares a.activo {
+  opacity: 1;
+}
+.qm-root .pilares a::after {
+  content: "";
+  position: absolute;
+  left: 15px;
+  right: 15px;
+  bottom: 9px;
+  height: 1.5px;
+  background: currentColor;
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 0.34s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+.qm-root .pilares a.activo::after {
+  transform: scaleX(1);
+}
+.qm-root .pilares a[href="#cultura"].activo {
+  color: var(--terracota);
+}
+.qm-root .pilares a[href="#bienestar"].activo {
+  color: var(--oliva-t);
+}
+.qm-root .pilares a[href="#pdis"].activo {
+  color: var(--azul-t);
+}
+
+/* ============ HERO ============ */
+.qm-root .hero {
+  position: relative;
+  height: 100svh;
+  min-height: 620px;
+  overflow: hidden;
+  background: var(--tinta);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  touch-action: pan-y;
+  user-select: none;
+}
+.qm-root .hero.arr {
+  cursor: grabbing;
+}
+.qm-root .pano {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 270%;
+  top: -85%;
+  will-change: transform;
+}
+.qm-root .pano svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.qm-root .hero::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      ellipse 62% 46% at 50% 40%,
+      rgba(159, 62, 46, 0.16),
+      transparent 70%
+    ),
+    linear-gradient(
+      180deg,
+      rgba(46, 26, 16, 0.82) 0%,
+      rgba(46, 26, 16, 0.24) 34%,
+      rgba(46, 26, 16, 0.32) 64%,
+      rgba(46, 26, 16, 0.88) 100%
+    );
+}
+.qm-root .hero-txt {
+  position: relative;
+  z-index: 5;
+  text-align: center;
+  color: var(--marfil);
+  pointer-events: none;
+  padding: 0 24px;
+  max-width: 1000px;
+}
+.qm-root .hero-estd {
+  font-family: var(--sans);
+  font-size: 8.5px;
+  letter-spacing: 0.52em;
+  opacity: 0.6;
+  margin-bottom: 34px;
+  text-transform: uppercase;
+}
+.qm-root .hero-txt h1 {
+  font-family: var(--serif);
+  font-weight: 400;
+  font-size: clamp(30px, 5.4vw, 64px);
+  line-height: 1.3;
+  letter-spacing: 0.005em;
+}
+.qm-root .hero-txt h1 .r {
+  font-family: var(--serif);
+  font-weight: 400;
+  font-style: normal;
+  font-size: 0.62em;
+  letter-spacing: 0.03em;
+  display: inline-block;
+}
+.qm-root .hero-txt h1 em {
+  font-family: var(--display);
+  font-style: normal;
+  font-weight: 400;
+  font-size: 1.12em;
+  letter-spacing: 0.012em;
+  display: inline-block;
+  margin: 0.1em 0 0.16em;
+}
+.qm-root .hero-iso {
+  width: clamp(64px, 8.4vw, 102px);
+  margin: 0 auto clamp(30px, 4.6vh, 46px);
+  color: var(--marfil);
+  opacity: 0.92;
+}
+.qm-root .hero-iso svg {
+  width: 100%;
+  height: auto;
+  display: block;
+  fill: currentColor;
+}
+.qm-root .hero-sub {
+  margin-top: 38px;
+  font-family: var(--sans);
+  font-size: 10px;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  opacity: 0.68;
+  line-height: 2.2;
+}
+.qm-root .placa {
+  position: absolute;
+  left: clamp(20px, 4vw, 60px);
+  bottom: clamp(28px, 6vh, 66px);
+  color: var(--marfil);
+  z-index: 6;
+}
+.qm-root .placa-n {
+  font-family: var(--serif);
+  font-size: clamp(36px, 6vw, 64px);
+  line-height: 0.86;
+}
+.qm-root .placa-l {
+  font-family: var(--sans);
+  font-size: 9px;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  opacity: 0.62;
+  margin-top: 12px;
+}
+.qm-root .riel {
+  position: absolute;
+  right: clamp(20px, 4vw, 60px);
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 6;
+  height: min(44vh, 300px);
+  width: 1px;
+  background: rgba(227, 220, 210, 0.24);
+}
+.qm-root .riel-p {
+  position: absolute;
+  left: -3.5px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--marfil);
+  transition: top 0.1s linear;
+}
+.qm-root .riel-lbl {
+  position: absolute;
+  right: 18px;
+  white-space: nowrap;
+  color: var(--marfil);
+  opacity: 0.46;
+  font-family: var(--sans);
+  font-size: 8px;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  transform: translateY(-50%);
+}
+.qm-root .arrastra {
+  position: absolute;
+  bottom: clamp(28px, 6vh, 66px);
+  left: 50%;
+  transform: translateX(-50%);
+  color: var(--marfil);
+  font-family: var(--sans);
+  font-size: 8.5px;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  opacity: 0.5;
+  z-index: 6;
+  text-align: center;
+}
+.qm-root .arrastra::after {
+  content: "";
+  display: block;
+  width: 1px;
+  height: 32px;
+  background: var(--marfil);
+  margin: 12px auto 0;
+  animation: qm-caer 2.6s ease-in-out infinite;
+  transform-origin: top;
+}
+@keyframes qm-caer {
+  0%,
+  100% {
+    transform: scaleY(0.2);
+    opacity: 0.2;
+  }
+  50% {
+    transform: scaleY(1);
+    opacity: 0.75;
+  }
+}
+.qm-root .nota {
+  position: absolute;
+  top: calc(var(--nav-h) + 14px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 7;
+  color: var(--marfil);
+  opacity: 0.3;
+  font-family: var(--sans);
+  font-size: 8px;
+  letter-spacing: 0.26em;
+  text-transform: uppercase;
+  border: 1px solid rgba(227, 220, 210, 0.26);
+  padding: 6px 15px;
+  text-align: center;
+}
+
+/* ============ ISOTIPO Y LOGOS ============ */
+.qm-root .iso {
+  display: block;
+  width: 100%;
+  height: 100%;
+  fill: currentColor;
+}
+.qm-root .logo {
+  text-decoration: none;
+  color: inherit;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+.qm-root .logo .isoW {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  color: inherit;
+}
+.qm-root .logo .txt {
+  line-height: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.qm-root .logo .estd {
+  font-family: var(--sans);
+  font-size: 7px;
+  letter-spacing: 0.36em;
+  opacity: 0.66;
+}
+.qm-root .logo .qm {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.qm-root .logo .q,
+.qm-root .logo .m {
+  font-family: var(--serif);
+  font-size: 13.5px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+/* monograma QM */
+.qm-root .mono {
+  font-family: var(--serif);
+  line-height: 0.8;
+  display: inline-flex;
+  align-items: baseline;
+}
+.qm-root .mono .mq {
+  font-size: 1em;
+}
+.qm-root .mono .mm {
+  font-family: var(--serif);
+  font-size: 1em;
+  margin-left: 0.04em;
+}
+
+/* ============ FONDO PLANO MARFIL ============ */
+.qm-root .sec,
+.qm-root .cita,
+.qm-root .cierre,
+.qm-root .hero {
+  position: relative;
+}
+.qm-root .sec,
+.qm-root .cita,
+.qm-root .cierre {
+  overflow: hidden;
+}
+.qm-root .wrap,
+.qm-root .cita > *,
+.qm-root .cierre > * {
+  position: relative;
+  z-index: 3;
+}
+
+/* ============ LOGOTIPOS DE ALIADOS ============ */
+.qm-root .card-head {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  margin-bottom: 2px;
+}
+.qm-root .marca-slot {
+  flex: 0 0 46px;
+  width: 46px;
+  height: 46px;
+  border: 1px dashed currentColor;
+  opacity: 0.42;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--sans);
+  font-size: 7px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  text-align: center;
+  line-height: 1.25;
+  padding: 3px;
+}
+.qm-root .marca-slot img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+.qm-root .marca-slot.tiene {
+  border: 0;
+  opacity: 1;
+}
+.qm-root .card-head h3 {
+  margin: 0;
+}
+
+/* ============ ALIADOS ============ */
+.qm-root #aliados .eyebrow,
+.qm-root #aliados h2 {
+  color: var(--cacao);
+}
+.qm-root .muro-logos {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(190px, 100%), 1fr));
+  margin-top: clamp(48px, 7vh, 84px);
+  width: 100%;
+  border-top: 1px solid rgba(107, 51, 25, 0.2);
+  border-left: 1px solid rgba(107, 51, 25, 0.2);
+}
+.qm-root .logo-celda {
+  aspect-ratio: 16 / 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 22px 14px;
+  text-align: center;
+  min-width: 0;
+  border-right: 1px solid rgba(107, 51, 25, 0.2);
+  border-bottom: 1px solid rgba(107, 51, 25, 0.2);
+  transition: background 0.45s ease;
+  cursor: pointer;
+}
+.qm-root .logo-celda .nm,
+.qm-root .logo-celda .cat {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.qm-root .logo-celda:hover {
+  background: var(--marfil);
+}
+.qm-root .logo-celda .slot {
+  width: clamp(64px, 7vw, 88px);
+  height: clamp(46px, 5vw, 60px);
+  border: 1px dashed currentColor;
+  opacity: 0.4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--sans);
+  font-size: 7.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  transition: opacity 0.4s;
+}
+.qm-root .logo-celda:hover .slot {
+  opacity: 0.68;
+}
+.qm-root .logo-celda .slot img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.qm-root .logo-celda .slot.tiene {
+  border: 0;
+  opacity: 0.82;
+}
+.qm-root .logo-celda .nm {
+  font-family: var(--serif);
+  font-size: 15px;
+  line-height: 1.25;
+}
+.qm-root .logo-celda .cat {
+  font-family: var(--sans);
+  font-size: 8.5px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  opacity: 0.6;
+  margin-top: -8px;
+}
+@media (max-width: 900px) {
+  .qm-root .muro-logos {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+@media (max-width: 560px) {
+  .qm-root .muro-logos {
+    grid-template-columns: 1fr;
+  }
+  .qm-root .logo-celda {
+    aspect-ratio: auto;
+    padding: 30px 18px;
+    gap: 16px;
+  }
+}
+
+/* ---- teléfono: márgenes y respiración ---- */
+@media (max-width: 600px) {
+  .qm-root .sec {
+    padding: clamp(58px, 9vh, 86px) 20px;
+  }
+  .qm-root .cita {
+    padding: clamp(64px, 11vh, 110px) 24px;
+  }
+  .qm-root .cierre {
+    padding: clamp(70px, 12vh, 120px) 20px;
+  }
+  .qm-root footer {
+    padding: 0 20px 30px;
+    gap: 10px;
+  }
+  .qm-root .wrap {
+    max-width: 100%;
+  }
+  .qm-root .sec h2 {
+    font-size: clamp(28px, 8.4vw, 40px);
+  }
+  .qm-root .sec h2 .sc {
+    font-size: 0.46em;
+  }
+  .qm-root .intro {
+    font-size: 15px;
+    line-height: 1.82;
+    max-width: 100%;
+  }
+  .qm-root .grid {
+    gap: 38px;
+  }
+  .qm-root .card-txt h3 {
+    font-size: 18px;
+  }
+  .qm-root .evt {
+    gap: 34px;
+  }
+  .qm-root .evt-form h3 {
+    font-size: 22px;
+  }
+  .qm-root .pdis-grid {
+    gap: 30px;
+  }
+  .qm-root .hist {
+    gap: 34px;
+  }
+  .qm-root .linea {
+    padding-left: 26px;
+  }
+  .qm-root .hito::before {
+    left: -30.5px;
+  }
+  .qm-root .cita p {
+    font-size: clamp(22px, 6.6vw, 30px);
+    max-width: 100%;
+  }
+  .qm-root .cierre h2 {
+    font-size: clamp(27px, 8vw, 38px);
+  }
+  .qm-root .modal {
+    padding: 14px;
+  }
+  .qm-root .modal-c {
+    padding: 26px 22px;
+  }
+  .qm-root .modal-in .ph {
+    min-height: 210px;
+  }
+  .qm-root .cerrar {
+    top: 16px;
+    right: 18px;
+  }
+  .qm-root .hero-txt {
+    padding: 0 22px;
+  }
+  .qm-root .hero-txt h1 {
+    font-size: clamp(26px, 7.4vw, 38px);
+    line-height: 1.32;
+  }
+  .qm-root .placa {
+    left: 20px;
+  }
+  .qm-root .marca-slot {
+    flex: 0 0 38px;
+    width: 38px;
+    height: 38px;
+  }
+  .qm-root .card-head {
+    gap: 11px;
+  }
+}
+
+/* ============ FRANJA CROMÁTICA (signature) ============ */
+.qm-root .franja {
+  display: flex;
+  height: 9px;
+  width: 100%;
+}
+.qm-root .franja i {
+  flex: 1;
+  display: block;
+}
+
+/* ============ SECCIONES ============ */
+.qm-root .sec {
+  padding: clamp(78px, 12vh, 140px) clamp(20px, 4vw, 60px);
+  position: relative;
+}
+.qm-root .wrap {
+  max-width: 1280px;
+  margin: 0 auto;
+}
+.qm-root .eyebrow {
+  font-family: var(--sans);
+  font-size: 9px;
+  letter-spacing: 0.4em;
+  text-transform: uppercase;
+  margin-bottom: 26px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.qm-root .eyebrow::before {
+  content: "";
+  width: 32px;
+  height: 1px;
+  background: currentColor;
+  opacity: 0.5;
+}
+.qm-root .sec h2 {
+  font-family: var(--serif);
+  font-weight: 400;
+  font-size: clamp(32px, 5.4vw, 60px);
+  line-height: 1.1;
+  margin-bottom: 32px;
+}
+.qm-root .sec h2 .sc {
+  font-family: var(--sans);
+  font-weight: 300;
+  text-transform: uppercase;
+  font-size: 0.5em;
+  letter-spacing: 0.18em;
+  display: block;
+  margin-bottom: 6px;
+  opacity: 0.72;
+}
+.qm-root .intro {
+  max-width: 64ch;
+  font-size: clamp(14.5px, 1.4vw, 16.5px);
+  line-height: 1.9;
+  font-weight: 300;
+}
+.qm-root .intro + .intro {
+  margin-top: 20px;
+}
+
+/* ---- El color del pilar vive en el título, no en el fondo ---- */
+.qm-root .sec {
+  color: var(--cacao);
+  background: var(--marfil);
+}
+.qm-root #cultura,
+.qm-root #eventos,
+.qm-root #aliados {
+  background: var(--marfil);
+}
+.qm-root #historia,
+.qm-root #bienestar,
+.qm-root #pdis {
+  background: var(--marfil-cl);
+}
+.qm-root .cita {
+  background: var(--marfil-cl);
+}
+.qm-root .cierre {
+  background: var(--marfil);
+}
+.qm-root .sec .eyebrow {
+  color: inherit;
+  opacity: 0.62;
+}
+
+/* cada pilar tiñe su titular y su acento */
+.qm-root #cultura h2,
+.qm-root #cultura .eyebrow {
+  color: var(--terracota);
+}
+.qm-root #bienestar h2,
+.qm-root #bienestar .eyebrow {
+  color: var(--oliva-t);
+}
+.qm-root #eventos h2,
+.qm-root #eventos .eyebrow {
+  color: var(--cacao);
+}
+.qm-root #pdis h2,
+.qm-root #pdis .eyebrow {
+  color: var(--azul-t);
+}
+.qm-root #historia h2,
+.qm-root #historia .eyebrow {
+  color: var(--cacao);
+}
+.qm-root #aliados h2,
+.qm-root #aliados .eyebrow {
+  color: var(--cacao);
+}
+.qm-root .sec h2 .sc {
+  color: var(--cacao);
+  opacity: 0.55;
+}
+.qm-root .sec h2::after {
+  content: "";
+  display: block;
+  height: 1px;
+  width: clamp(54px, 7vw, 92px);
+  background: currentColor;
+  opacity: 0.42;
+  margin-top: 24px;
+}
+.qm-root #pdis .pdis-item {
+  border-top-color: rgba(107, 51, 25, 0.24);
+}
+.qm-root #pdis .pdis-item h3 {
+  color: var(--azul-t);
+}
+.qm-root #cultura .card-txt h3 {
+  color: var(--cacao);
+}
+.qm-root #bienestar .card-txt h3 {
+  color: var(--cacao);
+}
+
+/* ============ GALERÍA ============ */
+.qm-root .grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: clamp(28px, 3.6vw, 56px);
+  margin-top: clamp(48px, 7vh, 84px);
+}
+.qm-root .card {
+  cursor: pointer;
+  position: relative;
+  background: transparent;
+}
+.qm-root .ph {
+  aspect-ratio: 4 / 5;
+  overflow: hidden;
+  position: relative;
+  background: #f4efe8;
+}
+.qm-root .ph svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  transition: transform 0.9s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+.qm-root .card:hover .ph svg {
+  transform: scale(1.045);
+}
+.qm-root .ph::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--tinta);
+  opacity: 0;
+  transition: opacity 0.5s;
+}
+.qm-root .card:hover .ph::after {
+  opacity: 0.06;
+}
+.qm-root .card-piso {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  z-index: 2;
+  font-family: var(--sans);
+  font-size: 8.5px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  padding: 5px 10px;
+  color: var(--marfil);
+}
+.qm-root .card-txt {
+  padding: 20px 0 0;
+}
+.qm-root .card-txt h3 {
+  font-family: var(--serif);
+  font-size: 20px;
+  font-weight: 400;
+  line-height: 1.2;
+}
+.qm-root .card-txt p {
+  font-family: var(--sans);
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  margin-top: 10px;
+  opacity: 0.66;
+}
+.qm-root .card-ver {
+  font-family: var(--sans);
+  font-size: 9px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  margin-top: 14px;
+  display: inline-block;
+  border-bottom: 1px solid currentColor;
+  padding-bottom: 3px;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition:
+    opacity 0.4s,
+    transform 0.4s;
+}
+.qm-root .card:hover .card-ver {
+  opacity: 0.8;
+  transform: none;
+}
+
+/* ============ CITA ============ */
+.qm-root .cita {
+  color: var(--terracota);
+  padding: clamp(80px, 15vh, 170px) clamp(24px, 6vw, 80px);
+  text-align: center;
+}
+.qm-root .cita p {
+  font-family: var(--serif);
+  font-size: clamp(24px, 3.9vw, 48px);
+  line-height: 1.34;
+  max-width: 19ch;
+  margin: 0 auto;
+}
+.qm-root .cita p .sc {
+  font-family: var(--sans);
+  font-weight: 300;
+  text-transform: uppercase;
+  font-size: 0.62em;
+  letter-spacing: 0.14em;
+  color: var(--cacao);
+  opacity: 0.7;
+}
+.qm-root .cita p em {
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 1em;
+}
+
+/* ============ EVENTOS ============ */
+.qm-root .evt {
+  display: grid;
+  grid-template-columns: 1.05fr 0.95fr;
+  gap: clamp(34px, 5vw, 74px);
+  margin-top: clamp(48px, 7vh, 84px);
+  align-items: start;
+}
+.qm-root .evt-img {
+  aspect-ratio: 1 / 1.06;
+  overflow: hidden;
+  background: #f4efe8;
+}
+.qm-root .evt-img svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.qm-root .evt-form h3 {
+  font-family: var(--serif);
+  font-size: 26px;
+  font-weight: 400;
+  margin-bottom: 34px;
+}
+.qm-root .campo {
+  margin-bottom: 27px;
+}
+.qm-root .campo label {
+  display: block;
+  font-family: var(--sans);
+  font-size: 9px;
+  letter-spacing: 0.26em;
+  text-transform: uppercase;
+  opacity: 0.66;
+  margin-bottom: 11px;
+}
+.qm-root .campo input,
+.qm-root .campo select,
+.qm-root .campo textarea {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid rgba(107, 51, 25, 0.3);
+  background: transparent;
+  padding: 10px 0;
+  font-family: var(--sans);
+  font-size: 15px;
+  color: var(--cacao);
+  font-weight: 300;
+  border-radius: 0;
+  transition: border-color 0.35s;
+}
+.qm-root .campo input:focus,
+.qm-root .campo select:focus,
+.qm-root .campo textarea:focus {
+  outline: none;
+  border-bottom-color: var(--terracota);
+}
+.qm-root .campo textarea {
+  resize: vertical;
+  min-height: 64px;
+}
+.qm-root .btn {
+  background: var(--terracota);
+  color: var(--marfil);
+  border: 1px solid var(--terracota);
+  cursor: pointer;
+  font-family: var(--sans);
+  font-size: 10px;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  padding: 16px 36px;
+  transition: 0.4s;
+  width: 100%;
+}
+.qm-root .btn:hover {
+  background: transparent;
+  color: var(--terracota);
+}
+.qm-root .aviso {
+  margin-top: 18px;
+  font-size: 12.5px;
+  line-height: 1.7;
+  min-height: 18px;
+  opacity: 0.8;
+}
+.qm-root .aviso a {
+  color: var(--terracota);
+}
+
+/* ============ PDIS ============ */
+.qm-root .pdis-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(268px, 1fr));
+  gap: clamp(28px, 3.4vw, 52px);
+  margin-top: clamp(48px, 7vh, 84px);
+}
+.qm-root .pdis-item {
+  border-top: 1px solid rgba(46, 26, 16, 0.25);
+  padding-top: 24px;
+}
+.qm-root .pdis-item h3 {
+  font-family: var(--serif);
+  font-size: 21px;
+  font-weight: 400;
+  margin-bottom: 14px;
+}
+.qm-root .pdis-item p {
+  font-size: 14.5px;
+  line-height: 1.85;
+  font-weight: 300;
+}
+
+/* ============ HISTORIA ============ */
+.qm-root .hist {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: clamp(36px, 6vw, 88px);
+  align-items: start;
+  margin-top: clamp(40px, 6vh, 68px);
+}
+.qm-root .linea {
+  border-left: 1px solid rgba(107, 51, 25, 0.25);
+  padding-left: 32px;
+}
+.qm-root .hito {
+  padding-bottom: 40px;
+  position: relative;
+}
+.qm-root .hito::before {
+  content: "";
+  position: absolute;
+  left: -36.5px;
+  top: 9px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--terracota);
+}
+.qm-root .hito:nth-child(2)::before {
+  background: var(--cacao);
+}
+.qm-root .hito:nth-child(3)::before {
+  background: var(--oliva);
+}
+.qm-root .hito:nth-child(4)::before {
+  background: var(--azul);
+}
+.qm-root .hito .a {
+  font-family: var(--sans);
+  font-size: 10px;
+  letter-spacing: 0.3em;
+  display: block;
+  margin-bottom: 11px;
+  opacity: 0.66;
+}
+.qm-root .hito .t {
+  font-family: var(--serif);
+  font-size: 17px;
+  line-height: 1.6;
+  max-width: 42ch;
+  display: block;
+}
+
+/* ============ CIERRE ============ */
+.qm-root .cierre {
+  color: var(--cacao);
+  text-align: center;
+  padding: clamp(88px, 16vh, 180px) clamp(20px, 4vw, 60px);
+}
+.qm-root .cierre h2 {
+  font-family: var(--serif);
+  font-size: clamp(30px, 5.2vw, 58px);
+  font-weight: 400;
+  line-height: 1.2;
+  margin-bottom: 32px;
+}
+.qm-root .cierre h2 em {
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 1em;
+}
+.qm-root .cierre p {
+  font-family: var(--sans);
+  font-size: 10px;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  opacity: 0.62;
+  line-height: 2.5;
+}
+.qm-root .cta {
+  display: inline-block;
+  margin-top: 46px;
+  border: 1px solid var(--terracota);
+  color: var(--terracota);
+  text-decoration: none;
+  padding: 17px 48px;
+  font-family: var(--sans);
+  font-size: 10px;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  transition: 0.4s;
+}
+.qm-root .cta:hover {
+  background: var(--terracota);
+  color: var(--marfil);
+}
+.qm-root .lnk-mapa {
+  color: inherit;
+  text-decoration: none;
+  border-bottom: 1px solid currentColor;
+  padding-bottom: 2px;
+  transition: opacity 0.3s;
+}
+.qm-root .lnk-mapa:hover {
+  opacity: 0.62;
+}
+.qm-root .cta-fila {
+  display: flex;
+  gap: 14px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-top: 46px;
+}
+.qm-root .cta-fila .cta {
+  margin-top: 0;
+}
+.qm-root .cta-alt {
+  border-color: rgba(107, 51, 25, 0.34);
+  color: var(--cacao);
+}
+.qm-root .cta-alt:hover {
+  background: var(--cacao);
+  color: var(--marfil);
+  border-color: var(--cacao);
+}
+@media (max-width: 600px) {
+  .qm-root .cta-fila {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+    margin-top: 38px;
+  }
+  .qm-root .cta-fila .cta {
+    padding: 16px 20px;
+  }
+}
+.qm-root footer {
+  background: transparent;
+  color: var(--cacao);
+  border-top: 1px solid rgba(107, 51, 25, 0.18);
+  padding: 0 clamp(20px, 4vw, 60px) 36px;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  align-items: center;
+  opacity: 0.62;
+}
+.qm-root footer span {
+  font-family: var(--sans);
+  font-size: 9px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+
+/* ============ MODAL ============ */
+.qm-root .modal {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(46, 26, 16, 0.93);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.45s;
+}
+.qm-root .modal.on {
+  opacity: 1;
+  pointer-events: auto;
+}
+.qm-root .modal-in {
+  background: var(--marfil);
+  max-width: 860px;
+  width: 100%;
+  max-height: 88vh;
+  overflow: auto;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+.qm-root .modal-in .ph {
+  aspect-ratio: auto;
+  min-height: 340px;
+  height: 100%;
+}
+.qm-root .modal-c {
+  padding: clamp(30px, 4vw, 52px);
+}
+.qm-root .modal-c h3 {
+  font-family: var(--serif);
+  font-size: 30px;
+  font-weight: 400;
+  line-height: 1.15;
+  margin-bottom: 10px;
+}
+.qm-root .modal-c .meta {
+  font-family: var(--sans);
+  font-size: 9.5px;
+  letter-spacing: 0.26em;
+  text-transform: uppercase;
+  opacity: 0.66;
+  margin-bottom: 28px;
+}
+.qm-root .modal-c p {
+  font-size: 15px;
+  line-height: 1.9;
+  font-weight: 300;
+}
+.qm-root .cerrar {
+  position: absolute;
+  top: 24px;
+  right: 28px;
+  background: none;
+  border: 0;
+  color: var(--marfil);
+  cursor: pointer;
+  font-family: var(--sans);
+  font-size: 9.5px;
+  letter-spacing: 0.26em;
+  text-transform: uppercase;
+}
+
+/* ============ REVEAL ============ */
+.qm-root .rv {
+  opacity: 0;
+  transform: translateY(24px);
+  transition:
+    opacity 1s ease,
+    transform 1s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+.qm-root .rv.in {
+  opacity: 1;
+  transform: none;
+}
+
+@media (max-width: 900px) {
+  .qm-root .nav {
+    background: rgba(227, 220, 210, 0.95);
+    border-bottom: 1px solid rgba(107, 51, 25, 0.16);
+    color: var(--cacao);
+  }
+  .qm-root .menu {
+    position: fixed;
+    top: var(--nav-h);
+    left: 0;
+    right: 0;
+    background: var(--marfil);
+    flex-direction: column;
+    gap: 0;
+    padding: 14px 0;
+    border-bottom: 1px solid rgba(107, 51, 25, 0.16);
+    transform: translateY(-135%);
+    transition: transform 0.5s cubic-bezier(0.22, 0.61, 0.36, 1);
+  }
+  .qm-root .menu.on {
+    transform: none;
+  }
+  .qm-root .menu a {
+    display: block;
+    padding: 15px clamp(20px, 4vw, 60px);
+  }
+  .qm-root .menu a::after {
+    display: none;
+  }
+  .qm-root .burger {
+    display: block;
+  }
+  .qm-root .grid {
+    grid-template-columns: 1fr;
+    gap: 46px;
+  }
+  .qm-root .evt,
+  .qm-root .hist,
+  .qm-root .modal-in {
+    grid-template-columns: 1fr;
+  }
+  .qm-root .riel {
+    display: none;
+  }
+  .qm-root .placa {
+    bottom: auto;
+    top: calc(var(--nav-h) + 74px);
+  }
+  .qm-root .hero {
+    height: 86svh;
+    min-height: 520px;
+  }
+  .qm-root .arrastra {
+    bottom: 18px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .qm-root *,
+  .qm-root *::before,
+  .qm-root *::after {
+    animation: none !important;
+    transition-duration: 0.01ms !important;
+  }
+  .qm-root .rv {
+    opacity: 1;
+    transform: none;
+  }
+}
