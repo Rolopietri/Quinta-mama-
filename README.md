@@ -1,36 +1,90 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Quinta Mamá
 
-## Getting Started
+App interna de operaciones para Quinta Mamá: cocina (insumos, recetas,
+sub-recetas, stock, planes de producción, compras, ventas y pedidos),
+eventos, presupuestos y tareas.
 
-First, run the development server:
+- **Framework:** Next.js 16 (App Router, webpack) + React 19 + TypeScript
+- **Base de datos y auth:** Supabase (Postgres con RLS, triggers y Supabase Auth)
+- **Estilos:** Tailwind CSS v4
+- **Deploy:** Vercel, desde la rama `main` (deploy automático en cada push)
+
+> **Ojo con la versión de Next:** este proyecto corre sobre una versión de
+> Next.js con cambios importantes respecto a lo habitual. Antes de tocar código,
+> lee la guía correspondiente en `node_modules/next/dist/docs/`. Ver también
+> `AGENTS.md` (convenciones del proyecto, p. ej. usar los iconos de
+> `src/components/icons.tsx` en vez de emojis).
+
+## Cómo correr en local
+
+Requisitos: **Node 22** y npm.
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+cp .env.local.example .env.local   # y llena los valores (ver abajo)
+npm run dev                        # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Scripts útiles:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm run build           # build de producción (lo mismo que corre Vercel)
+npm run lint            # eslint
+npx tsc --noEmit        # typecheck
+npm run test:unidades   # chequeo del sistema de unidades (scripts/check-unidades.mjs)
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Variables de entorno
 
-## Learn More
+Se copian de `.env.local.example`. En **local** van en `.env.local`; en
+**producción** se configuran en Vercel (Settings → Environment Variables).
 
-To learn more about Next.js, take a look at the following resources:
+| Variable | Dónde | Para qué |
+|---|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | local + Vercel | URL del proyecto Supabase (pública). |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | local + Vercel | Anon key de Supabase (pública, protegida por RLS). |
+| `ALLOWED_EMAILS` | local + Vercel | Lista separada por comas de correos con permiso de login. |
+| `SUPABASE_SERVICE_ROLE_KEY` | **solo Vercel** | Llave de servicio. La usa el cron de la tasa BCV para escribir con permisos de servidor. **Es secreta: nunca va en el repo ni en un `.env.local` compartido — solo en Vercel.** |
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Los valores de Supabase están en: Supabase → Settings → API.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Base de datos (recrear desde cero)
 
-## Deploy on Vercel
+El esquema y las funciones/triggers viven como archivos `.sql` sueltos en
+`supabase/`, que se aplican a mano en el **SQL Editor** de Supabase.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+**Orden de aplicación:** alfabético, y `cocina-zzz-motor-canonico.sql` **de
+último** (por eso el prefijo `zzz-`: es la versión canónica del motor de stock y
+tiene que ganar). Los detalles del porqué y qué archivos definen cada función
+están en **[`supabase/README-migraciones.md`](supabase/README-migraciones.md)** —
+léelo antes de reconstruir.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Puntos clave:
+
+- `schema.sql` crea las tablas base (tareas, eventos) con RLS.
+- Los archivos `cocina-*.sql`, `eventos-*.sql`, `presupuestos-*.sql`, etc. agregan
+  el resto de tablas, columnas, funciones y triggers.
+- Los `*-seed.sql` cargan datos iniciales (plantillas, mobiliario).
+- La whitelist de acceso NO está en la base: se controla con `ALLOWED_EMAILS` en
+  el código (`src/proxy.ts`).
+
+Como las funciones usan `create or replace` (idempotentes), reaplicar el repo
+completo en orden reconstruye el estado de producción.
+
+## Deploy
+
+Vercel está conectado a este repo y despliega **automáticamente en cada push a
+`main`**. El `vercel.json` define un cron diario (`/api/cron/bcv`) que actualiza
+la tasa BCV. No hay pasos manuales de deploy.
+
+## Estructura
+
+```
+src/app/            Rutas (App Router): cocina/, eventos/, presupuestos/, tareas/, api/
+src/components/     UI compartida (icons.tsx = set de iconos de línea propio)
+src/lib/            data/ (acceso a Supabase por módulo), units (sistema de unidades), types
+src/proxy.ts        Middleware de auth + whitelist de correos
+supabase/           Esquema y funciones SQL (ver README-migraciones.md)
+scripts/            Utilidades (check-unidades.mjs)
+docs/HISTORIA.md    Bitácora de decisiones y cambios importantes
+```
