@@ -585,8 +585,13 @@
   display: block;
 }
 .qm-root .marca-slot.tiene {
-  border: 0;
+  /* Logo real: teja clara para que los logos con fondo blanco se lean como
+     una ficha intencional y no como un recuadro flotante sobre el marfil. */
+  border: 1px solid rgba(107, 51, 25, 0.1);
   opacity: 1;
+  background: #fff;
+  border-radius: 7px;
+  padding: 5px;
 }
 .qm-root .card-head h3 {
   margin: 0;
@@ -651,8 +656,16 @@
   object-fit: contain;
 }
 .qm-root .logo-celda .slot.tiene {
-  border: 0;
-  opacity: 0.82;
+  /* Logo real: teja blanca con aire para uniformar logos de estilos muy
+     distintos (sellos a color, marcas minimalistas en negro). */
+  border: 1px solid rgba(107, 51, 25, 0.1);
+  opacity: 1;
+  background: #fff;
+  border-radius: 10px;
+  padding: 10px;
+  width: clamp(84px, 9vw, 116px);
+  height: clamp(64px, 7vw, 84px);
+  box-shadow: 0 1px 10px rgba(46, 26, 16, 0.05);
 }
 .qm-root .logo-celda .nm {
   font-family: var(--serif);

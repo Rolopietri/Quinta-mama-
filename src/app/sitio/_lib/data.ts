@@ -40,14 +40,14 @@ export const CULTURA: Aliado[] = [
   },
   {
     n: "Mercadillo del Buen Gusto",
-    logo: "",
+    logo: "/sitio/aliados/mercadillo-buen-gusto.jpg",
     s: "Exposición y reconstrucción de muebles",
     p: "Piso 1",
     d: "Salón de exposición y reconstrucción de muebles de moda. Piezas recuperadas, restauradas y puestas nuevamente en circulación.",
   },
   {
     n: "Yany Bastidas",
-    logo: "",
+    logo: "/sitio/aliados/yany-bastidas.jpg",
     s: "Diseñadora de moda · Taller showroom",
     p: "Piso 1",
     d: "Diseñadora de moda. Taller y showroom donde el proceso de confección queda a la vista del visitante.",
@@ -57,21 +57,21 @@ export const CULTURA: Aliado[] = [
 export const BIENESTAR: Aliado[] = [
   {
     n: "ARKO",
-    logo: "",
+    logo: "/sitio/aliados/arko.jpg",
     s: "Actividades holísticas",
     p: "Piso 2",
     d: "Prácticas holísticas orientadas a la salud mental y emocional. Sesiones grupales e individuales.",
   },
   {
     n: "Dani Pilates",
-    logo: "",
+    logo: "/sitio/aliados/dani-pilates.jpg",
     s: "Estiramiento y fuerza",
     p: "Piso 1",
     d: "Pilates enfocado en movilidad, estiramiento y fuerza controlada. Grupos reducidos.",
   },
   {
     n: "Nexo",
-    logo: "",
+    logo: "/sitio/aliados/nexo.jpg",
     s: "Fuerza y movimiento",
     p: "PB",
     d: "Entrenamiento funcional centrado en fuerza y movimiento. Clases recurrentes con cupo limitado.",
