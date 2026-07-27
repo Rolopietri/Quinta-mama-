@@ -26,14 +26,14 @@ export interface Aliado {
 export const CULTURA: Aliado[] = [
   {
     n: "Casa Payasa",
-    logo: "",
+    logo: "/sitio/aliados/casa-payasa.jpg",
     s: "Probadora de segunda mano",
     p: "PB",
     d: "Probadora de segunda mano. Selección, curaduría y venta de prendas con historia, en un espacio pensado para probar sin prisa.",
   },
   {
     n: "Archivo Público",
-    logo: "",
+    logo: "/sitio/aliados/archivo-publico.jpg",
     s: "Probadora de segunda mano",
     p: "PB",
     d: "Probadora de segunda mano. Archivo vivo de prendas seleccionadas que vuelven a circular entre quienes visitan la casa.",
