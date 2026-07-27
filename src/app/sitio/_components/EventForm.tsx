@@ -20,6 +20,7 @@ import { Placeholder } from "../_lib/placeholder";
  */
 export function EventForm() {
   const [nombre, setNombre] = useState("");
+  const [telefono, setTelefono] = useState("");
   const [tipo, setTipo] = useState("");
   const [espacio, setEspacio] = useState("");
   const [fecha, setFecha] = useState("");
@@ -51,23 +52,25 @@ export function EventForm() {
       /* deja la fecha ISO si falla el formateo */
     }
 
-    const asunto = `Solicitud de evento — ${nombre}`;
+    const asunto = `Solicitud de espacio — ${tipo} · ${nombre}`;
     const cuerpo = [
       "Hola, equipo de Quinta Mamá:",
       "",
-      "Quisiera solicitar un espacio para un evento.",
+      "Me gustaría solicitar un espacio para un evento en la casa. Estos son los datos:",
       "",
-      `Nombre: ${nombre}`,
-      `Tipo de evento: ${tipo}`,
-      `Espacio: ${espacio}`,
-      `Fecha tentativa: ${fechaTxt}`,
-      invitados.trim() ? `Invitados: ${invitados.trim()}` : null,
+      `• Nombre: ${nombre}`,
+      telefono.trim() ? `• Teléfono / WhatsApp: ${telefono.trim()}` : null,
+      `• Tipo de evento: ${tipo}`,
+      `• Espacio de interés: ${espacio}`,
+      `• Fecha tentativa: ${fechaTxt}`,
+      invitados.trim() ? `• Invitados (aprox.): ${invitados.trim()}` : null,
       "",
-      detalles.trim() ? "Detalles:" : null,
+      detalles.trim() ? "Lo que tengo en mente:" : null,
       detalles.trim() || null,
       "",
-      "Quedo atento a su respuesta.",
+      "¿Me podrían indicar disponibilidad, tarifas y los siguientes pasos? Quedo atento/a.",
       "",
+      "Gracias,",
       nombre,
     ]
       .filter((x) => x !== null)
@@ -113,6 +116,18 @@ export function EventForm() {
             placeholder="Nombre y apellido"
             value={nombre}
             onChange={(e) => setNombre(e.target.value)}
+          />
+        </div>
+
+        <div className="campo">
+          <label htmlFor="f1b">Teléfono / WhatsApp</label>
+          <input
+            id="f1b"
+            type="tel"
+            inputMode="tel"
+            placeholder="Para responderte más rápido"
+            value={telefono}
+            onChange={(e) => setTelefono(e.target.value)}
           />
         </div>
 
