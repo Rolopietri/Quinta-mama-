@@ -1133,6 +1133,15 @@
 .qm-root .aviso a {
   color: var(--terracota);
 }
+.qm-root .nota-campo {
+  font-family: var(--sans);
+  font-size: 11px;
+  line-height: 1.5;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  opacity: 0.6;
+  margin-top: 9px;
+}
 
 /* ============ PDIS ============ */
 .qm-root .pdis-grid {

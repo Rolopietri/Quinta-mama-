@@ -1,5 +1,5 @@
 import { Isotipo } from "./_lib/Isotipo";
-import { BIENESTAR, C, CULTURA, mapsUrl } from "./_lib/data";
+import { BIENESTAR, C, CONTACTO, CULTURA, mapsUrl } from "./_lib/data";
 import { Nav } from "./_components/Nav";
 import { Hero } from "./_components/Hero";
 import { AliadosProvider } from "./_components/AliadosProvider";
@@ -252,6 +252,19 @@ export default function SitioPage() {
           </a>
           <br />
           Martes a domingo
+          <br />
+          <a
+            href={CONTACTO.whatsapp}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="lnk-mapa"
+          >
+            WhatsApp {CONTACTO.telefono}
+          </a>
+          {" · "}
+          <a href={`mailto:${CONTACTO.correo}`} className="lnk-mapa">
+            {CONTACTO.correo}
+          </a>
         </p>
         <div className="cta-fila rv">
           <a href={mapa} className="cta" target="_blank" rel="noopener noreferrer">

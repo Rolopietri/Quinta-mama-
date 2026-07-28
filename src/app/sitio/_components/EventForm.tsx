@@ -1,22 +1,21 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import {
   C,
+  CATERING,
   CORREO_EVENTOS,
-  ESPACIOS_POR_TIPO,
+  ESPACIOS,
   TIPOS_EVENTO,
 } from "../_lib/data";
 import { Placeholder } from "../_lib/placeholder";
 
 /**
- * Formulario de solicitud de espacio. El tipo de evento filtra los espacios
- * (lógica encadenada). Envío actual por `mailto:`.
+ * Formulario de solicitud de espacio. Envío actual por `mailto:`.
  *
  * PENDIENTE de producción (ver 00-BRIEF sección 9): reemplazar `mailto:` por
  * un endpoint real (`/api/solicitudes`) que guarde en Supabase y notifique por
- * correo, y añadir campos de correo y teléfono del solicitante — sin ellos no
- * hay forma de responder.
+ * correo.
  */
 export function EventForm() {
   const [nombre, setNombre] = useState("");
@@ -25,12 +24,11 @@ export function EventForm() {
   const [espacio, setEspacio] = useState("");
   const [fecha, setFecha] = useState("");
   const [invitados, setInvitados] = useState("");
+  const [catering, setCatering] = useState("");
   const [detalles, setDetalles] = useState("");
   const [aviso, setAviso] = useState<{ texto: React.ReactNode; color: string } | null>(
     null,
   );
-
-  const espacios = useMemo(() => ESPACIOS_POR_TIPO[tipo] ?? [], [tipo]);
 
   const enviar = () => {
     if (!nombre.trim() || !tipo || !espacio || !fecha) {
@@ -64,6 +62,7 @@ export function EventForm() {
       `• Espacio de interés: ${espacio}`,
       `• Fecha tentativa: ${fechaTxt}`,
       invitados.trim() ? `• Invitados (aprox.): ${invitados.trim()}` : null,
+      catering ? `• Catering: ${catering}` : null,
       "",
       detalles.trim() ? "Lo que tengo en mente:" : null,
       detalles.trim() || null,
@@ -136,10 +135,7 @@ export function EventForm() {
           <select
             id="f2"
             value={tipo}
-            onChange={(e) => {
-              setTipo(e.target.value);
-              setEspacio("");
-            }}
+            onChange={(e) => setTipo(e.target.value)}
           >
             <option value="">Selecciona</option>
             {TIPOS_EVENTO.map((t) => (
@@ -155,16 +151,10 @@ export function EventForm() {
             value={espacio}
             onChange={(e) => setEspacio(e.target.value)}
           >
-            {tipo ? (
-              <>
-                <option value="">Selecciona</option>
-                {espacios.map((x) => (
-                  <option key={x}>{x}</option>
-                ))}
-              </>
-            ) : (
-              <option value="">Selecciona primero el tipo</option>
-            )}
+            <option value="">Selecciona</option>
+            {ESPACIOS.map((x) => (
+              <option key={x}>{x}</option>
+            ))}
           </select>
         </div>
 
@@ -188,6 +178,23 @@ export function EventForm() {
             value={invitados}
             onChange={(e) => setInvitados(e.target.value)}
           />
+        </div>
+
+        <div className="campo">
+          <label htmlFor="f7">¿Deseas servicio de catering?</label>
+          <select
+            id="f7"
+            value={catering}
+            onChange={(e) => setCatering(e.target.value)}
+          >
+            <option value="">Selecciona</option>
+            {CATERING.map((c) => (
+              <option key={c}>{c}</option>
+            ))}
+          </select>
+          <p className="nota-campo">
+            Solo factible si se solicita con al menos 10 días de anticipación.
+          </p>
         </div>
 
         <div className="campo">

@@ -100,33 +100,40 @@ export const NIVELES = [
   { n: "PB", l: "PB · Eventos" },
 ] as const;
 
-/**
- * Lógica encadenada del formulario: el tipo de evento filtra los espacios.
- * PENDIENTE: sustituir por espacios reales (código, capacidad, tarifa).
- */
-export const ESPACIOS_POR_TIPO: Record<string, string[]> = {
-  "Privado / social": [
-    "B1 — Salón circular (PB)",
-    "C2 — Terraza (Piso 1)",
-    "C6 — Jardín posterior",
-  ],
-  Corporativo: ["B3 — Sala de juntas (Piso 2)", "B1 — Salón circular (PB)"],
-  Cultural: ["B1 — Salón circular (PB)", "C2 — Terraza (Piso 1)"],
-  Bienestar: ["C2 — Terraza (Piso 1)", "B3 — Sala (Piso 2)"],
-  Educativo: ["B3 — Sala de juntas (Piso 2)", "C6 — Jardín posterior"],
-  Otro: [
-    "B1 — Salón circular (PB)",
-    "B3 — Sala de juntas (Piso 2)",
-    "C2 — Terraza (Piso 1)",
-    "C6 — Jardín posterior",
-    "Aún no lo sé",
-  ],
+/** Tipos de evento (para el formulario de solicitud). */
+export const TIPOS_EVENTO = [
+  "Privado / social",
+  "Corporativo",
+  "Cultural",
+  "Bienestar",
+  "Educativo",
+  "Otro",
+] as const;
+
+/** Espacios alquilables de la casa. */
+export const ESPACIOS = [
+  "Jardín",
+  "A1 — Galería",
+  "A2 — Comedor",
+  "B1 — Salón terraza",
+  "Terraza piso 2",
+  "Canchas",
+  "Cowork",
+  "Otros",
+] as const;
+
+/** Opciones de servicio de catering. */
+export const CATERING = ["No, gracias", "Sí, me interesa"] as const;
+
+/** Correo de destino de las solicitudes de evento. */
+export const CORREO_EVENTOS = "info@quintamama.com";
+
+/** Datos de contacto de Quinta Mamá. */
+export const CONTACTO = {
+  telefono: "+58 422 333 1955",
+  whatsapp: "https://wa.me/584223331955",
+  correo: "info@quintamama.com",
 };
-
-export const TIPOS_EVENTO = Object.keys(ESPACIOS_POR_TIPO);
-
-/** Correo de destino de las solicitudes. PENDIENTE: correo real de Quinta Mamá. */
-export const CORREO_EVENTOS = "eventos@quintamama.com";
 
 /**
  * Ubicación. PENDIENTE: coordenadas exactas o Place ID de Google Business.
