@@ -135,13 +135,10 @@ export const CONTACTO = {
   correo: "info@quintamama.com",
 };
 
-/**
- * Ubicación. PENDIENTE: coordenadas exactas o Place ID de Google Business.
- * Mientras tanto abre la búsqueda genérica en Google Maps.
- */
+/** Ubicación de Quinta Mamá (coordenadas exactas confirmadas por el cliente). */
 export const UBICACION = {
-  lat: null as number | null,
-  lng: null as number | null,
+  lat: 10.499694 as number | null,
+  lng: -66.868556 as number | null,
   direccion: "Quinta Mamá, Chacao, Caracas, Venezuela",
   placeId: "",
 };
@@ -162,4 +159,13 @@ export function mapsUrl(): string {
     "https://www.google.com/maps/search/?api=1&query=" +
     encodeURIComponent(UBICACION.direccion)
   );
+}
+
+/** URL de direcciones ("Cómo llegar") hacia Quinta Mamá. */
+export function directionsUrl(): string {
+  const base = "https://www.google.com/maps/dir/?api=1&destination=";
+  if (UBICACION.lat !== null && UBICACION.lng !== null) {
+    return `${base}${UBICACION.lat},${UBICACION.lng}`;
+  }
+  return base + encodeURIComponent(UBICACION.direccion);
 }

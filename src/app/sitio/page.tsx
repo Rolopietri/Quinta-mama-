@@ -1,5 +1,12 @@
 import { Isotipo } from "./_lib/Isotipo";
-import { BIENESTAR, C, CONTACTO, CULTURA, mapsUrl } from "./_lib/data";
+import {
+  BIENESTAR,
+  C,
+  CONTACTO,
+  CULTURA,
+  directionsUrl,
+  mapsUrl,
+} from "./_lib/data";
 import { Nav } from "./_components/Nav";
 import { Hero } from "./_components/Hero";
 import { AliadosProvider } from "./_components/AliadosProvider";
@@ -9,6 +16,7 @@ import { EventForm } from "./_components/EventForm";
 import { ScrollReveal } from "./_components/ScrollReveal";
 
 const mapa = mapsUrl();
+const comoLlegar = directionsUrl();
 
 export default function SitioPage() {
   return (
@@ -267,7 +275,12 @@ export default function SitioPage() {
           </a>
         </p>
         <div className="cta-fila rv">
-          <a href={mapa} className="cta" target="_blank" rel="noopener noreferrer">
+          <a
+            href={comoLlegar}
+            className="cta"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
             Cómo llegar
           </a>
           <a href="#eventos" className="cta cta-alt">
