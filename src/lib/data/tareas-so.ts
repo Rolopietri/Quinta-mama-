@@ -169,3 +169,97 @@ function agrupar<T extends Record<string, unknown>>(
   }
   return out;
 }
+
+// ── Escrituras ──────────────────────────────────────────────────────
+export type NuevaTareaInput = {
+  titulo: string;
+  subEjeId: string;
+  objetivoId: string;
+  espacioId?: string;
+  vence?: string;
+  impacto: Impacto;
+  proximidad: Proximidad;
+  patrimonio: boolean;
+  compromiso: boolean;
+  nota?: string;
+  responsables: string[]; // ids de persona
+  valores: string[];
+};
+
+/** Registra un hito en el historial (§3.6). Silencioso si falla. */
+export async function crearHito(h: {
+  subEjeId?: string;
+  tipo: string;
+  texto: string;
+  ref?: string;
+  espacioId?: string;
+  avance?: number;
+  avanceAnterior?: number;
+}): Promise<void> {
+  const sb = createSupabaseBrowserClient();
+  await sb.from("so_hito").insert({
+    sub_eje_id: h.subEjeId ?? null,
+    tipo: h.tipo,
+    texto: h.texto,
+    ref: h.ref ?? null,
+    espacio_id: h.espacioId ?? null,
+    avance: h.avance ?? null,
+    avance_anterior: h.avanceAnterior ?? null,
+  });
+}
+
+/** Siguiente id T-#### (los ids con ceros ordenan bien hasta T-9999). */
+async function siguienteTareaId(): Promise<string> {
+  const sb = createSupabaseBrowserClient();
+  const { data, error } = await sb
+    .from("so_tarea")
+    .select("id")
+    .like("id", "T-%")
+    .order("id", { ascending: false })
+    .limit(1);
+  if (error) throw error;
+  let n = 1;
+  const rows = data as { id: string }[];
+  if (rows.length) {
+    const parsed = parseInt(rows[0].id.replace("T-", ""), 10);
+    if (!Number.isNaN(parsed)) n = parsed + 1;
+  }
+  return `T-${String(n).padStart(4, "0")}`;
+}
+
+export async function crearTarea(input: NuevaTareaInput): Promise<string> {
+  const sb = createSupabaseBrowserClient();
+  const id = await siguienteTareaId();
+  const { error } = await sb.from("so_tarea").insert({
+    id,
+    titulo: input.titulo,
+    sub_eje_id: input.subEjeId,
+    objetivo_id: input.objetivoId || null,
+    espacio_id: input.espacioId || null,
+    vence: input.vence || null,
+    impacto: input.impacto,
+    proximidad: input.proximidad,
+    patrimonio: input.patrimonio,
+    compromiso: input.compromiso,
+    nota: input.nota || null,
+    estado: "pendiente",
+    origen: "sistema",
+  });
+  if (error) throw error;
+
+  if (input.responsables.length) {
+    const { error: rErr } = await sb
+      .from("so_tarea_responsable")
+      .insert(input.responsables.map((persona_id) => ({ tarea_id: id, persona_id })));
+    if (rErr) throw rErr;
+  }
+  if (input.valores.length) {
+    const { error: vErr } = await sb
+      .from("so_tarea_valor")
+      .insert(input.valores.map((valor) => ({ tarea_id: id, valor })));
+    if (vErr) throw vErr;
+  }
+
+  await crearHito({ subEjeId: input.subEjeId, tipo: "tarea", texto: `Nueva tarea: ${input.titulo}`, ref: id });
+  return id;
+}

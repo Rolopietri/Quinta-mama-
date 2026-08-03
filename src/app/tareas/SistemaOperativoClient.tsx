@@ -6,16 +6,24 @@
 // del prototipo. Portado por lotes: Áreas, Tablero, Objetivos y Casa
 // funcionan (lectura); las vistas con escritura quedan "en construcción".
 
-import { useEffect, useMemo, useState } from "react";
-import { AREAS, nombreSubEje, ESTADOS_ESPACIO } from "@/lib/tareas-so/taxonomia";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { AREAS, VALORES, nombreSubEje, ESTADOS_ESPACIO } from "@/lib/tareas-so/taxonomia";
 import { clasificar, progreso } from "@/lib/tareas-so/pce.mjs";
 import {
   listObjetivos,
   listTareas,
   listPersonas,
   listEspacios,
+  crearTarea,
 } from "@/lib/data/tareas-so";
-import type { Objetivo, Tarea, Persona, Espacio } from "@/lib/tareas-so/types";
+import type {
+  Objetivo,
+  Tarea,
+  Persona,
+  Espacio,
+  Impacto,
+  Proximidad,
+} from "@/lib/tareas-so/types";
 
 const VISTAS: [string, string][] = [
   ["tablero", "Tablero"],
@@ -108,6 +116,14 @@ export function SistemaOperativoClient() {
     };
   }, []);
 
+  const recargarTareas = useCallback(async () => {
+    try {
+      setTareas(await listTareas());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error recargando");
+    }
+  }, []);
+
   const objMap = useMemo(
     () => new Map(objetivos.map((o) => [o.id, o])),
     [objetivos],
@@ -161,7 +177,18 @@ export function SistemaOperativoClient() {
       {vista === "areas" && <VistaAreas objetivos={objetivos} tareas={tareas} />}
       {vista === "objetivos" && <VistaObjetivos objetivos={objetivos} tareas={tareas} />}
       {vista === "casa" && <VistaCasa espacios={espacios} tareas={tareas} />}
-      {["nueva", "notif", "reportes", "sync", "config"].includes(vista) && (
+      {vista === "nueva" && (
+        <VistaNueva
+          objetivos={objetivos}
+          personas={personas}
+          espacios={espacios}
+          onCreated={async () => {
+            await recargarTareas();
+            setVista("tablero");
+          }}
+        />
+      )}
+      {["notif", "reportes", "sync", "config"].includes(vista) && (
         <EnConstruccion titulo={etiqueta(vista)} nota={NOTA_CONSTRUCCION[vista]} />
       )}
     </div>
@@ -582,6 +609,251 @@ function Regla({ n, children }: { n: string; children: React.ReactNode }) {
     <div className="border-l-2 border-[#0F0F0F] pl-3">
       <b className="block font-medium mb-0.5">{n}</b>
       <p className="text-[#4A4A46]">{children}</p>
+    </div>
+  );
+}
+
+// ── Vista: Nueva tarea ──────────────────────────────────────────────
+const IMPACTOS: Impacto[] = ["alto", "medio", "bajo", "nulo"];
+const PROXIMIDADES: Proximidad[] = ["directa", "requisito", "apoyo"];
+
+function VistaNueva({
+  objetivos,
+  personas,
+  espacios,
+  onCreated,
+}: {
+  objetivos: Objetivo[];
+  personas: Persona[];
+  espacios: Espacio[];
+  onCreated: () => void | Promise<void>;
+}) {
+  const [titulo, setTitulo] = useState("");
+  const [areaId, setAreaId] = useState("");
+  const [subEjeId, setSubEjeId] = useState("");
+  const [objetivoId, setObjetivoId] = useState("");
+  const [responsables, setResponsables] = useState<string[]>([]);
+  const [valores, setValores] = useState<string[]>([]);
+  const [vence, setVence] = useState("");
+  const [espacioId, setEspacioId] = useState("");
+  const [impacto, setImpacto] = useState<Impacto>("medio");
+  const [proximidad, setProximidad] = useState<Proximidad>("requisito");
+  const [patrimonio, setPatrimonio] = useState(false);
+  const [compromiso, setCompromiso] = useState(false);
+  const [nota, setNota] = useState("");
+  const [guardando, setGuardando] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const area = AREAS.find((a) => a.id === areaId) ?? null;
+  const objetivosArea = objetivos.filter((o) => o.areaId === areaId);
+  const objetivoSel = objetivos.find((o) => o.id === objetivoId) ?? null;
+
+  function cambiarArea(v: string) {
+    setAreaId(v);
+    setSubEjeId("");
+    setObjetivoId("");
+  }
+  function toggle(lista: string[], set: (x: string[]) => void, v: string) {
+    set(lista.includes(v) ? lista.filter((x) => x !== v) : [...lista, v]);
+  }
+
+  const clasif =
+    objetivoId && objetivoSel
+      ? (clasificar({
+          impacto,
+          proximidad,
+          horizonte: objetivoSel.horizonte,
+          valores,
+          compromiso,
+          patrimonio,
+          subEjeId,
+        }) as Clasif)
+      : null;
+
+  const plantas = espacios.reduce<string[]>((acc, e) => {
+    if (!acc.includes(e.planta)) acc.push(e.planta);
+    return acc;
+  }, []);
+
+  async function crear() {
+    if (!titulo.trim() || !objetivoId) return;
+    setGuardando(true);
+    setError(null);
+    try {
+      await crearTarea({
+        titulo: titulo.trim(),
+        subEjeId: subEjeId || objetivoSel!.subEjeId,
+        objetivoId,
+        espacioId: espacioId || undefined,
+        vence: vence || undefined,
+        impacto,
+        proximidad,
+        patrimonio,
+        compromiso,
+        nota: nota.trim() || undefined,
+        responsables,
+        valores,
+      });
+      await onCreated();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo crear la tarea");
+      setGuardando(false);
+    }
+  }
+
+  const lbl = "block text-[9px] tracking-[0.16em] uppercase text-[#8C8C86] mb-1.5";
+  const inp = "w-full text-[13px] border border-[#DEDEDA] px-2.5 py-2 bg-white focus:outline focus:outline-2 focus:outline-[#0F0F0F] -outline-offset-1";
+
+  return (
+    <div className="max-w-3xl">
+      <Card titulo="Crear tarea" extra="el objetivo es compuerta de entrada">
+        <div className="p-4 space-y-4">
+          {error && (
+            <div className="border border-[#9F3E2E] border-l-4 px-3 py-2 text-[13px] text-[#9F3E2E]">{error}</div>
+          )}
+
+          <div>
+            <label className={lbl}>Tarea</label>
+            <input className={inp} value={titulo} onChange={(e) => setTitulo(e.target.value)} placeholder="Qué hay que hacer, en imperativo" />
+          </div>
+
+          <div className="grid sm:grid-cols-3 gap-3">
+            <div>
+              <label className={lbl}>Área</label>
+              <select className={inp} value={areaId} onChange={(e) => cambiarArea(e.target.value)}>
+                <option value="">Elegir área</option>
+                {AREAS.map((a) => (
+                  <option key={a.id} value={a.id}>{a.id} · {a.nombre}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className={lbl}>Sub-eje</label>
+              <select className={inp} value={subEjeId} onChange={(e) => setSubEjeId(e.target.value)} disabled={!area}>
+                <option value="">{area ? "Elegir sub-eje" : "Elige un área"}</option>
+                {area?.subEjes.map((s) => (
+                  <option key={s.id} value={s.id}>{s.id} · {s.nombre}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className={lbl}>Objetivo · obligatorio</label>
+              <select className={inp} value={objetivoId} onChange={(e) => setObjetivoId(e.target.value)} disabled={!area}>
+                <option value="">{area ? "Elegir objetivo" : "Elige un área"}</option>
+                {objetivosArea.map((o) => (
+                  <option key={o.id} value={o.id}>{o.id} · {o.titulo.slice(0, 50)}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="grid sm:grid-cols-3 gap-3">
+            <div>
+              <label className={lbl}>Responsables</label>
+              <div className="border border-[#DEDEDA] max-h-[130px] overflow-y-auto px-2.5 py-1">
+                {personas.map((p) => (
+                  <label key={p.id} className="flex items-center gap-2 py-1 text-[12.5px] cursor-pointer">
+                    <input type="checkbox" checked={responsables.includes(p.id)} onChange={() => toggle(responsables, setResponsables, p.id)} className="accent-[#0F0F0F]" />
+                    {p.nombre}
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label className={lbl}>Valores</label>
+              <div className="border border-[#DEDEDA] max-h-[130px] overflow-y-auto px-2.5 py-1">
+                {VALORES.map((v) => (
+                  <label key={v} className="flex items-center gap-2 py-1 text-[12.5px] cursor-pointer">
+                    <input type="checkbox" checked={valores.includes(v)} onChange={() => toggle(valores, setValores, v)} className="accent-[#0F0F0F]" />
+                    Refuerza {v}
+                  </label>
+                ))}
+                <label className="flex items-center gap-2 py-1 text-[12.5px] cursor-pointer text-[#9F3E2E]">
+                  <input type="checkbox" checked={valores.includes("__tensiona")} onChange={() => toggle(valores, setValores, "__tensiona")} className="accent-[#9F3E2E]" />
+                  Tensiona un valor
+                </label>
+              </div>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className={lbl}>Vence</label>
+                <input type="date" className={inp} value={vence} onChange={(e) => setVence(e.target.value)} />
+              </div>
+              <div>
+                <label className={lbl}>Espacio · opcional</label>
+                <select className={inp} value={espacioId} onChange={(e) => setEspacioId(e.target.value)}>
+                  <option value="">Sin espacio</option>
+                  {plantas.map((pl) => (
+                    <optgroup key={pl} label={pl}>
+                      {espacios.filter((e) => e.planta === pl).map((e) => (
+                        <option key={e.id} value={e.id}>{e.nombre}</option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid sm:grid-cols-3 gap-3">
+            <div>
+              <label className={lbl}>Impacto en KPI · 40</label>
+              <select className={inp} value={impacto} onChange={(e) => setImpacto(e.target.value as Impacto)}>
+                {IMPACTOS.map((x) => <option key={x} value={x}>{x}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className={lbl}>Proximidad · 30</label>
+              <select className={inp} value={proximidad} onChange={(e) => setProximidad(e.target.value as Proximidad)}>
+                {PROXIMIDADES.map((x) => <option key={x} value={x}>{x}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className={lbl}>Horizonte · heredado</label>
+              <input className={`${inp} bg-[#F4F4F2] text-[#8C8C86]`} disabled value={objetivoSel ? objetivoSel.horizonte : "del objetivo"} />
+            </div>
+          </div>
+
+          <div>
+            <label className={lbl}>Nota</label>
+            <input className={inp} value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Contexto, alcance o condición de cierre" />
+          </div>
+
+          <div className="border-t border-[#DEDEDA] pt-3 space-y-2">
+            <label className="flex items-start gap-2.5 text-[12.5px] cursor-pointer">
+              <input type="checkbox" checked={patrimonio} onChange={(e) => setPatrimonio(e.target.checked)} className="mt-0.5 accent-[#0F0F0F]" />
+              <span>Regla de patrimonio<span className="block text-[#8C8C86] text-[11px]">Riesgo estructural o de seguridad. Solo aplica en OPS-05.</span></span>
+            </label>
+            <label className="flex items-start gap-2.5 text-[12.5px] cursor-pointer">
+              <input type="checkbox" checked={compromiso} onChange={(e) => setCompromiso(e.target.checked)} className="mt-0.5 accent-[#0F0F0F]" />
+              <span>Compromiso adquirido<span className="block text-[#8C8C86] text-[11px]">Obligación contractual o fecha comprometida con un tercero.</span></span>
+            </label>
+          </div>
+
+          <div className="border-t border-[#DEDEDA] pt-3">
+            <label className={lbl}>Puntaje de contribución estratégica</label>
+            {clasif ? (
+              <div className="flex items-center gap-3">
+                <Medidor valor={clasif.puntaje} critica={clasif.critica} />
+                <ChipClasif c={clasif} />
+              </div>
+            ) : (
+              <p className="text-[12px] text-[#8C8C86] italic">Elige un objetivo para calcular el puntaje. Sin objetivo, la tarea no entra al tablero.</p>
+            )}
+          </div>
+
+          <div className="pt-1">
+            <button
+              type="button"
+              onClick={crear}
+              disabled={!titulo.trim() || !objetivoId || guardando}
+              className="text-[11px] tracking-[0.18em] uppercase px-5 py-2.5 bg-[#0F0F0F] text-white disabled:bg-[#F4F4F2] disabled:text-[#B9B9B3] disabled:cursor-not-allowed"
+            >
+              {guardando ? "Creando…" : "Crear tarea"}
+            </button>
+          </div>
+        </div>
+      </Card>
     </div>
   );
 }
