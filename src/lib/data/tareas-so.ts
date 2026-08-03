@@ -337,6 +337,40 @@ export async function updateObjetivoMeta(id: string, meta: number): Promise<void
   if (error) throw error;
 }
 
+// ── Equipo ──────────────────────────────────────────────────────────
+export async function addPersona(nombre: string, correo?: string): Promise<void> {
+  const sb = createSupabaseBrowserClient();
+  const { error } = await sb.from("so_persona").insert({ nombre, correo: correo || null });
+  if (error) throw error;
+}
+export async function updatePersonaCorreo(id: string, correo: string): Promise<void> {
+  const sb = createSupabaseBrowserClient();
+  const { error } = await sb.from("so_persona").update({ correo: correo || null }).eq("id", id);
+  if (error) throw error;
+}
+export async function deletePersona(id: string): Promise<void> {
+  const sb = createSupabaseBrowserClient();
+  const { error } = await sb.from("so_persona").delete().eq("id", id);
+  if (error) throw error;
+}
+
+// ── Notificaciones despachadas ──────────────────────────────────────
+export async function listNotificacionesClaves(): Promise<string[]> {
+  const sb = createSupabaseBrowserClient();
+  const { data, error } = await sb.from("so_notificacion").select("clave");
+  if (error) throw error;
+  return (data as { clave: string }[]).map((x) => x.clave);
+}
+export async function marcarNotificacion(n: {
+  clave: string; tareaId: string; personaId: string; tipo: string;
+}): Promise<void> {
+  const sb = createSupabaseBrowserClient();
+  const { error } = await sb
+    .from("so_notificacion")
+    .upsert({ clave: n.clave, tarea_id: n.tareaId, persona_id: n.personaId, tipo: n.tipo }, { onConflict: "clave" });
+  if (error) throw error;
+}
+
 // ── Importación desde el respaldo del prototipo ─────────────────────
 type RTarea = {
   id?: string; t?: string; sub?: string; obj?: string; espacio?: string;

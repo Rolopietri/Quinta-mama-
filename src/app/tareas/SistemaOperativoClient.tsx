@@ -29,6 +29,11 @@ import {
   setObjetivoActual,
   updateObjetivoMeta,
   importarRespaldo,
+  addPersona,
+  updatePersonaCorreo,
+  deletePersona,
+  listNotificacionesClaves,
+  marcarNotificacion,
 } from "@/lib/data/tareas-so";
 import type { Respaldo, ResumenImport } from "@/lib/data/tareas-so";
 import type {
@@ -104,22 +109,25 @@ export function SistemaOperativoClient() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [detalle, setDetalle] = useState<{ tipo: "tarea" | "objetivo"; id: string } | null>(null);
+  const [notifClaves, setNotifClaves] = useState<string[]>([]);
 
   useEffect(() => {
     let vivo = true;
     (async () => {
       try {
-        const [o, t, p, e] = await Promise.all([
+        const [o, t, p, e, n] = await Promise.all([
           listObjetivos(),
           listTareas(),
           listPersonas(),
           listEspacios(),
+          listNotificacionesClaves(),
         ]);
         if (!vivo) return;
         setObjetivos(o);
         setTareas(t);
         setPersonas(p);
         setEspacios(e);
+        setNotifClaves(n);
       } catch (err) {
         if (vivo)
           setError(err instanceof Error ? err.message : "Error cargando datos");
@@ -143,6 +151,22 @@ export function SistemaOperativoClient() {
   const recargarObjetivos = useCallback(async () => {
     try {
       setObjetivos(await listObjetivos());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error recargando");
+    }
+  }, []);
+
+  const recargarPersonas = useCallback(async () => {
+    try {
+      setPersonas(await listPersonas());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error recargando");
+    }
+  }, []);
+
+  const recargarNotif = useCallback(async () => {
+    try {
+      setNotifClaves(await listNotificacionesClaves());
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error recargando");
     }
@@ -273,7 +297,22 @@ export function SistemaOperativoClient() {
               onImported={recargarTodo}
             />
           )}
-          {["notif", "reportes", "config"].includes(vista) && (
+          {vista === "config" && (
+            <VistaAjustes
+              personas={personas}
+              tareas={tareas}
+              onCambio={recargarPersonas}
+            />
+          )}
+          {vista === "notif" && (
+            <VistaNotificaciones
+              tareas={tareas}
+              personas={personas}
+              notifClaves={notifClaves}
+              onMarcar={recargarNotif}
+            />
+          )}
+          {vista === "reportes" && (
             <EnConstruccion titulo={etiqueta(vista)} nota={NOTA_CONSTRUCCION[vista]} />
           )}
         </>
@@ -1388,6 +1427,253 @@ function VistaSync({
             Descargar respaldo
           </button>
         </div>
+      </Card>
+    </div>
+  );
+}
+
+// ── Vista: Ajustes (equipo + correos) ───────────────────────────────
+function VistaAjustes({
+  personas,
+  tareas,
+  onCambio,
+}: {
+  personas: Persona[];
+  tareas: Tarea[];
+  onCambio: () => Promise<void>;
+}) {
+  const [nombre, setNombre] = useState("");
+  const [correo, setCorreo] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const activasDe = (pid: string) =>
+    tareas.filter((t) => t.estado === "pendiente" && t.responsables.includes(pid)).length;
+
+  async function agregar() {
+    if (!nombre.trim()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await addPersona(nombre.trim(), correo.trim() || undefined);
+      setNombre("");
+      setCorreo("");
+      await onCambio();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-5 max-w-3xl">
+      <Card titulo="Equipo y correos" extra="base de las notificaciones">
+        {error && <div className="px-4 pt-3 text-[13px] text-[#9F3E2E]">{error}</div>}
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="text-[9px] tracking-[0.16em] uppercase text-[#8C8C86]">
+                <th className="text-left font-medium px-4 py-2 border-b border-[#DEDEDA]">Persona</th>
+                <th className="text-left font-medium px-3 py-2 border-b border-[#DEDEDA]">Correo</th>
+                <th className="text-left font-medium px-3 py-2 border-b border-[#DEDEDA]">Activas</th>
+                <th className="border-b border-[#DEDEDA]"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {personas.map((p) => (
+                <PersonaFila key={p.id} p={p} activas={activasDe(p.id)} onCambio={onCambio} />
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="p-4 border-t border-[#DEDEDA] flex flex-wrap gap-2">
+          <input value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Nombre y apellido" className="flex-1 min-w-[140px] text-[13px] border border-[#DEDEDA] px-2.5 py-2" />
+          <input value={correo} onChange={(e) => setCorreo(e.target.value)} type="email" placeholder="Correo" className="flex-1 min-w-[140px] text-[13px] border border-[#DEDEDA] px-2.5 py-2" />
+          <button type="button" disabled={busy || !nombre.trim()} onClick={agregar} className="text-[10px] tracking-[0.16em] uppercase px-4 border border-[#0F0F0F] disabled:border-[#DEDEDA] disabled:text-[#B9B9B3]">Agregar</button>
+        </div>
+        <p className="px-4 pb-4 text-[11px] text-[#8C8C86]">Una persona con tareas activas no se puede quitar: primero reasigna su trabajo.</p>
+      </Card>
+
+      <Card titulo="Motor de puntaje" extra="valores por defecto">
+        <div className="p-4 text-[12.5px] text-[#4A4A46] space-y-1">
+          <p>Pesos del PCE: <span className="font-mono">Impacto 40 · Proximidad 30 · Urgencia 20 · Valores 10</span>.</p>
+          <p>Umbrales: <span className="font-mono">Estratégica ≥ 70 · Operativa ≥ 40 · Delegar ≥ 20</span>.</p>
+          <p className="text-[11px] text-[#8C8C86]">Fijos por ahora, tal como los aprobó Beatriz. Se pueden hacer editables más adelante.</p>
+        </div>
+      </Card>
+    </div>
+  );
+}
+function PersonaFila({ p, activas, onCambio }: { p: Persona; activas: number; onCambio: () => Promise<void> }) {
+  const [correo, setCorreo] = useState(p.correo ?? "");
+  const [guardado, setGuardado] = useState(false);
+  async function guardar() {
+    if (correo === (p.correo ?? "")) return;
+    try {
+      await updatePersonaCorreo(p.id, correo.trim());
+      setGuardado(true);
+      setTimeout(() => setGuardado(false), 1500);
+      await onCambio();
+    } catch {
+      /* noop */
+    }
+  }
+  async function quitar() {
+    if (activas > 0) return;
+    try {
+      await deletePersona(p.id);
+      await onCambio();
+    } catch {
+      /* noop */
+    }
+  }
+  return (
+    <tr className="border-b border-[#DEDEDA] last:border-0">
+      <td className="px-4 py-3 text-[13px]">{p.nombre}</td>
+      <td className="px-3 py-3">
+        <input
+          type="email"
+          value={correo}
+          onChange={(e) => setCorreo(e.target.value)}
+          onBlur={guardar}
+          placeholder="correo@quintamama.com"
+          className={`w-full text-[12.5px] border px-2 py-1.5 ${guardado ? "border-[#0F0F0F]" : "border-[#DEDEDA]"}`}
+        />
+      </td>
+      <td className="px-3 py-3 font-mono text-[12px]">{activas}</td>
+      <td className="px-3 py-3 text-right">
+        {activas === 0 && (
+          <button type="button" onClick={quitar} className="text-[9px] tracking-[0.14em] uppercase text-[#8C8C86] hover:text-[#9F3E2E]">Quitar</button>
+        )}
+      </td>
+    </tr>
+  );
+}
+
+// ── Vista: Notificaciones ───────────────────────────────────────────
+type NotifItem = { clave: string; tipo: "creada" | "vence"; t: Tarea; persona: Persona };
+function VistaNotificaciones({
+  tareas,
+  personas,
+  notifClaves,
+  onMarcar,
+}: {
+  tareas: Tarea[];
+  personas: Persona[];
+  notifClaves: string[];
+  onMarcar: () => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const porId = useMemo(() => new Map(personas.map((p) => [p.id, p])), [personas]);
+  const claves = useMemo(() => new Set(notifClaves), [notifClaves]);
+
+  const bandeja: NotifItem[] = [];
+  for (const t of tareas) {
+    if (t.estado !== "pendiente") continue;
+    for (const pid of t.responsables) {
+      const persona = porId.get(pid);
+      if (!persona) continue;
+      const dCreada = diasHasta(t.creada);
+      if (dCreada !== null && dCreada <= 0 && dCreada >= -7) {
+        const clave = `${t.id}|creada|${pid}`;
+        if (!claves.has(clave)) bandeja.push({ clave, tipo: "creada", t, persona });
+      }
+      const dVence = diasHasta(t.vence);
+      if (dVence !== null && dVence <= 1) {
+        const clave = `${t.id}|vence|${pid}`;
+        if (!claves.has(clave)) bandeja.push({ clave, tipo: "vence", t, persona });
+      }
+    }
+  }
+
+  const sinCorreo = personas.filter((p) => !p.correo);
+
+  function mailto(n: NotifItem): string {
+    const asunto = `${n.tipo === "vence" ? "Vence" : "Nueva tarea"} · ${n.t.id} · ${n.t.titulo}`;
+    const cuerpo = [
+      n.tipo === "vence" ? "Tienes una tarea que vence pronto." : "Se te asignó una tarea.",
+      "",
+      `Tarea: ${n.t.titulo}`,
+      `Identificador: ${n.t.id}`,
+      `Sub-eje: ${n.t.subEjeId} — ${nombreSubEje(n.t.subEjeId)}`,
+      `Vence: ${fmtFecha(n.t.vence)}`,
+      "",
+      "— Sistema Operativo · Quinta Mamá",
+    ].join("\n");
+    return `mailto:${encodeURIComponent(n.persona.correo ?? "")}?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(cuerpo)}`;
+  }
+
+  async function marcar(n: NotifItem) {
+    setBusy(true);
+    try {
+      await marcarNotificacion({ clave: n.clave, tareaId: n.t.id, personaId: n.persona.id, tipo: n.tipo });
+      await onMarcar();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-5">
+      <Card titulo="Cómo funciona hoy" extra="y qué falta para que sea automático">
+        <div className="p-4 space-y-2 text-[12.5px] text-[#4A4A46]">
+          <p>El sistema detecta a quién avisar y por qué, y arma el borrador del correo. El <b>envío</b> todavía es manual: abre el borrador en tu correo y le das enviar.</p>
+          <p className="text-[#8C8C86] text-[11px]">El envío 100% automático (cron diario + Resend) es la Fase 3: necesita configurar Resend y los correos del equipo.</p>
+          {sinCorreo.length > 0 && (
+            <p className="text-[#9F3E2E] text-[12px]">Faltan correos de: {sinCorreo.map((p) => p.nombre).join(", ")}. Cárgalos en Ajustes o el aviso no llega.</p>
+          )}
+        </div>
+      </Card>
+
+      <Card titulo="Por enviar" extra={String(bandeja.length)}>
+        {bandeja.length === 0 ? (
+          <p className="px-4 py-8 text-center text-[13px] text-[#8C8C86] italic">Nada pendiente. No hay asignaciones nuevas ni vencimientos dentro de 24 horas.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="text-[9px] tracking-[0.16em] uppercase text-[#8C8C86]">
+                  <th className="text-left font-medium px-4 py-2 border-b border-[#DEDEDA]">Motivo</th>
+                  <th className="text-left font-medium px-3 py-2 border-b border-[#DEDEDA]">Para</th>
+                  <th className="text-left font-medium px-3 py-2 border-b border-[#DEDEDA]">Tarea</th>
+                  <th className="text-left font-medium px-3 py-2 border-b border-[#DEDEDA]">Vence</th>
+                  <th className="border-b border-[#DEDEDA]"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {bandeja.map((n) => (
+                  <tr key={n.clave} className="border-b border-[#DEDEDA] last:border-0 align-top">
+                    <td className="px-4 py-3">
+                      <span className={`text-[9px] tracking-[0.14em] uppercase px-2 py-0.5 border ${n.tipo === "vence" ? "bg-[#9F3E2E] text-white border-[#9F3E2E]" : "border-[#DEDEDA] text-[#8C8C86]"}`}>
+                        {n.tipo === "vence" ? "vencimiento" : "asignación"}
+                      </span>
+                    </td>
+                    <td className="px-3 py-3 text-[12.5px]">
+                      {n.persona.nombre}
+                      <div className="font-mono text-[10.5px]" style={{ color: n.persona.correo ? "#8C8C86" : "#9F3E2E" }}>{n.persona.correo ?? "sin correo"}</div>
+                    </td>
+                    <td className="px-3 py-3 text-[13px] max-w-[260px]">
+                      {n.t.titulo}
+                      <div className="font-mono text-[10px] text-[#B9B9B3] mt-1">{n.t.id}</div>
+                    </td>
+                    <td className="px-3 py-3 font-mono text-[11px]">{fmtFecha(n.t.vence)}</td>
+                    <td className="px-3 py-3 text-right whitespace-nowrap">
+                      {n.persona.correo && (
+                        <a href={mailto(n)} className="text-[9px] tracking-[0.14em] uppercase px-2.5 py-1 border border-[#DEDEDA] mr-1.5 inline-block hover:border-[#0F0F0F]">Borrador</a>
+                      )}
+                      <button type="button" disabled={busy} onClick={() => marcar(n)} className="text-[9px] tracking-[0.14em] uppercase px-2.5 py-1 border border-[#DEDEDA] hover:border-[#0F0F0F]">Marcar enviada</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+
+      <Card titulo="Enviadas" extra={String(notifClaves.length)}>
+        <p className="px-4 py-4 text-[12px] text-[#8C8C86]">{notifClaves.length === 0 ? "Todavía no se ha marcado ninguna notificación." : `${notifClaves.length} notificación${notifClaves.length === 1 ? "" : "es"} ya despachada${notifClaves.length === 1 ? "" : "s"}. No se vuelven a proponer.`}</p>
       </Card>
     </div>
   );
