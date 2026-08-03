@@ -8,13 +8,24 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AREAS, VALORES, nombreSubEje, ESTADOS_ESPACIO } from "@/lib/tareas-so/taxonomia";
-import { clasificar, progreso } from "@/lib/tareas-so/pce.mjs";
+import {
+  clasificar,
+  progreso,
+  ESCALAS,
+  PESOS_DEFECTO,
+  pesoValores,
+} from "@/lib/tareas-so/pce.mjs";
 import {
   listObjetivos,
   listTareas,
   listPersonas,
   listEspacios,
   crearTarea,
+  setEstadoTarea,
+  addSubtarea,
+  toggleSubtarea,
+  deleteSubtarea,
+  addComentario,
 } from "@/lib/data/tareas-so";
 import type {
   Objetivo,
@@ -66,7 +77,7 @@ function diasHasta(d?: string): number | null {
   h.setHours(12, 0, 0, 0);
   return Math.round((x.getTime() - h.getTime()) / 86400000);
 }
-type Clasif = { nombre: string; critica: boolean; puntaje: number };
+type Clasif = { nombre: string; critica: boolean; puntaje: number; razon?: string };
 function clasifDe(t: Tarea, objs: Map<string, Objetivo>): Clasif {
   const o = t.objetivoId ? objs.get(t.objetivoId) : undefined;
   return clasificar({
@@ -88,6 +99,7 @@ export function SistemaOperativoClient() {
   const [espacios, setEspacios] = useState<Espacio[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [detalle, setDetalle] = useState<{ tipo: "tarea"; id: string } | null>(null);
 
   useEffect(() => {
     let vivo = true;
@@ -141,7 +153,10 @@ export function SistemaOperativoClient() {
           <button
             key={id}
             type="button"
-            onClick={() => setVista(id)}
+            onClick={() => {
+              setVista(id);
+              setDetalle(null);
+            }}
             className={`text-[11px] tracking-[0.12em] uppercase px-3 py-1.5 border transition-colors ${
               vista === id
                 ? "bg-[#0F0F0F] text-white border-[#0F0F0F]"
@@ -165,31 +180,46 @@ export function SistemaOperativoClient() {
         <p className="text-[13px] text-[#8C8C86] italic mb-4">Cargando datos…</p>
       )}
 
-      {vista === "tablero" && (
-        <VistaTablero
+      {detalle ? (
+        <VistaTareaDetalle
+          tareaId={detalle.id}
           tareas={tareas}
-          objetivos={objetivos}
-          espacios={espacios}
+          personas={personas}
           objMap={objMap}
           nombreDe={nombreDe}
+          onVolver={() => setDetalle(null)}
+          recargar={recargarTareas}
         />
-      )}
-      {vista === "areas" && <VistaAreas objetivos={objetivos} tareas={tareas} />}
-      {vista === "objetivos" && <VistaObjetivos objetivos={objetivos} tareas={tareas} />}
-      {vista === "casa" && <VistaCasa espacios={espacios} tareas={tareas} />}
-      {vista === "nueva" && (
-        <VistaNueva
-          objetivos={objetivos}
-          personas={personas}
-          espacios={espacios}
-          onCreated={async () => {
-            await recargarTareas();
-            setVista("tablero");
-          }}
-        />
-      )}
-      {["notif", "reportes", "sync", "config"].includes(vista) && (
-        <EnConstruccion titulo={etiqueta(vista)} nota={NOTA_CONSTRUCCION[vista]} />
+      ) : (
+        <>
+          {vista === "tablero" && (
+            <VistaTablero
+              tareas={tareas}
+              objetivos={objetivos}
+              espacios={espacios}
+              objMap={objMap}
+              nombreDe={nombreDe}
+              onAbrir={(id) => setDetalle({ tipo: "tarea", id })}
+            />
+          )}
+          {vista === "areas" && <VistaAreas objetivos={objetivos} tareas={tareas} />}
+          {vista === "objetivos" && <VistaObjetivos objetivos={objetivos} tareas={tareas} />}
+          {vista === "casa" && <VistaCasa espacios={espacios} tareas={tareas} />}
+          {vista === "nueva" && (
+            <VistaNueva
+              objetivos={objetivos}
+              personas={personas}
+              espacios={espacios}
+              onCreated={async () => {
+                await recargarTareas();
+                setVista("tablero");
+              }}
+            />
+          )}
+          {["notif", "reportes", "sync", "config"].includes(vista) && (
+            <EnConstruccion titulo={etiqueta(vista)} nota={NOTA_CONSTRUCCION[vista]} />
+          )}
+        </>
       )}
     </div>
   );
@@ -272,12 +302,14 @@ function VistaTablero({
   espacios,
   objMap,
   nombreDe,
+  onAbrir,
 }: {
   tareas: Tarea[];
   objetivos: Objetivo[];
   espacios: Espacio[];
   objMap: Map<string, Objetivo>;
   nombreDe: (ids: string[]) => string;
+  onAbrir: (id: string) => void;
 }) {
   const activas = tareas.filter((t) => t.estado === "pendiente" && t.objetivoId);
   const conClasif = activas
@@ -351,7 +383,11 @@ function VistaTablero({
                 {conClasif.map(({ t, c }) => {
                   const d = diasHasta(t.vence);
                   return (
-                    <tr key={t.id} className="border-b border-[#DEDEDA] last:border-0 align-top">
+                    <tr
+                      key={t.id}
+                      onClick={() => onAbrir(t.id)}
+                      className="border-b border-[#DEDEDA] last:border-0 align-top cursor-pointer hover:bg-[#F4F4F2]"
+                    >
                       <td className="px-4 py-3 max-w-[320px]">
                         <div className="text-[13px]">{t.titulo}</div>
                         <div className="font-mono text-[10px] text-[#B9B9B3] mt-1">
@@ -854,6 +890,175 @@ function VistaNueva({
           </div>
         </div>
       </Card>
+    </div>
+  );
+}
+
+// ── Vista: Detalle de tarea ─────────────────────────────────────────
+function VistaTareaDetalle({
+  tareaId,
+  tareas,
+  personas,
+  objMap,
+  nombreDe,
+  onVolver,
+  recargar,
+}: {
+  tareaId: string;
+  tareas: Tarea[];
+  personas: Persona[];
+  objMap: Map<string, Objetivo>;
+  nombreDe: (ids: string[]) => string;
+  onVolver: () => void;
+  recargar: () => Promise<void>;
+}) {
+  const t = tareas.find((x) => x.id === tareaId);
+  const [nuevaSub, setNuevaSub] = useState("");
+  const [texto, setTexto] = useState("");
+  const [autor, setAutor] = useState(personas[0]?.id ?? "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (!t) {
+    return (
+      <div>
+        <button type="button" onClick={onVolver} className="text-[10px] tracking-[0.18em] uppercase text-[#8C8C86] hover:text-[#0F0F0F] mb-4">← Volver</button>
+        <p className="text-[13px] text-[#8C8C86] italic">Tarea no encontrada.</p>
+      </div>
+    );
+  }
+
+  const o = t.objetivoId ? objMap.get(t.objetivoId) : undefined;
+  const c = clasifDe(t, objMap);
+  const hechas = t.subtareas.filter((s) => s.hecho).length;
+  const progSub = t.subtareas.length ? Math.round((hechas / t.subtareas.length) * 100) : null;
+
+  async function conBusy(fn: () => Promise<void>) {
+    setBusy(true);
+    setError(null);
+    try {
+      await fn();
+      await recargar();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const filaPCE: [string, string, number, number][] = [
+    ["Impacto en KPI", t.impacto, ESCALAS.impacto[t.impacto], PESOS_DEFECTO.impacto],
+    ["Proximidad", t.proximidad, ESCALAS.proximidad[t.proximidad], PESOS_DEFECTO.proximidad],
+    ["Urgencia por horizonte", o?.horizonte ?? "—", o ? ESCALAS.horizonte[o.horizonte] : 0, PESOS_DEFECTO.urgencia],
+    ["Alineación con valores", t.valores.length ? t.valores.join(", ") : "neutral", pesoValores(t.valores), PESOS_DEFECTO.valores],
+  ];
+
+  return (
+    <div className="space-y-5 max-w-3xl">
+      <button type="button" onClick={onVolver} className="text-[10px] tracking-[0.18em] uppercase text-[#8C8C86] hover:text-[#0F0F0F]">← Volver al tablero</button>
+
+      {error && <div className="border border-[#9F3E2E] border-l-4 px-3 py-2 text-[13px] text-[#9F3E2E]">{error}</div>}
+
+      <div className="border border-[#DEDEDA] bg-white p-5">
+        <div className="text-[10px] tracking-[0.14em] uppercase text-[#8C8C86] mb-2">
+          {t.subEjeId} · {nombreSubEje(t.subEjeId)}
+        </div>
+        <h2 className="text-[19px] font-normal leading-snug">{t.titulo}</h2>
+        <div className="flex flex-wrap gap-x-6 gap-y-2 mt-4 pt-4 border-t border-[#DEDEDA] text-[12px]">
+          <Meta k="Identificador" v={<span className="font-mono">{t.id}</span>} />
+          <Meta k="Responsables" v={nombreDe(t.responsables)} />
+          <Meta k="Vence" v={<span className="font-mono">{fmtFecha(t.vence)}</span>} />
+          <Meta k="Estado" v={t.estado} />
+          <Meta k="Clasificación" v={<ChipClasif c={c} />} />
+        </div>
+      </div>
+
+      <Card titulo="Puntaje de contribución" extra={c.critica ? `Excepción: ${c.razon}` : `PCE ${c.puntaje} de 100`}>
+        <div className="p-4">
+          <Medidor valor={c.puntaje} critica={c.critica} />
+          <div className="mt-4 border-t border-[#DEDEDA] divide-y divide-[#DEDEDA]">
+            {filaPCE.map(([lbl, val, factor, peso]) => (
+              <div key={lbl} className="grid grid-cols-[1fr_auto_auto] gap-3 items-center py-2 text-[12px]">
+                <span className="text-[#8C8C86]">{lbl}</span>
+                <span>{val}</span>
+                <span className="font-mono w-24 text-right">{factor} × {peso} = <b>{Math.round(factor * peso)}</b></span>
+              </div>
+            ))}
+          </div>
+          {t.valores.length > 1 && (
+            <p className="text-[11px] text-[#8C8C86] mt-3">Con varios valores el puntaje no se suma: basta uno para que la alineación cuente completa, y basta que uno tensione para anularla.</p>
+          )}
+        </div>
+      </Card>
+
+      <Card titulo="Subtareas" extra={progSub === null ? "ninguna" : `${hechas} de ${t.subtareas.length} · ${progSub}%`}>
+        <div className="p-4">
+          {progSub !== null && <div className="mb-3"><Barra p={progSub} /></div>}
+          {t.subtareas.length === 0 ? (
+            <p className="text-[12px] text-[#8C8C86] italic mb-3">Las subtareas son los pasos de esta tarea. No se puntúan ni salen en el tablero.</p>
+          ) : (
+            <ul className="divide-y divide-[#DEDEDA] mb-3">
+              {t.subtareas.map((s) => (
+                <li key={s.id} className="flex items-start gap-3 py-2">
+                  <input type="checkbox" checked={s.hecho} disabled={busy} onChange={() => conBusy(() => toggleSubtarea(s.id, !s.hecho))} className="mt-0.5 accent-[#0F0F0F]" />
+                  <span className={`flex-1 text-[13px] ${s.hecho ? "line-through text-[#B9B9B3]" : ""}`}>{s.titulo}</span>
+                  <button type="button" disabled={busy} onClick={() => conBusy(() => deleteSubtarea(s.id))} className="text-[9px] tracking-[0.14em] uppercase text-[#8C8C86] hover:text-[#9F3E2E]">Quitar</button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="flex gap-2">
+            <input value={nuevaSub} onChange={(e) => setNuevaSub(e.target.value)} placeholder="Agregar un paso" className="flex-1 text-[13px] border border-[#DEDEDA] px-2.5 py-2" />
+            <button type="button" disabled={busy || !nuevaSub.trim()} onClick={() => conBusy(async () => { await addSubtarea(t.id, nuevaSub.trim(), t.subtareas.length); setNuevaSub(""); })} className="text-[10px] tracking-[0.16em] uppercase px-4 border border-[#0F0F0F] disabled:border-[#DEDEDA] disabled:text-[#B9B9B3]">Agregar</button>
+          </div>
+        </div>
+      </Card>
+
+      <Card titulo="Comentarios" extra={t.comentarios.length || "ninguno"}>
+        <div className="p-4">
+          {t.comentarios.length > 0 && (
+            <div className="divide-y divide-[#DEDEDA] mb-4">
+              {t.comentarios.map((cm) => (
+                <div key={cm.id} className="py-2.5">
+                  <div className="flex justify-between items-baseline mb-0.5">
+                    <b className="text-[12px] font-medium">{cm.autor ?? nombreDe(cm.personaId ? [cm.personaId] : [])}</b>
+                    <span className="font-mono text-[10px] text-[#B9B9B3]">{fmtFecha(cm.fecha.slice(0, 10))}</span>
+                  </div>
+                  <p className="text-[13px] whitespace-pre-wrap">{cm.texto}</p>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="grid sm:grid-cols-[180px_1fr] gap-2 items-start">
+            <select value={autor} onChange={(e) => setAutor(e.target.value)} className="text-[13px] border border-[#DEDEDA] px-2.5 py-2 bg-white">
+              {personas.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+            </select>
+            <div className="flex gap-2">
+              <textarea value={texto} onChange={(e) => setTexto(e.target.value)} rows={2} placeholder="Qué pasó, qué se decidió o qué está trabando" className="flex-1 text-[13px] border border-[#DEDEDA] px-2.5 py-2 resize-y" />
+            </div>
+          </div>
+          <div className="mt-2">
+            <button type="button" disabled={busy || !texto.trim()} onClick={() => conBusy(async () => { const p = personas.find((x) => x.id === autor); await addComentario(t.id, { personaId: autor || undefined, autor: p?.nombre, texto: texto.trim() }); setTexto(""); })} className="text-[10px] tracking-[0.16em] uppercase px-4 py-2 bg-[#0F0F0F] text-white disabled:bg-[#F4F4F2] disabled:text-[#B9B9B3]">Guardar comentario</button>
+          </div>
+        </div>
+      </Card>
+
+      <div className="flex flex-wrap gap-2">
+        {t.estado === "completado" ? (
+          <button type="button" disabled={busy} onClick={() => conBusy(() => setEstadoTarea(t, "pendiente"))} className="text-[10px] tracking-[0.16em] uppercase px-4 py-2.5 border border-[#0F0F0F]">Reabrir tarea</button>
+        ) : (
+          <button type="button" disabled={busy} onClick={() => conBusy(() => setEstadoTarea(t, "completado"))} className="text-[10px] tracking-[0.16em] uppercase px-4 py-2.5 bg-[#0F0F0F] text-white">Completar tarea</button>
+        )}
+        <button type="button" disabled={busy} onClick={() => conBusy(async () => { await setEstadoTarea(t, "descartado"); onVolver(); })} className="text-[10px] tracking-[0.16em] uppercase px-4 py-2.5 border border-[#DEDEDA] text-[#8C8C86] hover:text-[#9F3E2E] hover:border-[#9F3E2E]">Descartar</button>
+      </div>
+    </div>
+  );
+}
+function Meta({ k, v }: { k: string; v: React.ReactNode }) {
+  return (
+    <div>
+      <div className="text-[9px] tracking-[0.16em] uppercase text-[#8C8C86] mb-0.5">{k}</div>
+      <div className="text-[13px]">{v}</div>
     </div>
   );
 }

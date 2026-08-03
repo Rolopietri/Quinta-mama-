@@ -263,3 +263,51 @@ export async function crearTarea(input: NuevaTareaInput): Promise<string> {
   await crearHito({ subEjeId: input.subEjeId, tipo: "tarea", texto: `Nueva tarea: ${input.titulo}`, ref: id });
   return id;
 }
+
+/** Completar / reabrir / descartar una tarea. Genera hito al completar. */
+export async function setEstadoTarea(
+  t: { id: string; titulo: string; subEjeId: string },
+  estado: EstadoTareaSO,
+): Promise<void> {
+  const sb = createSupabaseBrowserClient();
+  const hoy = new Date().toISOString().slice(0, 10);
+  const { error } = await sb
+    .from("so_tarea")
+    .update({ estado, cerrada: estado === "completado" ? hoy : null })
+    .eq("id", t.id);
+  if (error) throw error;
+  if (estado === "completado")
+    await crearHito({ subEjeId: t.subEjeId, tipo: "tarea", texto: `Completada: ${t.titulo}`, ref: t.id });
+}
+
+export async function addSubtarea(tareaId: string, titulo: string, orden: number): Promise<void> {
+  const sb = createSupabaseBrowserClient();
+  const { error } = await sb.from("so_subtarea").insert({ tarea_id: tareaId, titulo, orden, hecho: false });
+  if (error) throw error;
+}
+
+export async function toggleSubtarea(id: string, hecho: boolean): Promise<void> {
+  const sb = createSupabaseBrowserClient();
+  const { error } = await sb.from("so_subtarea").update({ hecho }).eq("id", id);
+  if (error) throw error;
+}
+
+export async function deleteSubtarea(id: string): Promise<void> {
+  const sb = createSupabaseBrowserClient();
+  const { error } = await sb.from("so_subtarea").delete().eq("id", id);
+  if (error) throw error;
+}
+
+export async function addComentario(
+  tareaId: string,
+  c: { personaId?: string; autor?: string; texto: string },
+): Promise<void> {
+  const sb = createSupabaseBrowserClient();
+  const { error } = await sb.from("so_comentario").insert({
+    tarea_id: tareaId,
+    persona_id: c.personaId ?? null,
+    autor: c.autor ?? null,
+    texto: c.texto,
+  });
+  if (error) throw error;
+}
