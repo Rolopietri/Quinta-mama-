@@ -336,3 +336,119 @@ export async function updateObjetivoMeta(id: string, meta: number): Promise<void
   const { error } = await sb.from("so_objetivo").update({ meta }).eq("id", id);
   if (error) throw error;
 }
+
+// ── Importación desde el respaldo del prototipo ─────────────────────
+type RTarea = {
+  id?: string; t?: string; sub?: string; obj?: string; espacio?: string;
+  duenos?: string[]; fecha?: string; creada?: string; cerrada?: string;
+  imp?: string; prox?: string; vals?: string[]; patrimonio?: boolean;
+  compromiso?: boolean; nota?: string; estado?: string; origen?: string;
+  sub_t?: { t?: string; hecho?: boolean }[];
+  coms?: { fecha?: string; autor?: string; txt?: string; texto?: string }[];
+};
+export type Respaldo = {
+  equipo?: { n?: string; m?: string }[];
+  espacios?: { id?: string; n?: string; pl?: string; tipo?: string; estado?: string; nota?: string }[];
+  objetivos?: { id?: string; area?: string; sub?: string; h?: string; t?: string; ind?: string; meta?: number | string; actual?: number | string; uni?: string; sent?: string }[];
+  subejes?: Record<string, { e?: string; act?: string }>;
+  tareas?: RTarea[];
+};
+export type ResumenImport = {
+  personas: number; espacios: number; objetivos: number; tareas: number; estrategias: number;
+  errores: string[];
+};
+
+/** Migración de nombre del prototipo. */
+function nombreCanon(n: string): string {
+  return n === "Sofía Araujo" ? "Óscar Pietri" : n;
+}
+
+export async function importarRespaldo(data: Respaldo): Promise<ResumenImport> {
+  const sb = createSupabaseBrowserClient();
+  const res: ResumenImport = { personas: 0, espacios: 0, objetivos: 0, tareas: 0, estrategias: 0, errores: [] };
+
+  // 1. Personas — asegurar que existan por nombre, actualizar correo.
+  const { data: exist } = await sb.from("so_persona").select("id, nombre");
+  const byName = new Map<string, string>((exist as { id: string; nombre: string }[] | null ?? []).map((p) => [p.nombre, p.id]));
+  for (const p of data.equipo ?? []) {
+    if (!p?.n) continue;
+    const nombre = nombreCanon(p.n);
+    if (nombre === "Sin asignar") continue;
+    if (!byName.has(nombre)) {
+      const { data: ins, error } = await sb.from("so_persona").insert({ nombre, correo: p.m || null }).select("id").single();
+      if (error) { res.errores.push(`persona ${nombre}: ${error.message}`); continue; }
+      byName.set(nombre, (ins as { id: string }).id);
+      res.personas++;
+    } else if (p.m) {
+      await sb.from("so_persona").update({ correo: p.m }).eq("id", byName.get(nombre)!);
+    }
+  }
+
+  // 2. Espacios
+  if (data.espacios?.length) {
+    const rows = data.espacios.filter((e) => e.id).map((e) => ({
+      id: e.id!, nombre: e.n ?? e.id!, planta: e.pl ?? "Sin agrupar", tipo: e.tipo ?? "privativo",
+      estado: e.estado ?? "operativo", nota: e.nota ?? null,
+    }));
+    const { error } = await sb.from("so_espacio").upsert(rows, { onConflict: "id" });
+    if (error) res.errores.push(`espacios: ${error.message}`); else res.espacios = rows.length;
+  }
+
+  // 3. Objetivos
+  if (data.objetivos?.length) {
+    const rows = data.objetivos.filter((o) => o.id).map((o) => ({
+      id: o.id!, area_id: o.area ?? String(o.sub ?? "").split(".")[0], sub_eje_id: o.sub ?? "",
+      horizonte: o.h ?? "corto", titulo: o.t ?? o.id!, indicador: o.ind ?? "",
+      meta: Number(o.meta) || 0, actual: Number(o.actual) || 0, unidad: o.uni ?? "", sentido: o.sent ?? "mayor",
+    }));
+    const { error } = await sb.from("so_objetivo").upsert(rows, { onConflict: "id" });
+    if (error) res.errores.push(`objetivos: ${error.message}`); else res.objetivos = rows.length;
+  }
+
+  // 4. Estrategias de sub-eje
+  if (data.subejes && typeof data.subejes === "object") {
+    const rows = Object.entries(data.subejes).map(([sub, v]) => ({ sub_eje_id: sub, texto: v?.e ?? null, actualizada: v?.act ?? null }));
+    if (rows.length) {
+      const { error } = await sb.from("so_sub_eje_estrategia").upsert(rows, { onConflict: "sub_eje_id" });
+      if (error) res.errores.push(`estrategias: ${error.message}`); else res.estrategias = rows.length;
+    }
+  }
+
+  // 5. Tareas + hijos (reemplaza los hijos para no duplicar)
+  const hoy = new Date().toISOString().slice(0, 10);
+  for (const t of data.tareas ?? []) {
+    if (!t?.id || !t.t) continue;
+    const row = {
+      id: t.id, titulo: t.t, sub_eje_id: t.sub ?? "", objetivo_id: t.obj || null,
+      espacio_id: t.espacio || null, vence: t.fecha || null, creada: t.creada || hoy,
+      cerrada: t.cerrada || null, impacto: t.imp ?? "medio", proximidad: t.prox ?? "requisito",
+      patrimonio: !!t.patrimonio, compromiso: !!t.compromiso, nota: t.nota || null,
+      estado: t.estado ?? "pendiente", origen: t.origen ?? "importado",
+    };
+    const { error } = await sb.from("so_tarea").upsert(row, { onConflict: "id" });
+    if (error) { res.errores.push(`tarea ${t.id}: ${error.message}`); continue; }
+
+    await sb.from("so_tarea_responsable").delete().eq("tarea_id", t.id);
+    const pids = (t.duenos ?? []).map(nombreCanon).map((n) => byName.get(n)).filter((x): x is string => !!x);
+    if (pids.length) await sb.from("so_tarea_responsable").insert(pids.map((persona_id) => ({ tarea_id: t.id!, persona_id })));
+
+    await sb.from("so_tarea_valor").delete().eq("tarea_id", t.id);
+    const vals = (t.vals ?? []).filter((v) => !!v);
+    if (vals.length) await sb.from("so_tarea_valor").insert(vals.map((valor) => ({ tarea_id: t.id!, valor })));
+
+    await sb.from("so_subtarea").delete().eq("tarea_id", t.id);
+    const subs = (t.sub_t ?? []).filter((s) => s?.t).map((s, i) => ({ tarea_id: t.id!, titulo: s.t!, hecho: !!s.hecho, orden: i }));
+    if (subs.length) await sb.from("so_subtarea").insert(subs);
+
+    await sb.from("so_comentario").delete().eq("tarea_id", t.id);
+    const coms = (t.coms ?? []).filter((c) => c?.txt || c?.texto).map((c) => ({
+      tarea_id: t.id!, persona_id: c.autor ? byName.get(nombreCanon(c.autor)) ?? null : null,
+      autor: c.autor ?? null, texto: (c.txt ?? c.texto)!, ...(c.fecha ? { fecha: c.fecha } : {}),
+    }));
+    if (coms.length) await sb.from("so_comentario").insert(coms);
+
+    res.tareas++;
+  }
+
+  return res;
+}

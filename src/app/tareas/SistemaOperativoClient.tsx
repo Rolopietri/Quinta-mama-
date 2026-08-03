@@ -28,7 +28,9 @@ import {
   addComentario,
   setObjetivoActual,
   updateObjetivoMeta,
+  importarRespaldo,
 } from "@/lib/data/tareas-so";
+import type { Respaldo, ResumenImport } from "@/lib/data/tareas-so";
 import type {
   Objetivo,
   Tarea,
@@ -146,6 +148,23 @@ export function SistemaOperativoClient() {
     }
   }, []);
 
+  const recargarTodo = useCallback(async () => {
+    try {
+      const [o, t, p, e] = await Promise.all([
+        listObjetivos(),
+        listTareas(),
+        listPersonas(),
+        listEspacios(),
+      ]);
+      setObjetivos(o);
+      setTareas(t);
+      setPersonas(p);
+      setEspacios(e);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error recargando");
+    }
+  }, []);
+
   const objMap = useMemo(
     () => new Map(objetivos.map((o) => [o.id, o])),
     [objetivos],
@@ -245,7 +264,16 @@ export function SistemaOperativoClient() {
               }}
             />
           )}
-          {["notif", "reportes", "sync", "config"].includes(vista) && (
+          {vista === "sync" && (
+            <VistaSync
+              objetivos={objetivos}
+              tareas={tareas}
+              personas={personas}
+              espacios={espacios}
+              onImported={recargarTodo}
+            />
+          )}
+          {["notif", "reportes", "config"].includes(vista) && (
             <EnConstruccion titulo={etiqueta(vista)} nota={NOTA_CONSTRUCCION[vista]} />
           )}
         </>
@@ -1225,6 +1253,141 @@ function VistaObjetivoDetalle({
             })}
           </ul>
         )}
+      </Card>
+    </div>
+  );
+}
+
+// ── Vista: Sincronizar ──────────────────────────────────────────────
+function descargarJSON(nombre: string, obj: unknown) {
+  const url = URL.createObjectURL(new Blob([JSON.stringify(obj, null, 2)], { type: "application/json" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = nombre;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function VistaSync({
+  objetivos,
+  tareas,
+  personas,
+  espacios,
+  onImported,
+}: {
+  objetivos: Objetivo[];
+  tareas: Tarea[];
+  personas: Persona[];
+  espacios: Espacio[];
+  onImported: () => Promise<void>;
+}) {
+  const [texto, setTexto] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [resumen, setResumen] = useState<ResumenImport | null>(null);
+
+  async function importar(raw: string) {
+    setError(null);
+    setResumen(null);
+    let data: Respaldo;
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      setError("El archivo no es un JSON válido. Revisa que copiaste todo.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const r = await importarRespaldo(data);
+      setResumen(r);
+      await onImported();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error importando");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function exportar() {
+    descargarJSON(`quinta-mama-sistema-operativo-${new Date().toISOString().slice(0, 10)}.json`, {
+      generado: new Date().toISOString(),
+      version: "so-1",
+      personas,
+      espacios,
+      objetivos,
+      tareas,
+    });
+  }
+
+  return (
+    <div className="space-y-5 max-w-3xl">
+      <Card titulo="Importar datos" extra="pega el respaldo del prototipo o sube el archivo">
+        <div className="p-4 space-y-3">
+          <p className="text-[12px] text-[#8C8C86] leading-relaxed">
+            Pega aquí el JSON del <b>respaldo completo</b> exportado desde el prototipo de Beatriz
+            (Sincronizar → Descargar respaldo completo), o sube el archivo. Se traen personas,
+            espacios, objetivos, estrategias y tareas (con sus responsables, valores, subtareas y
+            comentarios). Lo que ya existe se actualiza, no se duplica.
+          </p>
+          {error && <div className="border border-[#9F3E2E] border-l-4 px-3 py-2 text-[13px] text-[#9F3E2E]">{error}</div>}
+          {resumen && (
+            <div className="border border-[#DEDEDA] border-l-[3px] border-l-[#0F0F0F] px-3 py-2 text-[13px]">
+              <b className="block mb-1">Importación lista</b>
+              <span className="text-[#4A4A46]">
+                {resumen.personas} personas · {resumen.espacios} espacios · {resumen.objetivos} objetivos · {resumen.estrategias} estrategias · {resumen.tareas} tareas.
+              </span>
+              {resumen.errores.length > 0 && (
+                <div className="text-[#9F3E2E] text-[12px] mt-1">{resumen.errores.length} avisos: {resumen.errores.slice(0, 3).join("; ")}</div>
+              )}
+            </div>
+          )}
+          <textarea
+            value={texto}
+            onChange={(e) => setTexto(e.target.value)}
+            rows={7}
+            placeholder="Pega aquí el JSON del respaldo"
+            className="w-full text-[12px] font-mono border border-[#DEDEDA] px-2.5 py-2 resize-y"
+          />
+          <div className="flex flex-wrap gap-2 items-center">
+            <button
+              type="button"
+              disabled={busy || !texto.trim()}
+              onClick={() => importar(texto)}
+              className="text-[10px] tracking-[0.16em] uppercase px-5 py-2.5 bg-[#0F0F0F] text-white disabled:bg-[#F4F4F2] disabled:text-[#B9B9B3]"
+            >
+              {busy ? "Importando…" : "Importar"}
+            </button>
+            <input
+              type="file"
+              accept=".json,application/json"
+              disabled={busy}
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (!f) return;
+                const r = new FileReader();
+                r.onload = () => importar(String(r.result));
+                r.readAsText(f);
+              }}
+              className="text-[12px]"
+            />
+          </div>
+          <p className="text-[11px] text-[#8C8C86]">
+            Nota: el historial (hitos), reportes y notificaciones no se importan — el sistema
+            los genera solo de aquí en adelante.
+          </p>
+        </div>
+      </Card>
+
+      <Card titulo="Exportar respaldo" extra="todo el sistema en un archivo">
+        <div className="p-4">
+          <p className="text-[12px] text-[#8C8C86] mb-3">
+            Descarga un archivo con personas, espacios, objetivos y tareas actuales. Guárdalo en Drive
+            como respaldo.
+          </p>
+          <button type="button" onClick={exportar} className="text-[10px] tracking-[0.16em] uppercase px-5 py-2.5 border border-[#0F0F0F]">
+            Descargar respaldo
+          </button>
+        </div>
       </Card>
     </div>
   );
