@@ -26,6 +26,8 @@ import {
   toggleSubtarea,
   deleteSubtarea,
   addComentario,
+  setObjetivoActual,
+  updateObjetivoMeta,
 } from "@/lib/data/tareas-so";
 import type {
   Objetivo,
@@ -99,7 +101,7 @@ export function SistemaOperativoClient() {
   const [espacios, setEspacios] = useState<Espacio[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [detalle, setDetalle] = useState<{ tipo: "tarea"; id: string } | null>(null);
+  const [detalle, setDetalle] = useState<{ tipo: "tarea" | "objetivo"; id: string } | null>(null);
 
   useEffect(() => {
     let vivo = true;
@@ -131,6 +133,14 @@ export function SistemaOperativoClient() {
   const recargarTareas = useCallback(async () => {
     try {
       setTareas(await listTareas());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error recargando");
+    }
+  }, []);
+
+  const recargarObjetivos = useCallback(async () => {
+    try {
+      setObjetivos(await listObjetivos());
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error recargando");
     }
@@ -180,7 +190,7 @@ export function SistemaOperativoClient() {
         <p className="text-[13px] text-[#8C8C86] italic mb-4">Cargando datos…</p>
       )}
 
-      {detalle ? (
+      {detalle?.tipo === "tarea" ? (
         <VistaTareaDetalle
           tareaId={detalle.id}
           tareas={tareas}
@@ -189,6 +199,19 @@ export function SistemaOperativoClient() {
           nombreDe={nombreDe}
           onVolver={() => setDetalle(null)}
           recargar={recargarTareas}
+        />
+      ) : detalle?.tipo === "objetivo" ? (
+        <VistaObjetivoDetalle
+          objetivoId={detalle.id}
+          objetivos={objetivos}
+          tareas={tareas}
+          objMap={objMap}
+          nombreDe={nombreDe}
+          onVolver={() => setDetalle(null)}
+          onAbrirTarea={(id) => setDetalle({ tipo: "tarea", id })}
+          recargar={async () => {
+            await recargarObjetivos();
+          }}
         />
       ) : (
         <>
@@ -203,7 +226,13 @@ export function SistemaOperativoClient() {
             />
           )}
           {vista === "areas" && <VistaAreas objetivos={objetivos} tareas={tareas} />}
-          {vista === "objetivos" && <VistaObjetivos objetivos={objetivos} tareas={tareas} />}
+          {vista === "objetivos" && (
+            <VistaObjetivos
+              objetivos={objetivos}
+              tareas={tareas}
+              onAbrir={(id) => setDetalle({ tipo: "objetivo", id })}
+            />
+          )}
           {vista === "casa" && <VistaCasa espacios={espacios} tareas={tareas} />}
           {vista === "nueva" && (
             <VistaNueva
@@ -429,7 +458,15 @@ function Aviso({ k, rojo, children }: { k: string; rojo?: boolean; children: Rea
 }
 
 // ── Vista: Objetivos ────────────────────────────────────────────────
-function VistaObjetivos({ objetivos, tareas }: { objetivos: Objetivo[]; tareas: Tarea[] }) {
+function VistaObjetivos({
+  objetivos,
+  tareas,
+  onAbrir,
+}: {
+  objetivos: Objetivo[];
+  tareas: Tarea[];
+  onAbrir: (id: string) => void;
+}) {
   return (
     <div className="space-y-6">
       {AREAS.map((a) => {
@@ -464,7 +501,11 @@ function VistaObjetivos({ objetivos, tareas }: { objetivos: Objetivo[]; tareas: 
                       const p = progreso(o);
                       const ts = tareas.filter((t) => t.objetivoId === o.id && t.estado === "pendiente").length;
                       return (
-                        <tr key={o.id} className="border-b border-[#DEDEDA] last:border-0 align-top">
+                        <tr
+                          key={o.id}
+                          onClick={() => onAbrir(o.id)}
+                          className="border-b border-[#DEDEDA] last:border-0 align-top cursor-pointer hover:bg-[#F4F4F2]"
+                        >
                           <td className="px-4 py-3 max-w-[320px]">
                             <div className="text-[13px]">{o.titulo}</div>
                             <div className="text-[11px] text-[#8C8C86] mt-0.5">{o.indicador}</div>
@@ -1059,6 +1100,132 @@ function Meta({ k, v }: { k: string; v: React.ReactNode }) {
     <div>
       <div className="text-[9px] tracking-[0.16em] uppercase text-[#8C8C86] mb-0.5">{k}</div>
       <div className="text-[13px]">{v}</div>
+    </div>
+  );
+}
+
+// ── Vista: Detalle de objetivo (medición) ───────────────────────────
+function VistaObjetivoDetalle({
+  objetivoId,
+  objetivos,
+  tareas,
+  objMap,
+  nombreDe,
+  onVolver,
+  onAbrirTarea,
+  recargar,
+}: {
+  objetivoId: string;
+  objetivos: Objetivo[];
+  tareas: Tarea[];
+  objMap: Map<string, Objetivo>;
+  nombreDe: (ids: string[]) => string;
+  onVolver: () => void;
+  onAbrirTarea: (id: string) => void;
+  recargar: () => Promise<void>;
+}) {
+  const o = objetivos.find((x) => x.id === objetivoId);
+  const [actual, setActual] = useState(o ? String(o.actual) : "0");
+  const [meta, setMeta] = useState(o ? String(o.meta) : "0");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [ok, setOk] = useState(false);
+
+  if (!o) {
+    return (
+      <div>
+        <button type="button" onClick={onVolver} className="text-[10px] tracking-[0.18em] uppercase text-[#8C8C86] hover:text-[#0F0F0F] mb-4">← Volver</button>
+        <p className="text-[13px] text-[#8C8C86] italic">Objetivo no encontrado.</p>
+      </div>
+    );
+  }
+
+  const p = progreso(o);
+  const tsObj = tareas.filter((t) => t.objetivoId === o.id && t.estado !== "descartado");
+  const cambio = Number(actual) !== Number(o.actual) || Number(meta) !== Number(o.meta);
+
+  async function guardar() {
+    if (!o) return;
+    setBusy(true);
+    setError(null);
+    setOk(false);
+    try {
+      if (Number(meta) !== Number(o.meta)) await updateObjetivoMeta(o.id, Number(meta) || 0);
+      if (Number(actual) !== Number(o.actual)) await setObjetivoActual(o, Number(actual) || 0);
+      await recargar();
+      setOk(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo guardar la medición");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const inp = "w-full text-[13px] border border-[#DEDEDA] px-2.5 py-2 bg-white font-mono";
+  const lbl = "block text-[9px] tracking-[0.16em] uppercase text-[#8C8C86] mb-1.5";
+
+  return (
+    <div className="space-y-5 max-w-3xl">
+      <button type="button" onClick={onVolver} className="text-[10px] tracking-[0.18em] uppercase text-[#8C8C86] hover:text-[#0F0F0F]">← Volver a objetivos</button>
+
+      <div className="border border-[#DEDEDA] bg-white p-5">
+        <div className="text-[10px] tracking-[0.14em] uppercase text-[#8C8C86] mb-2">{o.areaId} · {o.subEjeId} · {nombreSubEje(o.subEjeId)}</div>
+        <h2 className="text-[19px] font-normal leading-snug">{o.titulo}</h2>
+        <div className="flex flex-wrap gap-x-6 gap-y-2 mt-4 pt-4 border-t border-[#DEDEDA]">
+          <Meta k="Identificador" v={<span className="font-mono">{o.id}</span>} />
+          <Meta k="Horizonte" v={`${o.horizonte} plazo`} />
+          <Meta k="Indicador" v={o.indicador} />
+          <Meta k="Dirección" v={o.sentido === "menor" ? "bajar es mejor" : "subir es mejor"} />
+          <Meta k="Avance" v={<span className="font-mono">{p}%</span>} />
+        </div>
+      </div>
+
+      <Card titulo="Medición" extra={`${o.actual} de ${o.meta} ${o.unidad}`}>
+        <div className="p-4">
+          {error && <div className="border border-[#9F3E2E] border-l-4 px-3 py-2 text-[13px] text-[#9F3E2E] mb-3">{error}</div>}
+          {ok && <div className="border border-[#8C8C86] border-l-4 px-3 py-2 text-[13px] text-[#4A4A46] mb-3">Medición guardada. Quedó registrada en el historial.</div>}
+          <div className="grid sm:grid-cols-3 gap-3">
+            <div>
+              <label className={lbl}>Valor actual</label>
+              <input type="number" step="any" className={inp} value={actual} onChange={(e) => { setActual(e.target.value); setOk(false); }} />
+            </div>
+            <div>
+              <label className={lbl}>Meta</label>
+              <input type="number" step="any" className={inp} value={meta} onChange={(e) => { setMeta(e.target.value); setOk(false); }} />
+            </div>
+            <div>
+              <label className={lbl}>Unidad</label>
+              <input disabled className={`${inp} bg-[#F4F4F2] text-[#8C8C86]`} value={o.unidad} />
+            </div>
+          </div>
+          <div className="mt-4"><Barra p={progreso({ actual: Number(actual) || 0, meta: Number(meta) || 0, sentido: o.sentido })} /></div>
+          <p className="text-[11px] text-[#8C8C86] mt-2">Cada cambio del valor actual queda registrado como hito y alimenta el reporte quincenal.</p>
+          <div className="mt-3">
+            <button type="button" disabled={busy || !cambio} onClick={guardar} className="text-[10px] tracking-[0.16em] uppercase px-5 py-2.5 bg-[#0F0F0F] text-white disabled:bg-[#F4F4F2] disabled:text-[#B9B9B3]">
+              {busy ? "Guardando…" : "Guardar medición"}
+            </button>
+          </div>
+        </div>
+      </Card>
+
+      <Card titulo="Tareas asociadas" extra={`${tsObj.filter((t) => t.estado === "pendiente").length} activas · ${tsObj.filter((t) => t.estado === "completado").length} completadas`}>
+        {tsObj.length === 0 ? (
+          <p className="px-4 py-6 text-[13px] text-[#8C8C86] italic">Ninguna tarea apunta a este objetivo. Un objetivo sin tareas es una intención.</p>
+        ) : (
+          <ul className="divide-y divide-[#DEDEDA]">
+            {tsObj.map((t) => {
+              const c = clasifDe(t, objMap);
+              return (
+                <li key={t.id} onClick={() => onAbrirTarea(t.id)} className="px-4 py-3 flex items-center gap-3 cursor-pointer hover:bg-[#F4F4F2]">
+                  <span className={`flex-1 text-[13px] ${t.estado === "completado" ? "line-through text-[#B9B9B3]" : ""}`}>{t.titulo}</span>
+                  <span className="text-[11px] text-[#8C8C86]">{nombreDe(t.responsables)}</span>
+                  {t.estado === "pendiente" && <ChipClasif c={c} />}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </Card>
     </div>
   );
 }

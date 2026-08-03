@@ -7,6 +7,7 @@
 // agregan junto con los formularios.
 
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import { progreso } from "@/lib/tareas-so/pce.mjs";
 import type {
   Persona,
   Objetivo,
@@ -309,5 +310,29 @@ export async function addComentario(
     autor: c.autor ?? null,
     texto: c.texto,
   });
+  if (error) throw error;
+}
+
+/** Carga una medición: actualiza el valor actual y registra un hito (§3.6). */
+export async function setObjetivoActual(o: Objetivo, nuevoActual: number): Promise<void> {
+  const sb = createSupabaseBrowserClient();
+  const avanceAnterior = progreso({ actual: o.actual, meta: o.meta, sentido: o.sentido });
+  const { error } = await sb.from("so_objetivo").update({ actual: nuevoActual }).eq("id", o.id);
+  if (error) throw error;
+  const avance = progreso({ actual: nuevoActual, meta: o.meta, sentido: o.sentido });
+  await crearHito({
+    subEjeId: o.subEjeId,
+    tipo: "medición",
+    texto: `${o.id}: ${o.actual} → ${nuevoActual} ${o.unidad}`,
+    ref: o.id,
+    avance,
+    avanceAnterior,
+  });
+}
+
+/** Cambiar la meta de un objetivo (sin hito de medición). */
+export async function updateObjetivoMeta(id: string, meta: number): Promise<void> {
+  const sb = createSupabaseBrowserClient();
+  const { error } = await sb.from("so_objetivo").update({ meta }).eq("id", id);
   if (error) throw error;
 }
