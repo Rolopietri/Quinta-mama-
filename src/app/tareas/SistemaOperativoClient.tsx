@@ -3,14 +3,19 @@
 // Sistema Operativo · cliente principal (vive bajo /tareas)
 // ═══════════════════════════════════════════════════════════════════
 // Navegación interna de las 9 vistas + contenido. Estética blanco y negro
-// del prototipo (tinta/papel/fondo/alerta). Se va portando vista por vista;
-// arranca con Áreas funcionando y el resto como "en construcción".
+// del prototipo. Portado por lotes: Áreas, Tablero, Objetivos y Casa
+// funcionan (lectura); las vistas con escritura quedan "en construcción".
 
 import { useEffect, useMemo, useState } from "react";
-import { AREAS } from "@/lib/tareas-so/taxonomia";
-import { progreso } from "@/lib/tareas-so/pce.mjs";
-import { listObjetivos, listTareas } from "@/lib/data/tareas-so";
-import type { Objetivo, Tarea } from "@/lib/tareas-so/types";
+import { AREAS, nombreSubEje, ESTADOS_ESPACIO } from "@/lib/tareas-so/taxonomia";
+import { clasificar, progreso } from "@/lib/tareas-so/pce.mjs";
+import {
+  listObjetivos,
+  listTareas,
+  listPersonas,
+  listEspacios,
+} from "@/lib/data/tareas-so";
+import type { Objetivo, Tarea, Persona, Espacio } from "@/lib/tareas-so/types";
 
 const VISTAS: [string, string][] = [
   ["tablero", "Tablero"],
@@ -24,17 +29,55 @@ const VISTAS: [string, string][] = [
   ["config", "Ajustes"],
 ];
 
-const LISTA_VISTA: Record<string, string> = {
-  areas: "Toca un sub-eje para ver su estrategia y objetivos.",
-  tablero: "El trabajo del equipo, ordenado por contribución estratégica.",
-  objetivos: "Las metas estratégicas y su avance.",
-  casa: "Inventario de espacios y trabajos abiertos.",
+const NOTA_CONSTRUCCION: Record<string, string> = {
+  nueva: "Crear tareas con el puntaje en vivo. Necesita la capa de escritura.",
+  notif: "Avisos a responsables por asignación y vencimiento.",
+  reportes: "Informe quincenal de operaciones.",
+  sync: "Entrada y salida de datos — acá se importan los datos reales.",
+  config: "Equipo, correos, pesos del PCE y umbrales.",
 };
 
+const ORDEN: Record<string, number> = {
+  Crítica: 0,
+  Estratégica: 1,
+  "Operativa necesaria": 2,
+  "Delegar o automatizar": 3,
+  Ruido: 4,
+};
+
+// ── Helpers ─────────────────────────────────────────────────────────
+function fmtFecha(d?: string): string {
+  if (!d) return "—";
+  const x = new Date(d + "T12:00:00");
+  return x.toLocaleDateString("es-VE", { day: "2-digit", month: "short" });
+}
+function diasHasta(d?: string): number | null {
+  if (!d) return null;
+  const x = new Date(d + "T12:00:00");
+  const h = new Date();
+  h.setHours(12, 0, 0, 0);
+  return Math.round((x.getTime() - h.getTime()) / 86400000);
+}
+type Clasif = { nombre: string; critica: boolean; puntaje: number };
+function clasifDe(t: Tarea, objs: Map<string, Objetivo>): Clasif {
+  const o = t.objetivoId ? objs.get(t.objetivoId) : undefined;
+  return clasificar({
+    impacto: t.impacto,
+    proximidad: t.proximidad,
+    horizonte: o?.horizonte ?? null,
+    valores: t.valores,
+    compromiso: t.compromiso,
+    patrimonio: t.patrimonio,
+    subEjeId: t.subEjeId,
+  }) as Clasif;
+}
+
 export function SistemaOperativoClient() {
-  const [vista, setVista] = useState("areas");
+  const [vista, setVista] = useState("tablero");
   const [objetivos, setObjetivos] = useState<Objetivo[]>([]);
   const [tareas, setTareas] = useState<Tarea[]>([]);
+  const [personas, setPersonas] = useState<Persona[]>([]);
+  const [espacios, setEspacios] = useState<Espacio[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -42,12 +85,20 @@ export function SistemaOperativoClient() {
     let vivo = true;
     (async () => {
       try {
-        const [o, t] = await Promise.all([listObjetivos(), listTareas()]);
+        const [o, t, p, e] = await Promise.all([
+          listObjetivos(),
+          listTareas(),
+          listPersonas(),
+          listEspacios(),
+        ]);
         if (!vivo) return;
         setObjetivos(o);
         setTareas(t);
-      } catch (e) {
-        if (vivo) setError(e instanceof Error ? e.message : "Error cargando datos");
+        setPersonas(p);
+        setEspacios(e);
+      } catch (err) {
+        if (vivo)
+          setError(err instanceof Error ? err.message : "Error cargando datos");
       } finally {
         if (vivo) setLoading(false);
       }
@@ -57,9 +108,18 @@ export function SistemaOperativoClient() {
     };
   }, []);
 
+  const objMap = useMemo(
+    () => new Map(objetivos.map((o) => [o.id, o])),
+    [objetivos],
+  );
+  const nombreDe = useMemo(() => {
+    const m = new Map(personas.map((p) => [p.id, p.nombre]));
+    return (ids: string[]) =>
+      ids.length ? ids.map((i) => m.get(i) ?? "?").join(" · ") : "Sin asignar";
+  }, [personas]);
+
   return (
     <div className="text-[#0F0F0F]">
-      {/* Navegación interna */}
       <nav className="flex flex-wrap gap-1.5 border-b border-[#DEDEDA] pb-3 mb-5">
         {VISTAS.map(([id, label], i) => (
           <button
@@ -85,11 +145,24 @@ export function SistemaOperativoClient() {
           {error}
         </div>
       )}
+      {loading && (
+        <p className="text-[13px] text-[#8C8C86] italic mb-4">Cargando datos…</p>
+      )}
 
-      {vista === "areas" ? (
-        <VistaAreas objetivos={objetivos} tareas={tareas} loading={loading} />
-      ) : (
-        <EnConstruccion titulo={etiqueta(vista)} nota={LISTA_VISTA[vista]} />
+      {vista === "tablero" && (
+        <VistaTablero
+          tareas={tareas}
+          objetivos={objetivos}
+          espacios={espacios}
+          objMap={objMap}
+          nombreDe={nombreDe}
+        />
+      )}
+      {vista === "areas" && <VistaAreas objetivos={objetivos} tareas={tareas} />}
+      {vista === "objetivos" && <VistaObjetivos objetivos={objetivos} tareas={tareas} />}
+      {vista === "casa" && <VistaCasa espacios={espacios} tareas={tareas} />}
+      {["nueva", "notif", "reportes", "sync", "config"].includes(vista) && (
+        <EnConstruccion titulo={etiqueta(vista)} nota={NOTA_CONSTRUCCION[vista]} />
       )}
     </div>
   );
@@ -99,47 +172,375 @@ function etiqueta(id: string): string {
   return VISTAS.find(([v]) => v === id)?.[1] ?? id;
 }
 
-// ── Vista: Áreas ────────────────────────────────────────────────────
-function VistaAreas({
-  objetivos,
-  tareas,
-  loading,
-}: {
-  objetivos: Objetivo[];
-  tareas: Tarea[];
-  loading: boolean;
-}) {
-  const activas = useMemo(
-    () => tareas.filter((t) => t.estado === "pendiente"),
-    [tareas],
+// ── Componentes chicos ──────────────────────────────────────────────
+function Medidor({ valor, critica }: { valor: number; critica: boolean }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="font-mono text-[12px] w-6 text-right">{valor}</span>
+      <div className="relative h-3 w-[120px] bg-[#EDEDEA]">
+        <div
+          className={`absolute inset-y-0 left-0 ${critica ? "bg-[#9F3E2E]" : "bg-[#0F0F0F]"}`}
+          style={{ width: `${Math.min(100, valor)}%` }}
+        />
+        {[20, 40, 70].map((g) => (
+          <div
+            key={g}
+            className="absolute -top-0.5 -bottom-0.5 w-px bg-[#B9B9B3]"
+            style={{ left: `${g}%` }}
+          />
+        ))}
+      </div>
+    </div>
   );
+}
+function ChipClasif({ c }: { c: Clasif }) {
+  const cls = c.critica
+    ? "bg-[#9F3E2E] text-white border-[#9F3E2E]"
+    : c.puntaje >= 70
+      ? "bg-[#0F0F0F] text-white border-[#0F0F0F]"
+      : "border-[#DEDEDA] text-[#8C8C86]";
+  return (
+    <span className={`inline-block text-[9px] tracking-[0.14em] uppercase px-2 py-0.5 border ${cls}`}>
+      {c.nombre}
+    </span>
+  );
+}
+function Barra({ p }: { p: number }) {
+  return (
+    <div className="h-1 bg-[#EDEDEA] mt-1.5 relative">
+      <div
+        className={`absolute inset-y-0 left-0 ${p < 40 ? "bg-[#9F3E2E]" : "bg-[#0F0F0F]"}`}
+        style={{ width: `${p}%` }}
+      />
+    </div>
+  );
+}
+function Kpi({ chico, num, nota }: { chico: string; num: React.ReactNode; nota?: React.ReactNode }) {
+  return (
+    <div className="bg-white px-4 py-3">
+      <div className="text-[9px] tracking-[0.16em] uppercase text-[#8C8C86] mb-1.5">
+        {chico}
+      </div>
+      <div className="text-[26px] font-light leading-none font-mono">{num}</div>
+      {nota && <div className="text-[11px] text-[#8C8C86] mt-1">{nota}</div>}
+    </div>
+  );
+}
+function Card({ titulo, extra, children }: { titulo: string; extra?: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <section className="border border-[#DEDEDA] bg-white">
+      <header className="flex flex-wrap items-baseline justify-between gap-3 px-4 py-3 border-b border-[#DEDEDA]">
+        <h2 className="text-[11px] tracking-[0.16em] uppercase font-medium">{titulo}</h2>
+        {extra && <span className="text-[11px] text-[#8C8C86]">{extra}</span>}
+      </header>
+      {children}
+    </section>
+  );
+}
+
+// ── Vista: Tablero ──────────────────────────────────────────────────
+function VistaTablero({
+  tareas,
+  objetivos,
+  espacios,
+  objMap,
+  nombreDe,
+}: {
+  tareas: Tarea[];
+  objetivos: Objetivo[];
+  espacios: Espacio[];
+  objMap: Map<string, Objetivo>;
+  nombreDe: (ids: string[]) => string;
+}) {
+  const activas = tareas.filter((t) => t.estado === "pendiente" && t.objetivoId);
+  const conClasif = activas
+    .map((t) => ({ t, c: clasifDe(t, objMap) }))
+    .sort((a, b) =>
+      ORDEN[a.c.nombre] !== ORDEN[b.c.nombre]
+        ? ORDEN[a.c.nombre] - ORDEN[b.c.nombre]
+        : b.c.puntaje - a.c.puntaje,
+    );
+  const criticas = conClasif.filter((x) => x.c.critica).length;
+  const estrategicas = conClasif.filter((x) => !x.c.critica && x.c.puntaje >= 70).length;
+  const avanceG = objetivos.length
+    ? Math.round(objetivos.reduce((s, o) => s + progreso(o), 0) / objetivos.length)
+    : 0;
+  const corto = objetivos.filter((o) => o.horizonte === "corto");
+  const avanceC = corto.length
+    ? Math.round(corto.reduce((s, o) => s + progreso(o), 0) / corto.length)
+    : 0;
+  const conNovedad = espacios.filter((e) => e.estado !== "operativo").length;
+  const sinClasif = tareas.filter((t) => !t.objetivoId && t.estado !== "descartado").length;
+  const vencidas = activas.filter((t) => {
+    const d = diasHasta(t.vence);
+    return d !== null && d < 0;
+  }).length;
 
   return (
-    <div className="space-y-6">
-      {loading && (
-        <p className="text-[13px] text-[#8C8C86] italic">Cargando datos…</p>
+    <div className="space-y-5">
+      {(sinClasif > 0 || vencidas > 0) && (
+        <div className="space-y-2">
+          {vencidas > 0 && (
+            <Aviso k="Vencidas" rojo>
+              {vencidas} tarea{vencidas === 1 ? "" : "s"} con fecha vencida. Reprogramar o cerrar.
+            </Aviso>
+          )}
+          {sinClasif > 0 && (
+            <Aviso k="Sin clasificar" rojo>
+              {sinClasif} tarea{sinClasif === 1 ? "" : "s"} sin objetivo — no entran al tablero hasta asignarles uno.
+            </Aviso>
+          )}
+        </div>
       )}
 
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-px bg-[#DEDEDA] border border-[#DEDEDA]">
+        <Kpi chico="Tareas activas" num={activas.length} />
+        <Kpi chico="Críticas" num={criticas} nota="excepción sobre el PCE" />
+        <Kpi chico="Estratégicas" num={estrategicas} nota="PCE ≥ 70" />
+        <Kpi chico="Avance global" num={`${avanceG}%`} nota={<Barra p={avanceG} />} />
+        <Kpi chico="Avance corto plazo" num={`${avanceC}%`} nota={<Barra p={avanceC} />} />
+        <Kpi chico="Espacios con novedad" num={conNovedad} nota={`de ${espacios.length}`} />
+      </div>
+
+      <Card titulo="Tareas activas" extra={`${activas.length} en total`}>
+        {conClasif.length === 0 ? (
+          <p className="px-4 py-8 text-center text-[13px] text-[#8C8C86] italic">
+            Ninguna tarea activa todavía. Los datos reales de Beatriz entran por
+            la vista Sincronizar.
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="text-[9px] tracking-[0.16em] uppercase text-[#8C8C86]">
+                  <th className="text-left font-medium px-4 py-2 border-b border-[#DEDEDA]">Tarea</th>
+                  <th className="text-left font-medium px-3 py-2 border-b border-[#DEDEDA]">Responsables</th>
+                  <th className="text-left font-medium px-3 py-2 border-b border-[#DEDEDA]">Vence</th>
+                  <th className="text-left font-medium px-3 py-2 border-b border-[#DEDEDA]">PCE</th>
+                  <th className="text-left font-medium px-3 py-2 border-b border-[#DEDEDA]">Clasificación</th>
+                </tr>
+              </thead>
+              <tbody>
+                {conClasif.map(({ t, c }) => {
+                  const d = diasHasta(t.vence);
+                  return (
+                    <tr key={t.id} className="border-b border-[#DEDEDA] last:border-0 align-top">
+                      <td className="px-4 py-3 max-w-[320px]">
+                        <div className="text-[13px]">{t.titulo}</div>
+                        <div className="font-mono text-[10px] text-[#B9B9B3] mt-1">
+                          {t.id} · {t.subEjeId} — {nombreSubEje(t.subEjeId)}
+                        </div>
+                      </td>
+                      <td className="px-3 py-3 text-[12px]">{nombreDe(t.responsables)}</td>
+                      <td className="px-3 py-3 font-mono text-[11px]" style={d !== null && d < 0 ? { color: "#9F3E2E" } : undefined}>
+                        {fmtFecha(t.vence)}
+                        {d !== null && (
+                          <div className="text-[10px] text-[#8C8C86]">
+                            {d < 0 ? `${Math.abs(d)} d vencida` : `${d} d`}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-3 py-3">
+                        <Medidor valor={c.puntaje} critica={c.critica} />
+                      </td>
+                      <td className="px-3 py-3"><ChipClasif c={c} /></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+function Aviso({ k, rojo, children }: { k: string; rojo?: boolean; children: React.ReactNode }) {
+  return (
+    <div className={`border bg-white px-4 py-3 flex gap-3 items-start ${rojo ? "border-[#DEDEDA] border-l-[3px] border-l-[#9F3E2E]" : "border-[#DEDEDA] border-l-[3px] border-l-[#0F0F0F]"}`}>
+      <span className={`text-[9px] tracking-[0.16em] uppercase pt-0.5 ${rojo ? "text-[#9F3E2E]" : "text-[#8C8C86]"} flex-none w-[92px]`}>{k}</span>
+      <span className="text-[13px]">{children}</span>
+    </div>
+  );
+}
+
+// ── Vista: Objetivos ────────────────────────────────────────────────
+function VistaObjetivos({ objetivos, tareas }: { objetivos: Objetivo[]; tareas: Tarea[] }) {
+  return (
+    <div className="space-y-6">
+      {AREAS.map((a) => {
+        const objs = objetivos.filter((o) => o.areaId === a.id);
+        const pr = objs.length
+          ? Math.round(objs.reduce((s, o) => s + progreso(o), 0) / objs.length)
+          : null;
+        return (
+          <Card
+            key={a.id}
+            titulo={`${a.id} · ${a.nombre}`}
+            extra={pr !== null ? `${pr}% de avance` : "sin objetivos cargados"}
+          >
+            {objs.length === 0 ? (
+              <p className="px-4 py-6 text-[13px] text-[#8C8C86] italic">
+                Todavía no hay objetivos cargados para esta área.
+              </p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="text-[9px] tracking-[0.16em] uppercase text-[#8C8C86]">
+                      <th className="text-left font-medium px-4 py-2 border-b border-[#DEDEDA]">Objetivo</th>
+                      <th className="text-left font-medium px-3 py-2 border-b border-[#DEDEDA]">Sub-eje</th>
+                      <th className="text-left font-medium px-3 py-2 border-b border-[#DEDEDA]">Horizonte</th>
+                      <th className="text-left font-medium px-3 py-2 border-b border-[#DEDEDA]">Tareas</th>
+                      <th className="text-left font-medium px-3 py-2 border-b border-[#DEDEDA] w-[150px]">Avance</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {objs.map((o) => {
+                      const p = progreso(o);
+                      const ts = tareas.filter((t) => t.objetivoId === o.id && t.estado === "pendiente").length;
+                      return (
+                        <tr key={o.id} className="border-b border-[#DEDEDA] last:border-0 align-top">
+                          <td className="px-4 py-3 max-w-[320px]">
+                            <div className="text-[13px]">{o.titulo}</div>
+                            <div className="text-[11px] text-[#8C8C86] mt-0.5">{o.indicador}</div>
+                            <div className="font-mono text-[10px] text-[#B9B9B3] mt-1">{o.id}</div>
+                          </td>
+                          <td className="px-3 py-3 font-mono text-[11px]">{o.subEjeId}</td>
+                          <td className="px-3 py-3">
+                            <span className="text-[9px] tracking-[0.14em] uppercase px-2 py-0.5 border border-[#DEDEDA] text-[#8C8C86]">{o.horizonte}</span>
+                          </td>
+                          <td className="px-3 py-3 font-mono text-[12px]">{ts}</td>
+                          <td className="px-3 py-3">
+                            <span className="font-mono text-[13px]">{p}%</span>
+                            <Barra p={p} />
+                            <div className="text-[10px] text-[#8C8C86] mt-1">{o.actual} / {o.meta} {o.unidad}</div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Card>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Vista: Casa ─────────────────────────────────────────────────────
+function estadoLabel(e: string): string {
+  return ESTADOS_ESPACIO.find((x) => x.value === e)?.label ?? e;
+}
+function VistaCasa({ espacios, tareas }: { espacios: Espacio[]; tareas: Tarea[] }) {
+  const activas = tareas.filter((t) => t.estado === "pendiente");
+  const conNovedad = espacios.filter((e) => e.estado !== "operativo").length;
+  const trabajosAbiertos = activas.filter((t) => t.espacioId).length;
+  const conTrabajos = espacios.filter(
+    (e) => activas.filter((t) => t.espacioId === e.id).length > 0,
+  ).length;
+  const plantas = espacios.reduce<string[]>((acc, e) => {
+    if (!acc.includes(e.planta)) acc.push(e.planta);
+    return acc;
+  }, []);
+
+  return (
+    <div className="space-y-5">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-[#DEDEDA] border border-[#DEDEDA]">
+        <Kpi chico="Espacios" num={espacios.length} />
+        <Kpi chico="Con novedad" num={conNovedad} nota="no operativos" />
+        <Kpi chico="Con trabajos" num={conTrabajos} />
+        <Kpi chico="Trabajos abiertos" num={trabajosAbiertos} />
+      </div>
+
+      <Card titulo="Inventario de la casa">
+        {espacios.length === 0 ? (
+          <p className="px-4 py-8 text-center text-[13px] text-[#8C8C86] italic">
+            Todavía no hay espacios cargados. Entran por la vista Sincronizar.
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="text-[9px] tracking-[0.16em] uppercase text-[#8C8C86]">
+                  <th className="text-left font-medium px-4 py-2 border-b border-[#DEDEDA]">Espacio</th>
+                  <th className="text-left font-medium px-3 py-2 border-b border-[#DEDEDA]">Uso</th>
+                  <th className="text-left font-medium px-3 py-2 border-b border-[#DEDEDA]">Estado</th>
+                  <th className="text-left font-medium px-3 py-2 border-b border-[#DEDEDA]">Trabajos abiertos</th>
+                </tr>
+              </thead>
+              <tbody>
+                {plantas.map((pl) => (
+                  <FragmentoPlanta
+                    key={pl}
+                    planta={pl}
+                    espacios={espacios.filter((e) => e.planta === pl)}
+                    activas={activas}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+function FragmentoPlanta({ planta, espacios, activas }: { planta: string; espacios: Espacio[]; activas: Tarea[] }) {
+  return (
+    <>
+      <tr>
+        <td colSpan={4} className="bg-[#F4F4F2] px-4 py-2 text-[9px] tracking-[0.2em] uppercase text-[#8C8C86]">
+          {planta}
+        </td>
+      </tr>
+      {espacios.map((e) => {
+        const ab = activas.filter((t) => t.espacioId === e.id).length;
+        const alerta = e.estado === "fuera" || e.estado === "intervención";
+        return (
+          <tr key={e.id} className="border-b border-[#DEDEDA] last:border-0 align-top">
+            <td className="px-4 py-3">
+              <div className="text-[13px]">{e.nombre}</div>
+              <div className="font-mono text-[10px] text-[#B9B9B3] mt-1">{e.id}</div>
+            </td>
+            <td className="px-3 py-3 text-[12px] text-[#8C8C86]">{e.tipo}</td>
+            <td className="px-3 py-3">
+              <span className={`text-[9px] tracking-[0.14em] uppercase px-2 py-0.5 border ${alerta ? "bg-[#9F3E2E] text-white border-[#9F3E2E]" : "border-[#DEDEDA] text-[#8C8C86]"}`}>
+                {estadoLabel(e.estado)}
+              </span>
+            </td>
+            <td className="px-3 py-3 font-mono text-[13px]">{ab}</td>
+          </tr>
+        );
+      })}
+    </>
+  );
+}
+
+// ── Vista: Áreas ────────────────────────────────────────────────────
+function VistaAreas({ objetivos, tareas }: { objetivos: Objetivo[]; tareas: Tarea[] }) {
+  const activas = tareas.filter((t) => t.estado === "pendiente");
+  return (
+    <div className="space-y-6">
       {AREAS.map((a) => {
         const objsArea = objetivos.filter((o) => o.areaId === a.id);
         const avance = objsArea.length
-          ? Math.round(
-              objsArea.reduce((s, o) => s + progreso(o), 0) / objsArea.length,
-            )
+          ? Math.round(objsArea.reduce((s, o) => s + progreso(o), 0) / objsArea.length)
           : null;
         return (
-          <section key={a.id} className="border border-[#DEDEDA] bg-white">
-            <header className="flex flex-wrap items-baseline justify-between gap-3 px-4 py-3 border-b border-[#DEDEDA]">
-              <h2 className="text-[11px] tracking-[0.16em] uppercase font-medium">
-                <span className="font-mono">{a.id}</span> · {a.nombre}
-              </h2>
-              <span className="text-[11px] text-[#8C8C86]">
+          <Card
+            key={a.id}
+            titulo={`${a.id} · ${a.nombre}`}
+            extra={
+              <>
                 Dueño: {a.dueno}
-                {avance !== null && (
-                  <span className="font-mono"> · {avance}% de avance</span>
-                )}
-              </span>
-            </header>
+                {avance !== null && <span className="font-mono"> · {avance}% de avance</span>}
+              </>
+            }
+          >
             <div className="divide-y divide-[#DEDEDA]">
               {a.subEjes.map((s) => {
                 const objsSub = objetivos.filter((o) => o.subEjeId === s.id);
@@ -150,62 +551,32 @@ function VistaAreas({
                       <span className="font-mono text-[12px]">{s.id}</span>
                       <span className="text-[13px] font-medium">{s.nombre}</span>
                       <span className="ml-auto text-[11px] text-[#8C8C86] font-mono">
-                        {objsSub.length} objetivo{objsSub.length === 1 ? "" : "s"}
-                        {" · "}
-                        {tareasSub.length} tarea{tareasSub.length === 1 ? "" : "s"} activa
-                        {tareasSub.length === 1 ? "" : "s"}
+                        {objsSub.length} objetivo{objsSub.length === 1 ? "" : "s"} · {tareasSub.length} tarea{tareasSub.length === 1 ? "" : "s"} activa{tareasSub.length === 1 ? "" : "s"}
                       </span>
                     </div>
-                    <p className="text-[12px] text-[#8C8C86] mt-1 leading-relaxed">
-                      {s.estrategia}
-                    </p>
+                    <p className="text-[12px] text-[#8C8C86] mt-1 leading-relaxed">{s.estrategia}</p>
                     {objsSub.length === 0 && (
-                      <p className="text-[11px] text-[#9F3E2E] mt-1 uppercase tracking-wider">
-                        Sin objetivos
-                      </p>
+                      <p className="text-[11px] text-[#9F3E2E] mt-1 uppercase tracking-wider">Sin objetivos</p>
                     )}
                   </div>
                 );
               })}
             </div>
-          </section>
+          </Card>
         );
       })}
 
-      {/* Reglas de excepción (texto fijo del sistema) */}
-      <section className="border border-[#DEDEDA] bg-white">
-        <header className="px-4 py-3 border-b border-[#DEDEDA]">
-          <h2 className="text-[11px] tracking-[0.16em] uppercase font-medium">
-            Reglas de excepción{" "}
-            <span className="text-[#8C8C86] normal-case tracking-normal font-normal">
-              — anulan el puntaje
-            </span>
-          </h2>
-        </header>
+      <Card titulo="Reglas de excepción" extra="anulan el puntaje">
         <div className="px-4 py-3 space-y-3 text-[12.5px]">
-          <Regla n="1 · Patrimonio">
-            Toda tarea de OPS-05 con riesgo estructural o de seguridad se marca
-            Crítica sin importar el puntaje. La casa es el activo; nada la
-            subordina.
-          </Regla>
-          <Regla n="2 · Compromiso adquirido">
-            Obligación contractual o fecha comprometida con un tercero se marca
-            Crítica.
-          </Regla>
-          <Regla n="3 · Concentración">
-            Si más del 60% de las tareas activas de una persona son de prioridad
-            alta, el sistema avisa. Con responsables múltiples, la tarea cuenta
-            para cada uno.
-          </Regla>
-          <Regla n="4 · Vacío">
-            Un área sin tareas activas, o un sub-eje sin objetivos, se señala.
-          </Regla>
+          <Regla n="1 · Patrimonio">Toda tarea de OPS-05 con riesgo estructural o de seguridad se marca Crítica sin importar el puntaje. La casa es el activo; nada la subordina.</Regla>
+          <Regla n="2 · Compromiso adquirido">Obligación contractual o fecha comprometida con un tercero se marca Crítica.</Regla>
+          <Regla n="3 · Concentración">Si más del 60% de las tareas activas de una persona son de prioridad alta, el sistema avisa. Con responsables múltiples, la tarea cuenta para cada uno.</Regla>
+          <Regla n="4 · Vacío">Un área sin tareas activas, o un sub-eje sin objetivos, se señala.</Regla>
         </div>
-      </section>
+      </Card>
     </div>
   );
 }
-
 function Regla({ n, children }: { n: string; children: React.ReactNode }) {
   return (
     <div className="border-l-2 border-[#0F0F0F] pl-3">
@@ -215,13 +586,11 @@ function Regla({ n, children }: { n: string; children: React.ReactNode }) {
   );
 }
 
-// ── Placeholder de vistas aún no portadas ───────────────────────────
+// ── Placeholder ─────────────────────────────────────────────────────
 function EnConstruccion({ titulo, nota }: { titulo: string; nota?: string }) {
   return (
     <div className="border border-[#DEDEDA] bg-white px-6 py-12 text-center">
-      <p className="text-[11px] tracking-[0.2em] uppercase text-[#8C8C86] mb-2">
-        {titulo}
-      </p>
+      <p className="text-[11px] tracking-[0.2em] uppercase text-[#8C8C86] mb-2">{titulo}</p>
       <p className="text-[15px] text-[#0F0F0F] mb-1">En construcción</p>
       {nota && <p className="text-[13px] text-[#8C8C86]">{nota}</p>}
     </div>
