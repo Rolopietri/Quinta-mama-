@@ -128,6 +128,8 @@ function Panel({ onSalir }: { onSalir: () => void }) {
   const [movs, setMovs] = useState<Movimiento[]>([]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [vista, setVista] = useState<"mes" | "historia">("mes");
+  const [cerrando, setCerrando] = useState(false);
 
   const [tick, setTick] = useState(0);
   const recargar = useCallback(() => setTick((t) => t + 1), []);
@@ -177,6 +179,20 @@ function Panel({ onSalir }: { onSalir: () => void }) {
     const d = await r.json();
     if (d.url) window.open(d.url, "_blank");
   }
+  async function cerrarMes() {
+    if (!confirm(`¿Guardar el cierre de ${fmtMes(mes)}? Congela el resumen del mes para la historia y las comparaciones. Puedes recalcularlo después si registras más movimientos.`)) return;
+    setCerrando(true);
+    try {
+      const r = await fetch("/api/admin/cierre", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mes }),
+      });
+      if (!r.ok) { const d = await r.json().catch(() => ({})); setError(d.error || "No se pudo cerrar el mes."); }
+    } finally {
+      setCerrando(false);
+    }
+  }
 
   // Últimos 24 meses para el selector
   const meses = useMemo(() => {
@@ -192,16 +208,38 @@ function Panel({ onSalir }: { onSalir: () => void }) {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <label className="font-display text-xs tracking-[0.3em] uppercase text-cacao-mute">Mes</label>
-          <select value={mes} onChange={(e) => setMes(e.target.value)} className="border border-marfil rounded-lg px-3 py-1.5 text-sm text-cacao capitalize">
-            {meses.map((m) => <option key={m} value={m}>{fmtMes(m)}</option>)}
-          </select>
+        <div className="flex gap-2">
+          {([["mes", "Movimientos"], ["historia", "Historia"]] as const).map(([v, l]) => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => setVista(v)}
+              className={`px-4 py-1.5 rounded-full text-xs uppercase tracking-widest ${vista === v ? "bg-cacao text-white" : "ring-1 ring-marfil text-cacao-soft hover:bg-marfil-soft"}`}
+            >
+              {l}
+            </button>
+          ))}
         </div>
         <button type="button" onClick={salir} className="text-[11px] uppercase tracking-widest text-cacao-soft hover:text-terracotta">Salir</button>
       </div>
 
       {error && <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419]">{error}</div>}
+
+      {vista === "historia" ? (
+        <Historia />
+      ) : (
+        <>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <label className="font-display text-xs tracking-[0.3em] uppercase text-cacao-mute">Mes</label>
+              <select value={mes} onChange={(e) => setMes(e.target.value)} className="border border-marfil rounded-lg px-3 py-1.5 text-sm text-cacao capitalize">
+                {meses.map((m) => <option key={m} value={m}>{fmtMes(m)}</option>)}
+              </select>
+            </div>
+            <button type="button" onClick={cerrarMes} disabled={cerrando} className="text-[11px] uppercase tracking-widest px-3 py-1.5 rounded-full ring-1 ring-marfil text-cacao-soft hover:bg-marfil-soft disabled:opacity-50">
+              {cerrando ? "Guardando…" : "✓ Cerrar mes"}
+            </button>
+          </div>
 
       {/* Tablero del mes */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-px bg-marfil ring-1 ring-marfil rounded-2xl overflow-hidden">
@@ -261,6 +299,92 @@ function Panel({ onSalir }: { onSalir: () => void }) {
           </ul>
         )}
       </section>
+        </>
+      )}
+    </div>
+  );
+}
+
+type Cierre = { mes: string; total_ingresos: number | string; total_gastos: number | string; resultado: number | string };
+
+function Historia() {
+  const [cierres, setCierres] = useState<Cierre[]>([]);
+  const [cargando, setCargando] = useState(true);
+
+  useEffect(() => {
+    let a = true;
+    (async () => {
+      try {
+        const r = await fetch("/api/admin/cierre");
+        const d = await r.json();
+        if (a) setCierres(d.cierres ?? []);
+      } finally {
+        if (a) setCargando(false);
+      }
+    })();
+    return () => { a = false; };
+  }, []);
+
+  const anios = useMemo(() => {
+    const g: Record<string, Cierre[]> = {};
+    for (const c of cierres) (g[c.mes.slice(0, 4)] ??= []).push(c);
+    return Object.entries(g).sort((x, y) => y[0].localeCompare(x[0]));
+  }, [cierres]);
+
+  if (cargando) return <p className="text-cacao-soft italic font-serif">Cargando…</p>;
+  if (cierres.length === 0)
+    return (
+      <div className="rounded-2xl bg-white ring-1 ring-marfil p-8 text-center text-cacao-soft italic font-serif">
+        Aún no has cerrado ningún mes. En la pestaña Movimientos, usa “✓ Cerrar mes” para guardar el resumen y empezar a comparar año contra año.
+      </div>
+    );
+
+  return (
+    <div className="space-y-6">
+      {anios.map(([anio, lista]) => {
+        const ordenados = [...lista].sort((x, y) => y.mes.localeCompare(x.mes));
+        const ti = ordenados.reduce((s, c) => s + Number(c.total_ingresos), 0);
+        const tg = ordenados.reduce((s, c) => s + Number(c.total_gastos), 0);
+        return (
+          <section key={anio} className="rounded-2xl bg-white ring-1 ring-marfil overflow-hidden">
+            <h2 className="font-display text-xs tracking-[0.3em] uppercase text-cacao-mute p-5 border-b border-marfil flex justify-between">
+              <span>{anio}</span>
+              <span className={`normal-case tracking-normal font-medium ${ti - tg < 0 ? "text-terracotta" : "text-cacao"}`}>Resultado {usd(ti - tg)}</span>
+            </h2>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-cacao-mute text-[10px] uppercase tracking-widest">
+                    <th className="text-left font-medium p-3">Mes</th>
+                    <th className="text-right font-medium p-3">Ingresos</th>
+                    <th className="text-right font-medium p-3">Gastos</th>
+                    <th className="text-right font-medium p-3">Resultado</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ordenados.map((c) => {
+                    const res = Number(c.resultado);
+                    return (
+                      <tr key={c.mes} className="border-t border-marfil">
+                        <td className="p-3 text-cacao capitalize">{fmtMes(c.mes)}</td>
+                        <td className="p-3 text-right text-cacao">{usd(Number(c.total_ingresos))}</td>
+                        <td className="p-3 text-right text-cacao">{usd(Number(c.total_gastos))}</td>
+                        <td className={`p-3 text-right font-medium ${res < 0 ? "text-terracotta" : "text-cacao"}`}>{usd(res)}</td>
+                      </tr>
+                    );
+                  })}
+                  <tr className="border-t border-marfil bg-marfil-soft">
+                    <td className="p-3 font-medium text-cacao">Total {anio}</td>
+                    <td className="p-3 text-right font-medium text-cacao">{usd(ti)}</td>
+                    <td className="p-3 text-right font-medium text-cacao">{usd(tg)}</td>
+                    <td className={`p-3 text-right font-medium ${ti - tg < 0 ? "text-terracotta" : "text-cacao"}`}>{usd(ti - tg)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        );
+      })}
     </div>
   );
 }
