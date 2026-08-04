@@ -60,6 +60,18 @@ export type Comentario = {
   texto: string;
 };
 
+export type Hito = {
+  id: string;
+  fecha: string;
+  subEjeId?: string;
+  tipo: string;
+  texto: string;
+  ref?: string;
+  espacioId?: string;
+  avance?: number;
+  avanceAnterior?: number;
+};
+
 export type Tarea = {
   id: string;
   titulo: string;

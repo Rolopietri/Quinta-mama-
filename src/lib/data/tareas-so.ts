@@ -13,6 +13,7 @@ import type {
   Objetivo,
   Espacio,
   Tarea,
+  Hito,
   Subtarea,
   Comentario,
   Impacto,
@@ -169,6 +170,25 @@ function agrupar<T extends Record<string, unknown>>(
     (out[k] ??= []).push(item);
   }
   return out;
+}
+
+export async function listHitos(): Promise<Hito[]> {
+  const sb = createSupabaseBrowserClient();
+  const { data, error } = await sb
+    .from("so_hito")
+    .select("*")
+    .order("fecha", { ascending: false })
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return (data as {
+    id: string; fecha: string; sub_eje_id: string | null; tipo: string;
+    texto: string; ref: string | null; espacio_id: string | null;
+    avance: number | null; avance_anterior: number | null;
+  }[]).map((r) => ({
+    id: r.id, fecha: r.fecha, subEjeId: r.sub_eje_id ?? undefined, tipo: r.tipo,
+    texto: r.texto, ref: r.ref ?? undefined, espacioId: r.espacio_id ?? undefined,
+    avance: r.avance ?? undefined, avanceAnterior: r.avance_anterior ?? undefined,
+  }));
 }
 
 // ── Escrituras ──────────────────────────────────────────────────────

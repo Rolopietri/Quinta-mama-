@@ -20,6 +20,7 @@ import {
   listTareas,
   listPersonas,
   listEspacios,
+  listHitos,
   crearTarea,
   setEstadoTarea,
   addSubtarea,
@@ -41,6 +42,7 @@ import type {
   Tarea,
   Persona,
   Espacio,
+  Hito,
   Impacto,
   Proximidad,
 } from "@/lib/tareas-so/types";
@@ -56,14 +58,6 @@ const VISTAS: [string, string][] = [
   ["sync", "Sincronizar"],
   ["config", "Ajustes"],
 ];
-
-const NOTA_CONSTRUCCION: Record<string, string> = {
-  nueva: "Crear tareas con el puntaje en vivo. Necesita la capa de escritura.",
-  notif: "Avisos a responsables por asignación y vencimiento.",
-  reportes: "Informe quincenal de operaciones.",
-  sync: "Entrada y salida de datos — acá se importan los datos reales.",
-  config: "Equipo, correos, pesos del PCE y umbrales.",
-};
 
 const ORDEN: Record<string, number> = {
   Crítica: 0,
@@ -110,17 +104,19 @@ export function SistemaOperativoClient() {
   const [error, setError] = useState<string | null>(null);
   const [detalle, setDetalle] = useState<{ tipo: "tarea" | "objetivo"; id: string } | null>(null);
   const [notifClaves, setNotifClaves] = useState<string[]>([]);
+  const [hitos, setHitos] = useState<Hito[]>([]);
 
   useEffect(() => {
     let vivo = true;
     (async () => {
       try {
-        const [o, t, p, e, n] = await Promise.all([
+        const [o, t, p, e, n, h] = await Promise.all([
           listObjetivos(),
           listTareas(),
           listPersonas(),
           listEspacios(),
           listNotificacionesClaves(),
+          listHitos(),
         ]);
         if (!vivo) return;
         setObjetivos(o);
@@ -128,6 +124,7 @@ export function SistemaOperativoClient() {
         setPersonas(p);
         setEspacios(e);
         setNotifClaves(n);
+        setHitos(h);
       } catch (err) {
         if (vivo)
           setError(err instanceof Error ? err.message : "Error cargando datos");
@@ -313,16 +310,20 @@ export function SistemaOperativoClient() {
             />
           )}
           {vista === "reportes" && (
-            <EnConstruccion titulo={etiqueta(vista)} nota={NOTA_CONSTRUCCION[vista]} />
+            <VistaReportes
+              tareas={tareas}
+              objetivos={objetivos}
+              personas={personas}
+              espacios={espacios}
+              hitos={hitos}
+              objMap={objMap}
+              nombreDe={nombreDe}
+            />
           )}
         </>
       )}
     </div>
   );
-}
-
-function etiqueta(id: string): string {
-  return VISTAS.find(([v]) => v === id)?.[1] ?? id;
 }
 
 // ── Componentes chicos ──────────────────────────────────────────────
@@ -1679,13 +1680,207 @@ function VistaNotificaciones({
   );
 }
 
-// ── Placeholder ─────────────────────────────────────────────────────
-function EnConstruccion({ titulo, nota }: { titulo: string; nota?: string }) {
+// ── Vista: Reportes (informe quincenal) ─────────────────────────────
+const REP_INICIO = "2026-07-30";
+const REP_DIAS = 15;
+function parseISO(d: string) { return new Date(d + "T12:00:00"); }
+function isoLocal(x: Date) { return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`; }
+function addDiasISO(d: string, n: number) { const x = parseISO(d); x.setDate(x.getDate() + n); return isoLocal(x); }
+function diffDiasISO(a: string, b: string) { return Math.round((parseISO(a).getTime() - parseISO(b).getTime()) / 86400000); }
+function enRango(f: string | undefined, i: string, ff: string) { return !!f && f >= i && f <= ff; }
+function periodoDe(n: number) { const i = addDiasISO(REP_INICIO, n * REP_DIAS); return { n, i, f: addDiasISO(i, REP_DIAS - 1) }; }
+function fmtLargo(d: string) { return parseISO(d).toLocaleDateString("es-VE", { day: "2-digit", month: "long", year: "numeric" }); }
+
+function VistaReportes({
+  tareas,
+  objetivos,
+  personas,
+  espacios,
+  hitos,
+  objMap,
+  nombreDe,
+}: {
+  tareas: Tarea[];
+  objetivos: Objetivo[];
+  personas: Persona[];
+  espacios: Espacio[];
+  hitos: Hito[];
+  objMap: Map<string, Objetivo>;
+  nombreDe: (ids: string[]) => string;
+}) {
+  const hoy = isoLocal(new Date());
+  const indiceActual = Math.max(0, Math.floor(diffDiasISO(hoy, REP_INICIO) / REP_DIAS));
+  const [periodoN, setPeriodoN] = useState(indiceActual);
+  const p = periodoDe(periodoN);
+
+  const nombrePorId = useMemo(() => new Map(personas.map((x) => [x.id, x.nombre])), [personas]);
+
+  const D = useMemo(() => {
+    const activas = tareas.filter((t) => t.estado === "pendiente");
+    const comp = tareas.filter((t) => t.estado === "completado" && enRango(t.cerrada, p.i, p.f));
+    const nuev = tareas.filter((t) => enRango(t.creada, p.i, p.f));
+    const venc = activas.filter((t) => t.vence && t.vence < p.f);
+    const crit = activas.filter((t) => clasifDe(t, objMap).critica);
+    const med = hitos.filter((h) => h.tipo === "medición" && enRango(h.fecha, p.i, p.f));
+    const areas = AREAS.map((a) => {
+      const objs = objetivos.filter((o) => o.areaId === a.id);
+      const pr = objs.length ? Math.round(objs.reduce((s, o) => s + progreso(o), 0) / objs.length) : 0;
+      const medA = med.filter((h) => h.ref && h.ref.startsWith(a.id));
+      const delta = medA.reduce((s, h) => s + ((h.avance ?? 0) - (h.avanceAnterior ?? 0)), 0);
+      return {
+        a, pr, delta,
+        comp: comp.filter((t) => t.subEjeId.split(".")[0] === a.id).length,
+        act: activas.filter((t) => t.subEjeId.split(".")[0] === a.id).length,
+      };
+    });
+    const carga: Record<string, { n: number; alta: number }> = {};
+    for (const t of activas) {
+      const alta = clasifDe(t, objMap);
+      for (const pid of t.responsables) {
+        const nom = nombrePorId.get(pid) ?? pid;
+        carga[nom] ??= { n: 0, alta: 0 };
+        carga[nom].n++;
+        if (alta.critica || alta.puntaje >= 70) carga[nom].alta++;
+      }
+    }
+    const casa = espacios.filter((e) => e.estado !== "operativo");
+    return { activas, comp, nuev, venc, crit, med, areas, carga, casa };
+  }, [tareas, objetivos, espacios, hitos, objMap, nombrePorId, p.i, p.f]);
+
+  function descargarInforme() {
+    const filas = (rows: string[][]) =>
+      rows.length
+        ? `<table><tbody>${rows.map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join("")}</tr>`).join("")}</tbody></table>`
+        : `<p class="v">Sin datos en el período.</p>`;
+    const esc2 = (s: string) => s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c] || c));
+    const html = `<!doctype html><meta charset="utf-8"><title>Reporte quincenal · Quinta Mamá</title>
+<style>body{font-family:Jost,system-ui,sans-serif;color:#0F0F0F;max-width:860px;margin:0 auto;padding:34px;font-size:12px;line-height:1.5}
+h1{font-size:22px;font-weight:400}h2{font-size:10px;letter-spacing:.2em;text-transform:uppercase;margin:28px 0 8px;border-bottom:1px solid #0F0F0F;padding-bottom:6px}
+.eb{font-size:9px;letter-spacing:.24em;text-transform:uppercase;color:#8C8C86}.sb{color:#8C8C86;margin-top:4px}
+table{width:100%;border-collapse:collapse;margin-top:4px}td{padding:6px 8px 6px 0;border-bottom:1px solid #DEDEDA;font-size:11.5px}
+.v{color:#8C8C86;font-size:11.5px}.al{color:#9F3E2E}</style>
+<div class="eb">Quinta Mamá · Operaciones</div><h1>Reporte quincenal</h1>
+<div class="sb">Período ${fmtLargo(p.i)} — ${fmtLargo(p.f)} · Emitido ${fmtLargo(hoy)}</div>
+<h2>Resumen del período</h2>${filas([["Completadas", String(D.comp.length)], ["Nuevas", String(D.nuev.length)], ["Activas al cierre", String(D.activas.length)], ["Vencidas", String(D.venc.length)], ["Críticas", String(D.crit.length)], ["Mediciones", String(D.med.length)]])}
+<h2>Avance por área</h2>${filas(D.areas.map((x) => [`${x.a.id} · ${esc2(x.a.nombre)}`, `${x.pr}%`, `${x.delta > 0 ? "+" : ""}${x.delta} pts`, `${x.comp} compl. · ${x.act} activas`]))}
+<h2>Carga por responsable</h2>${filas(Object.entries(D.carga).map(([q, c]) => [esc2(q), `${c.n} activas`, `${c.alta} de prioridad alta`, `${Math.round((c.alta / c.n) * 100)}%`]))}
+<h2>Movimiento de indicadores</h2>${D.med.length ? filas(D.med.map((h) => [h.fecha, esc2(h.ref ?? ""), esc2(h.texto), `${h.avanceAnterior ?? "?"}% → ${h.avance ?? "?"}%`])) : `<p class="v">No se registró ninguna medición en el período. Sin mediciones, el avance no cambió por resultado, sino por omisión.</p>`}
+<h2>Tareas completadas</h2>${filas(D.comp.map((t) => [esc2(t.titulo), t.subEjeId, nombreDe(t.responsables)]))}
+<h2>Atención al cierre</h2>${filas(D.crit.concat(D.venc.filter((t) => !D.crit.includes(t))).map((t) => [esc2(t.titulo), t.subEjeId, nombreDe(t.responsables), t.vence ? fmtFecha(t.vence) : "—"]))}
+<h2>Estado de la casa</h2>${filas(D.casa.map((e) => [esc2(e.nombre), e.planta, e.estado]))}`;
+    const url = URL.createObjectURL(new Blob([html], { type: "text/html;charset=utf-8" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `quinta-mama-reporte-${p.i}_${p.f}.html`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
-    <div className="border border-[#DEDEDA] bg-white px-6 py-12 text-center">
-      <p className="text-[11px] tracking-[0.2em] uppercase text-[#8C8C86] mb-2">{titulo}</p>
-      <p className="text-[15px] text-[#0F0F0F] mb-1">En construcción</p>
-      {nota && <p className="text-[13px] text-[#8C8C86]">{nota}</p>}
+    <div className="space-y-5">
+      <Card titulo="Ciclo quincenal" extra={`cada ${REP_DIAS} días desde el ${fmtFecha(REP_INICIO)}`}>
+        <div className="p-4 flex flex-wrap items-end gap-3">
+          <div>
+            <label className="block text-[9px] tracking-[0.16em] uppercase text-[#8C8C86] mb-1.5">Período</label>
+            <select value={periodoN} onChange={(e) => setPeriodoN(Number(e.target.value))} className="text-[13px] border border-[#DEDEDA] px-2.5 py-2 bg-white">
+              {Array.from({ length: indiceActual + 1 }, (_, i) => indiceActual - i).map((n) => {
+                const pp = periodoDe(n);
+                return <option key={n} value={n}>{fmtFecha(pp.i)} — {fmtFecha(pp.f)}{n === indiceActual ? " (en curso)" : ""}</option>;
+              })}
+            </select>
+          </div>
+          <button type="button" onClick={descargarInforme} className="text-[10px] tracking-[0.16em] uppercase px-5 py-2.5 bg-[#0F0F0F] text-white">Descargar informe</button>
+        </div>
+      </Card>
+
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-px bg-[#DEDEDA] border border-[#DEDEDA]">
+        <Kpi chico="Completadas" num={D.comp.length} />
+        <Kpi chico="Nuevas" num={D.nuev.length} />
+        <Kpi chico="Activas" num={D.activas.length} />
+        <Kpi chico="Vencidas" num={D.venc.length} />
+        <Kpi chico="Críticas" num={D.crit.length} />
+        <Kpi chico="Mediciones" num={D.med.length} />
+      </div>
+
+      <Card titulo="Avance por área" extra="variación en puntos del período">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="text-[9px] tracking-[0.16em] uppercase text-[#8C8C86]">
+                <th className="text-left font-medium px-4 py-2 border-b border-[#DEDEDA]">Área</th>
+                <th className="text-left font-medium px-3 py-2 border-b border-[#DEDEDA]">Avance</th>
+                <th className="text-left font-medium px-3 py-2 border-b border-[#DEDEDA]">Variación</th>
+                <th className="text-left font-medium px-3 py-2 border-b border-[#DEDEDA]">Compl. · Activas</th>
+              </tr>
+            </thead>
+            <tbody>
+              {D.areas.map((x) => (
+                <tr key={x.a.id} className="border-b border-[#DEDEDA] last:border-0">
+                  <td className="px-4 py-2.5 text-[12.5px]"><span className="font-mono">{x.a.id}</span> · {x.a.nombre}</td>
+                  <td className="px-3 py-2.5 font-mono text-[13px]">{x.pr}%</td>
+                  <td className="px-3 py-2.5 font-mono text-[12px]" style={x.delta < 0 ? { color: "#9F3E2E" } : undefined}>{x.delta > 0 ? "+" : ""}{x.delta} pts</td>
+                  <td className="px-3 py-2.5 font-mono text-[12px] text-[#8C8C86]">{x.comp} · {x.act}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+
+      <Card titulo="Carga por responsable" extra="% de prioridad alta">
+        {Object.keys(D.carga).length === 0 ? (
+          <p className="px-4 py-6 text-[13px] text-[#8C8C86] italic">No hay tareas activas asignadas.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <tbody>
+                {Object.entries(D.carga).map(([q, c]) => {
+                  const pc = Math.round((c.alta / c.n) * 100);
+                  return (
+                    <tr key={q} className="border-b border-[#DEDEDA] last:border-0">
+                      <td className="px-4 py-2.5 text-[13px]">{q}</td>
+                      <td className="px-3 py-2.5 font-mono text-[12px]">{c.n} activas</td>
+                      <td className="px-3 py-2.5 font-mono text-[12px]">{c.alta} altas</td>
+                      <td className="px-3 py-2.5 font-mono text-[12px]" style={pc > 60 ? { color: "#9F3E2E" } : undefined}>{pc}%</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+
+      <Card titulo="Movimiento de indicadores" extra={`${D.med.length} mediciones`}>
+        {D.med.length === 0 ? (
+          <p className="px-4 py-4 text-[12px] text-[#8C8C86]">No se registró ninguna medición en el período. <b>Sin mediciones, el avance no cambió por resultado, sino por omisión.</b></p>
+        ) : (
+          <ul className="divide-y divide-[#DEDEDA]">
+            {D.med.map((h) => (
+              <li key={h.id} className="px-4 py-2.5 text-[12.5px] flex justify-between gap-3">
+                <span><span className="font-mono text-[11px] text-[#8C8C86]">{fmtFecha(h.fecha)}</span> · {h.texto}</span>
+                <span className="font-mono text-[11px] whitespace-nowrap">{h.avanceAnterior ?? "?"}% → {h.avance ?? "?"}%</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+
+      <Card titulo="Atención al cierre" extra="críticas y vencidas">
+        {D.crit.concat(D.venc.filter((t) => !D.crit.includes(t))).length === 0 ? (
+          <p className="px-4 py-6 text-[13px] text-[#8C8C86] italic">Sin tareas críticas ni vencidas. El período cierra limpio.</p>
+        ) : (
+          <ul className="divide-y divide-[#DEDEDA]">
+            {D.crit.concat(D.venc.filter((t) => !D.crit.includes(t))).map((t) => (
+              <li key={t.id} className="px-4 py-2.5 text-[13px] flex justify-between gap-3">
+                <span>{t.titulo}<span className="font-mono text-[10px] text-[#B9B9B3]"> · {t.subEjeId}</span></span>
+                <span className="text-[11px] text-[#8C8C86] whitespace-nowrap">{nombreDe(t.responsables)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
     </div>
   );
 }
+
