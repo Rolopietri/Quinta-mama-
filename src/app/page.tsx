@@ -51,6 +51,13 @@ const cards: {
     title: "Cocina",
     desc: "Insumos, recetas, costos e inventario.",
   },
+  {
+    href: "/administracion",
+    index: "07",
+    eyebrow: "Finanzas · Privado",
+    title: "Administración",
+    desc: "Estados financieros: gastos, ingresos y resultado. Requiere contraseña.",
+  },
 ];
 
 export default function Home() {
