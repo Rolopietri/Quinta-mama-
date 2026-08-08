@@ -3,41 +3,19 @@
 // Administración financiera · cliente
 // La puerta con contraseña la maneja el servidor: este cliente solo pide la
 // clave, y todo lo financiero se lee/escribe por /api/admin/* (que exige el
-// token). Si no hay sesión, no se carga ningún número.
+// token). Menú desplegable con las secciones; se van construyendo por fases.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
-const CAT_GASTO = ["Proveedor puntual", "Servicios fijos", "Nómina", "Insumos", "Otros"];
-const CAT_INGRESO = ["Eventos", "Inquilinos", "Comedor", "Cafetín", "Otros"];
-const PERSONAS = ["Roló", "Lucía", "Inés", "Óscar", "Norberto"];
-
-type Movimiento = {
-  id: string;
-  tipo: "gasto" | "ingreso";
-  fecha: string;
-  mes: string;
-  monto_usd: number | string;
-  monto_original: number | string | null;
-  moneda_original: string | null;
-  categoria: string;
-  subcategoria: string | null;
-  proveedor: string | null;
-  pagado_por: string | null;
-  descripcion: string | null;
-  factura_path: string | null;
-};
-
-function mesActual(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-}
-function fmtMes(mes: string): string {
-  const d = new Date(mes + "-01T12:00:00");
-  return d.toLocaleDateString("es-VE", { month: "long", year: "numeric" });
-}
-function usd(n: number): string {
-  return `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
+type Seccion = "proveedores" | "solicitudes" | "ingresos" | "egresos" | "estado" | "historico";
+const SECCIONES: { id: Seccion; label: string; grupo?: string }[] = [
+  { id: "proveedores", label: "Proveedores", grupo: "Proveedores" },
+  { id: "solicitudes", label: "Generar solicitud de pagos", grupo: "Proveedores" },
+  { id: "ingresos", label: "Ingresos" },
+  { id: "egresos", label: "Egresos" },
+  { id: "estado", label: "Estado de Cuenta" },
+  { id: "historico", label: "Históricos y comparación" },
+];
 
 export function AdministracionClient() {
   const [estado, setEstado] = useState<"cargando" | "sin-config" | "bloqueado" | "abierto">("cargando");
@@ -124,322 +102,280 @@ function Puerta({ onEntrar }: { onEntrar: () => void }) {
 }
 
 function Panel({ onSalir }: { onSalir: () => void }) {
-  const [mes, setMes] = useState(mesActual());
-  const [movs, setMovs] = useState<Movimiento[]>([]);
-  const [cargando, setCargando] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [vista, setVista] = useState<"mes" | "historia">("mes");
-  const [cerrando, setCerrando] = useState(false);
-
-  const [tick, setTick] = useState(0);
-  const recargar = useCallback(() => setTick((t) => t + 1), []);
-
-  useEffect(() => {
-    let activo = true;
-    (async () => {
-      try {
-        const r = await fetch(`/api/admin/movimientos?mes=${mes}`);
-        if (!activo) return;
-        if (r.status === 401) { onSalir(); return; }
-        const d = await r.json();
-        if (activo) setMovs(d.movimientos ?? []);
-      } catch {
-        if (activo) setError("No se pudieron cargar los movimientos.");
-      } finally {
-        if (activo) setCargando(false);
-      }
-    })();
-    return () => { activo = false; };
-  }, [mes, tick, onSalir]);
-
-  const totales = useMemo(() => {
-    let ingresos = 0, gastos = 0;
-    const porCat: Record<string, number> = {};
-    for (const m of movs) {
-      const monto = Number(m.monto_usd) || 0;
-      if (m.tipo === "ingreso") ingresos += monto;
-      else gastos += monto;
-      const clave = `${m.tipo === "ingreso" ? "＋" : "−"} ${m.categoria}`;
-      porCat[clave] = (porCat[clave] ?? 0) + monto;
-    }
-    return { ingresos, gastos, resultado: ingresos - gastos, porCat };
-  }, [movs]);
+  const [seccion, setSeccion] = useState<Seccion>("proveedores");
+  const [menuAbierto, setMenuAbierto] = useState(false);
+  const actual = SECCIONES.find((s) => s.id === seccion)!;
 
   async function salir() {
     await fetch("/api/admin/logout", { method: "POST" }).catch(() => {});
     onSalir();
   }
-  async function borrar(id: string) {
-    if (!confirm("¿Borrar este movimiento?")) return;
-    await fetch(`/api/admin/movimientos?id=${id}`, { method: "DELETE" });
-    recargar();
-  }
-  async function verFactura(path: string) {
-    const r = await fetch(`/api/admin/factura?path=${encodeURIComponent(path)}`);
-    const d = await r.json();
-    if (d.url) window.open(d.url, "_blank");
-  }
-  async function cerrarMes() {
-    if (!confirm(`¿Guardar el cierre de ${fmtMes(mes)}? Congela el resumen del mes para la historia y las comparaciones. Puedes recalcularlo después si registras más movimientos.`)) return;
-    setCerrando(true);
-    try {
-      const r = await fetch("/api/admin/cierre", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mes }),
-      });
-      if (!r.ok) { const d = await r.json().catch(() => ({})); setError(d.error || "No se pudo cerrar el mes."); }
-    } finally {
-      setCerrando(false);
-    }
-  }
-
-  // Últimos 24 meses para el selector
-  const meses = useMemo(() => {
-    const out: string[] = [];
-    const d = new Date();
-    for (let i = 0; i < 24; i++) {
-      out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
-      d.setMonth(d.getMonth() - 1);
-    }
-    return out;
-  }, []);
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex gap-2">
-          {([["mes", "Movimientos"], ["historia", "Historia"]] as const).map(([v, l]) => (
+      {/* Barra superior con menú desplegable */}
+      <div className="flex items-center justify-between gap-3">
+        <h1 className="font-cinzel text-xl text-cacao">{actual.label}</h1>
+        <div className="flex items-center gap-2">
+          <div className="relative">
             <button
-              key={v}
               type="button"
-              onClick={() => setVista(v)}
-              className={`px-4 py-1.5 rounded-full text-xs uppercase tracking-widest ${vista === v ? "bg-cacao text-white" : "ring-1 ring-marfil text-cacao-soft hover:bg-marfil-soft"}`}
+              onClick={() => setMenuAbierto((v) => !v)}
+              className="flex items-center gap-2 rounded-lg ring-1 ring-marfil px-3 py-1.5 text-xs uppercase tracking-widest text-cacao hover:bg-marfil-soft"
             >
-              {l}
+              Menú
+              <span className={`transition-transform ${menuAbierto ? "rotate-180" : ""}`}>▾</span>
             </button>
-          ))}
+            {menuAbierto && (
+              <div className="absolute right-0 mt-1 w-64 rounded-xl bg-white ring-1 ring-marfil shadow-lg z-30 p-1.5">
+                <div className="flex justify-between items-center px-2 py-1">
+                  <span className="font-display text-[10px] tracking-[0.25em] uppercase text-cacao-mute">Secciones</span>
+                  <button type="button" onClick={() => setMenuAbierto(false)} className="text-cacao-soft hover:text-cacao text-sm">✕</button>
+                </div>
+                {SECCIONES.map((s, i) => {
+                  const primerDelGrupo = s.grupo && SECCIONES[i - 1]?.grupo !== s.grupo;
+                  return (
+                    <div key={s.id}>
+                      {primerDelGrupo && (
+                        <div className="px-2 pt-2 pb-0.5 font-display text-[9px] tracking-[0.2em] uppercase text-cacao-mute">{s.grupo}</div>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setSeccion(s.id)}
+                        className={`block w-full text-left rounded-lg px-2 py-2 text-sm ${seccion === s.id ? "bg-cacao text-white" : "text-cacao hover:bg-marfil-soft"} ${s.grupo ? "pl-4" : ""}`}
+                      >
+                        {s.label}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          <button type="button" onClick={salir} className="text-[11px] uppercase tracking-widest text-cacao-soft hover:text-terracotta">Salir</button>
         </div>
-        <button type="button" onClick={salir} className="text-[11px] uppercase tracking-widest text-cacao-soft hover:text-terracotta">Salir</button>
+      </div>
+
+      {seccion === "proveedores" ? (
+        <SeccionProveedores />
+      ) : (
+        <EnConstruccion seccion={actual.label} />
+      )}
+    </div>
+  );
+}
+
+function EnConstruccion({ seccion }: { seccion: string }) {
+  return (
+    <div className="rounded-2xl bg-white ring-1 ring-marfil p-10 text-center">
+      <p className="font-display text-[11px] tracking-[0.3em] uppercase text-cacao-mute mb-2">{seccion}</p>
+      <p className="text-cacao">En construcción</p>
+      <p className="text-sm text-cacao-soft mt-1 font-serif italic">Esta sección se construye en las siguientes fases.</p>
+    </div>
+  );
+}
+
+// ── Proveedores ─────────────────────────────────────────────────────
+type Proveedor = {
+  id: string;
+  nombre: string;
+  concepto: string | null;
+  cedula: string | null;
+  rif: string | null;
+  numero_cuenta: string | null;
+  banco: string | null;
+};
+const CAMPOS_FORM: { k: keyof Proveedor; label: string; req?: boolean; ph?: string }[] = [
+  { k: "nombre", label: "Nombre", req: true },
+  { k: "concepto", label: "Concepto (producto o servicio que ofrece)" },
+  { k: "cedula", label: "Cédula (opcional)" },
+  { k: "rif", label: "RIF (opcional)" },
+  { k: "numero_cuenta", label: "Número de cuenta" },
+  { k: "banco", label: "Nombre del banco" },
+];
+
+function SeccionProveedores() {
+  const [proveedores, setProveedores] = useState<Proveedor[]>([]);
+  const [cargando, setCargando] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [busqueda, setBusqueda] = useState("");
+  const [sel, setSel] = useState<string[]>([]);
+  const [modo, setModo] = useState<"lista" | "form">("lista");
+  const [editando, setEditando] = useState<Proveedor | null>(null);
+  const [confirmando, setConfirmando] = useState<Proveedor[] | null>(null);
+  const [tick, setTick] = useState(0);
+
+  const recargar = useCallback(() => setTick((t) => t + 1), []);
+
+  useEffect(() => {
+    let a = true;
+    (async () => {
+      try {
+        const r = await fetch("/api/admin/proveedores");
+        const d = await r.json();
+        if (a) setProveedores(d.proveedores ?? []);
+      } catch {
+        if (a) setError("No se pudieron cargar los proveedores.");
+      } finally {
+        if (a) setCargando(false);
+      }
+    })();
+    return () => { a = false; };
+  }, [tick]);
+
+  const filtrados = proveedores.filter((p) =>
+    p.nombre.toLowerCase().includes(busqueda.trim().toLowerCase()),
+  );
+
+  function toggle(id: string) {
+    setSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
+  }
+  function abrirEditar() {
+    setError(null);
+    if (sel.length !== 1) { setError("Selecciona un proveedor (uno) para editar."); return; }
+    const p = proveedores.find((x) => x.id === sel[0]) ?? null;
+    setEditando(p);
+    setModo("form");
+  }
+  function pedirEliminar() {
+    setError(null);
+    if (sel.length === 0) { setError("Selecciona al menos un proveedor para eliminar."); return; }
+    setConfirmando(proveedores.filter((p) => sel.includes(p.id)));
+  }
+  async function eliminar() {
+    if (!confirmando) return;
+    const ids = confirmando.map((p) => p.id);
+    try {
+      await fetch(`/api/admin/proveedores?ids=${ids.join(",")}`, { method: "DELETE" });
+      setMsg(`Eliminaste ${confirmando.length === 1 ? "a " + confirmando[0].nombre : confirmando.length + " proveedores"} de tu registro.`);
+      setSel([]);
+      setConfirmando(null);
+      recargar();
+    } catch {
+      setError("No se pudo eliminar.");
+    }
+  }
+
+  // Confirmación de borrado
+  if (confirmando) {
+    return (
+      <div className="rounded-2xl bg-white ring-1 ring-marfil p-6 max-w-lg">
+        <h2 className="font-display text-xs tracking-[0.3em] uppercase text-cacao-mute mb-3">Confirmar eliminación</h2>
+        <p className="text-cacao">
+          ¿Seguro que quieres eliminar {confirmando.length === 1 ? <><strong>{confirmando[0].nombre}</strong></> : <>estos <strong>{confirmando.length}</strong> proveedores</>} del registro?
+        </p>
+        {confirmando.length > 1 && (
+          <ul className="mt-2 text-sm text-cacao-soft list-disc pl-5">
+            {confirmando.map((p) => <li key={p.id}>{p.nombre}</li>)}
+          </ul>
+        )}
+        <div className="flex gap-2 mt-5">
+          <button type="button" onClick={eliminar} className="rounded-lg bg-terracotta text-white px-5 py-2 text-xs uppercase tracking-widest">Sí, eliminar</button>
+          <button type="button" onClick={() => { setConfirmando(null); setMsg("Ningún proveedor fue eliminado."); }} className="rounded-lg ring-1 ring-marfil text-cacao px-5 py-2 text-xs uppercase tracking-widest">No</button>
+        </div>
+      </div>
+    );
+  }
+
+  // Formulario agregar/editar
+  if (modo === "form") {
+    return (
+      <FormProveedor
+        inicial={editando}
+        onCancelar={() => { setModo("lista"); setEditando(null); }}
+        onGuardado={(nombre, esEdicion) => {
+          setModo("lista");
+          setEditando(null);
+          setSel([]);
+          setMsg(esEdicion ? "Información del proveedor actualizada correctamente." : `Proveedor "${nombre}" agregado correctamente.`);
+          recargar();
+        }}
+      />
+    );
+  }
+
+  // Lista
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap gap-2">
+        <button type="button" onClick={() => { setEditando(null); setModo("form"); setError(null); }} className="rounded-lg bg-cacao text-white px-4 py-2 text-xs uppercase tracking-widest hover:bg-terracotta">+ Agregar</button>
+        <button type="button" onClick={abrirEditar} className="rounded-lg ring-1 ring-marfil text-cacao px-4 py-2 text-xs uppercase tracking-widest hover:bg-marfil-soft">Editar</button>
+        <button type="button" onClick={pedirEliminar} className="rounded-lg ring-1 ring-marfil text-cacao-soft px-4 py-2 text-xs uppercase tracking-widest hover:text-terracotta hover:ring-terracotta">− Eliminar</button>
       </div>
 
       {error && <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419]">{error}</div>}
+      {msg && <div className="rounded-lg bg-[#F1F4ED] ring-1 ring-[#C9D6BC] p-3 text-sm text-[#2F4A1F]">{msg}</div>}
 
-      {vista === "historia" ? (
-        <Historia />
-      ) : (
-        <>
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <label className="font-display text-xs tracking-[0.3em] uppercase text-cacao-mute">Mes</label>
-              <select value={mes} onChange={(e) => setMes(e.target.value)} className="border border-marfil rounded-lg px-3 py-1.5 text-sm text-cacao capitalize">
-                {meses.map((m) => <option key={m} value={m}>{fmtMes(m)}</option>)}
-              </select>
-            </div>
-            <button type="button" onClick={cerrarMes} disabled={cerrando} className="text-[11px] uppercase tracking-widest px-3 py-1.5 rounded-full ring-1 ring-marfil text-cacao-soft hover:bg-marfil-soft disabled:opacity-50">
-              {cerrando ? "Guardando…" : "✓ Cerrar mes"}
-            </button>
-          </div>
-
-      {/* Tablero del mes */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-px bg-marfil ring-1 ring-marfil rounded-2xl overflow-hidden">
-        <div className="bg-white p-5">
-          <div className="font-display text-[10px] tracking-[0.25em] uppercase text-cacao-mute mb-1">Ingresos</div>
-          <div className="font-cinzel text-2xl text-cacao">{usd(totales.ingresos)}</div>
-        </div>
-        <div className="bg-white p-5">
-          <div className="font-display text-[10px] tracking-[0.25em] uppercase text-cacao-mute mb-1">Gastos</div>
-          <div className="font-cinzel text-2xl text-cacao">{usd(totales.gastos)}</div>
-        </div>
-        <div className="bg-white p-5">
-          <div className="font-display text-[10px] tracking-[0.25em] uppercase text-cacao-mute mb-1">Resultado</div>
-          <div className={`font-cinzel text-2xl ${totales.resultado < 0 ? "text-terracotta" : "text-cacao"}`}>{usd(totales.resultado)}</div>
-        </div>
+      <div className="relative">
+        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-cacao-mute">⌕</span>
+        <input value={busqueda} onChange={(e) => setBusqueda(e.target.value)} placeholder="Buscar proveedor por nombre…" className="w-full border border-marfil rounded-lg pl-9 pr-3 py-2 text-sm text-cacao" />
       </div>
 
-      <FormMovimiento mes={mes} onGuardado={recargar} />
-
-      {/* Lista de movimientos */}
       <section className="rounded-2xl bg-white ring-1 ring-marfil overflow-hidden">
-        <h2 className="font-display text-xs tracking-[0.3em] uppercase text-cacao-mute p-5 border-b border-marfil">
-          Movimientos de {fmtMes(mes)} <span className="text-cacao-soft normal-case tracking-normal">· {movs.length}</span>
-        </h2>
         {cargando ? (
           <p className="p-5 text-cacao-soft italic font-serif">Cargando…</p>
-        ) : movs.length === 0 ? (
-          <p className="p-8 text-center text-cacao-soft italic font-serif">Sin movimientos este mes. Registra el primero arriba.</p>
+        ) : filtrados.length === 0 ? (
+          <p className="p-8 text-center text-cacao-soft italic font-serif">
+            {proveedores.length === 0 ? "Aún no hay proveedores. Agrega el primero con “+ Agregar”." : "Ningún proveedor coincide con la búsqueda."}
+          </p>
         ) : (
           <ul className="divide-y divide-marfil">
-            {movs.map((m) => (
-              <li key={m.id} className="p-4 flex items-start gap-3">
-                <span className={`mt-1 inline-block w-2 h-2 rounded-full flex-none ${m.tipo === "ingreso" ? "bg-[#5C7A3F]" : "bg-terracotta"}`} />
+            {filtrados.map((p) => (
+              <li key={p.id} className="flex items-start gap-3 p-3.5">
+                <input type="checkbox" checked={sel.includes(p.id)} onChange={() => toggle(p.id)} className="mt-1 accent-[#0F0F0F]" />
                 <div className="flex-1 min-w-0">
-                  <div className="text-cacao text-sm">
-                    {m.categoria}{m.subcategoria ? ` · ${m.subcategoria}` : ""}
-                    {m.proveedor ? <span className="text-cacao-soft"> · {m.proveedor}</span> : null}
-                  </div>
-                  <div className="text-xs text-cacao-soft mt-0.5">
-                    {m.fecha}
-                    {m.pagado_por ? ` · pagó ${m.pagado_por}` : ""}
-                    {m.descripcion ? ` · ${m.descripcion}` : ""}
-                  </div>
-                  <div className="mt-1 flex gap-3">
-                    {m.factura_path && (
-                      <button type="button" onClick={() => verFactura(m.factura_path!)} className="text-[11px] uppercase tracking-widest text-cacao-soft hover:text-cacao">Ver factura</button>
-                    )}
-                    <button type="button" onClick={() => borrar(m.id)} className="text-[11px] uppercase tracking-widest text-cacao-soft hover:text-terracotta">Borrar</button>
-                  </div>
-                </div>
-                <div className={`text-right font-medium ${m.tipo === "ingreso" ? "text-cacao" : "text-terracotta"}`}>
-                  {m.tipo === "ingreso" ? "＋" : "−"}{usd(Number(m.monto_usd) || 0)}
-                  {m.monto_original ? <div className="text-[10px] text-cacao-mute font-normal">{Number(m.monto_original).toLocaleString("es-VE")} {m.moneda_original}</div> : null}
+                  <div className="text-cacao font-medium">{p.nombre}</div>
+                  {p.concepto && <div className="text-xs text-cacao-soft mt-0.5">{p.concepto}</div>}
+                  {(p.numero_cuenta || p.banco) && (
+                    <div className="text-[11px] text-cacao-mute mt-1">
+                      {p.banco ? p.banco : ""}{p.banco && p.numero_cuenta ? " · " : ""}{p.numero_cuenta ? p.numero_cuenta : ""}
+                    </div>
+                  )}
                 </div>
               </li>
             ))}
           </ul>
         )}
       </section>
-        </>
+      {!cargando && proveedores.length > 0 && (
+        <p className="text-xs text-cacao-mute">{proveedores.length} proveedor{proveedores.length === 1 ? "" : "es"} · {sel.length} seleccionado{sel.length === 1 ? "" : "s"}</p>
       )}
     </div>
   );
 }
 
-type Cierre = { mes: string; total_ingresos: number | string; total_gastos: number | string; resultado: number | string };
-
-function Historia() {
-  const [cierres, setCierres] = useState<Cierre[]>([]);
-  const [cargando, setCargando] = useState(true);
-
-  useEffect(() => {
-    let a = true;
-    (async () => {
-      try {
-        const r = await fetch("/api/admin/cierre");
-        const d = await r.json();
-        if (a) setCierres(d.cierres ?? []);
-      } finally {
-        if (a) setCargando(false);
-      }
-    })();
-    return () => { a = false; };
-  }, []);
-
-  const anios = useMemo(() => {
-    const g: Record<string, Cierre[]> = {};
-    for (const c of cierres) (g[c.mes.slice(0, 4)] ??= []).push(c);
-    return Object.entries(g).sort((x, y) => y[0].localeCompare(x[0]));
-  }, [cierres]);
-
-  if (cargando) return <p className="text-cacao-soft italic font-serif">Cargando…</p>;
-  if (cierres.length === 0)
-    return (
-      <div className="rounded-2xl bg-white ring-1 ring-marfil p-8 text-center text-cacao-soft italic font-serif">
-        Aún no has cerrado ningún mes. En la pestaña Movimientos, usa “✓ Cerrar mes” para guardar el resumen y empezar a comparar año contra año.
-      </div>
-    );
-
-  return (
-    <div className="space-y-6">
-      {anios.map(([anio, lista]) => {
-        const ordenados = [...lista].sort((x, y) => y.mes.localeCompare(x.mes));
-        const ti = ordenados.reduce((s, c) => s + Number(c.total_ingresos), 0);
-        const tg = ordenados.reduce((s, c) => s + Number(c.total_gastos), 0);
-        return (
-          <section key={anio} className="rounded-2xl bg-white ring-1 ring-marfil overflow-hidden">
-            <h2 className="font-display text-xs tracking-[0.3em] uppercase text-cacao-mute p-5 border-b border-marfil flex justify-between">
-              <span>{anio}</span>
-              <span className={`normal-case tracking-normal font-medium ${ti - tg < 0 ? "text-terracotta" : "text-cacao"}`}>Resultado {usd(ti - tg)}</span>
-            </h2>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-cacao-mute text-[10px] uppercase tracking-widest">
-                    <th className="text-left font-medium p-3">Mes</th>
-                    <th className="text-right font-medium p-3">Ingresos</th>
-                    <th className="text-right font-medium p-3">Gastos</th>
-                    <th className="text-right font-medium p-3">Resultado</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {ordenados.map((c) => {
-                    const res = Number(c.resultado);
-                    return (
-                      <tr key={c.mes} className="border-t border-marfil">
-                        <td className="p-3 text-cacao capitalize">{fmtMes(c.mes)}</td>
-                        <td className="p-3 text-right text-cacao">{usd(Number(c.total_ingresos))}</td>
-                        <td className="p-3 text-right text-cacao">{usd(Number(c.total_gastos))}</td>
-                        <td className={`p-3 text-right font-medium ${res < 0 ? "text-terracotta" : "text-cacao"}`}>{usd(res)}</td>
-                      </tr>
-                    );
-                  })}
-                  <tr className="border-t border-marfil bg-marfil-soft">
-                    <td className="p-3 font-medium text-cacao">Total {anio}</td>
-                    <td className="p-3 text-right font-medium text-cacao">{usd(ti)}</td>
-                    <td className="p-3 text-right font-medium text-cacao">{usd(tg)}</td>
-                    <td className={`p-3 text-right font-medium ${ti - tg < 0 ? "text-terracotta" : "text-cacao"}`}>{usd(ti - tg)}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </section>
-        );
-      })}
-    </div>
-  );
-}
-
-function FormMovimiento({ mes, onGuardado }: { mes: string; onGuardado: () => void }) {
-  const hoy = new Date().toISOString().slice(0, 10);
-  const [tipo, setTipo] = useState<"gasto" | "ingreso">("gasto");
-  const [fecha, setFecha] = useState(mes === mesActual() ? hoy : `${mes}-01`);
-  const [categoria, setCategoria] = useState(CAT_GASTO[0]);
-  const [subcategoria, setSubcategoria] = useState("");
-  const [proveedor, setProveedor] = useState("");
-  const [pagadoPor, setPagadoPor] = useState("");
-  const [monto, setMonto] = useState("");
-  const [montoOrig, setMontoOrig] = useState("");
-  const [monedaOrig, setMonedaOrig] = useState("Bs");
-  const [descripcion, setDescripcion] = useState("");
-  const [file, setFile] = useState<File | null>(null);
+function FormProveedor({
+  inicial,
+  onGuardado,
+  onCancelar,
+}: {
+  inicial: Proveedor | null;
+  onGuardado: (nombre: string, esEdicion: boolean) => void;
+  onCancelar: () => void;
+}) {
+  const [form, setForm] = useState<Record<string, string>>(() => {
+    const o: Record<string, string> = {};
+    for (const c of CAMPOS_FORM) o[c.k] = (inicial?.[c.k] as string) ?? "";
+    return o;
+  });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const cats = tipo === "gasto" ? CAT_GASTO : CAT_INGRESO;
-
-  function cambiarTipo(t: "gasto" | "ingreso") {
-    setTipo(t);
-    setCategoria((t === "gasto" ? CAT_GASTO : CAT_INGRESO)[0]);
-  }
+  const esEdicion = !!inicial;
 
   async function guardar() {
-    if (!monto || Number(monto) <= 0) { setError("Pon un monto en USD."); return; }
+    if (!form.nombre.trim()) { setError("El nombre es obligatorio."); return; }
     setBusy(true);
     setError(null);
     try {
-      let factura_path: string | null = null;
-      if (file) {
-        const fd = new FormData();
-        fd.append("file", file);
-        const fr = await fetch("/api/admin/factura", { method: "POST", body: fd });
-        const fd2 = await fr.json();
-        if (!fr.ok) throw new Error(fd2.error || "Error subiendo la factura");
-        factura_path = fd2.path;
-      }
-      const r = await fetch("/api/admin/movimientos", {
-        method: "POST",
+      const r = await fetch("/api/admin/proveedores", {
+        method: esEdicion ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          tipo, fecha, monto_usd: Number(monto),
-          monto_original: montoOrig || null, moneda_original: montoOrig ? monedaOrig : null,
-          categoria, subcategoria, proveedor: tipo === "gasto" ? proveedor : "",
-          pagado_por: tipo === "gasto" ? pagadoPor : "", descripcion, factura_path,
-        }),
+        body: JSON.stringify(esEdicion ? { id: inicial!.id, ...form } : form),
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || "Error guardando");
-      setMonto(""); setMontoOrig(""); setSubcategoria(""); setProveedor(""); setDescripcion(""); setFile(null);
-      onGuardado();
+      onGuardado(form.nombre.trim(), esEdicion);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error");
     } finally {
@@ -447,58 +383,28 @@ function FormMovimiento({ mes, onGuardado }: { mes: string; onGuardado: () => vo
     }
   }
 
-  const inp = "w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao";
-  const lbl = "block font-display text-[10px] tracking-[0.2em] uppercase text-cacao-mute mb-1";
-
   return (
-    <section className="rounded-2xl bg-white ring-1 ring-marfil p-5 space-y-4">
-      <div className="flex items-center gap-2">
-        <button type="button" onClick={() => cambiarTipo("gasto")} className={`px-4 py-1.5 rounded-full text-xs uppercase tracking-widest ${tipo === "gasto" ? "bg-terracotta text-white" : "ring-1 ring-marfil text-cacao-soft"}`}>Gasto</button>
-        <button type="button" onClick={() => cambiarTipo("ingreso")} className={`px-4 py-1.5 rounded-full text-xs uppercase tracking-widest ${tipo === "ingreso" ? "bg-cacao text-white" : "ring-1 ring-marfil text-cacao-soft"}`}>Ingreso</button>
-      </div>
-
+    <div className="rounded-2xl bg-white ring-1 ring-marfil p-5 max-w-lg space-y-4">
+      <h2 className="font-display text-xs tracking-[0.3em] uppercase text-cacao-mute">{esEdicion ? "Editar proveedor" : "Agregar proveedor"}</h2>
       {error && <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-2.5 text-sm text-[#7A2419]">{error}</div>}
-
-      <div className="grid sm:grid-cols-3 gap-3">
-        <div><label className={lbl}>Fecha</label><input type="date" className={inp} value={fecha} onChange={(e) => setFecha(e.target.value)} /></div>
-        <div><label className={lbl}>{tipo === "gasto" ? "Tipo de gasto" : "Fuente"}</label>
-          <select className={inp} value={categoria} onChange={(e) => setCategoria(e.target.value)}>
-            {cats.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
-        </div>
-        <div><label className={lbl}>Detalle {tipo === "gasto" ? "(servicio/producto)" : "(opcional)"}</label><input className={inp} value={subcategoria} onChange={(e) => setSubcategoria(e.target.value)} placeholder={tipo === "gasto" ? "Seguridad, Corpoelec…" : ""} /></div>
-      </div>
-
-      {tipo === "gasto" && (
-        <div className="grid sm:grid-cols-2 gap-3">
-          <div><label className={lbl}>Proveedor</label><input className={inp} value={proveedor} onChange={(e) => setProveedor(e.target.value)} /></div>
-          <div><label className={lbl}>¿Quién pagó?</label>
-            <select className={inp} value={pagadoPor} onChange={(e) => setPagadoPor(e.target.value)}>
-              <option value="">—</option>
-              {PERSONAS.map((p) => <option key={p} value={p}>{p}</option>)}
-            </select>
+      <div className="grid gap-3">
+        {CAMPOS_FORM.map((c) => (
+          <div key={c.k}>
+            <label className="block font-display text-[10px] tracking-[0.2em] uppercase text-cacao-mute mb-1">{c.label}{c.req ? " *" : ""}</label>
+            <input
+              value={form[c.k]}
+              onChange={(e) => setForm((f) => ({ ...f, [c.k]: e.target.value }))}
+              className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao"
+            />
           </div>
-        </div>
-      )}
-
-      <div className="grid sm:grid-cols-3 gap-3">
-        <div><label className={lbl}>Monto (USD)</label><input type="number" step="0.01" className={inp} value={monto} onChange={(e) => setMonto(e.target.value)} placeholder="0.00" /></div>
-        <div><label className={lbl}>Monto original (opcional)</label><input type="number" step="0.01" className={inp} value={montoOrig} onChange={(e) => setMontoOrig(e.target.value)} placeholder="en Bs" /></div>
-        <div><label className={lbl}>Moneda original</label>
-          <select className={inp} value={monedaOrig} onChange={(e) => setMonedaOrig(e.target.value)}>
-            <option value="Bs">Bs</option><option value="USD">USD</option><option value="EUR">EUR</option>
-          </select>
-        </div>
+        ))}
       </div>
-
-      <div><label className={lbl}>Descripción</label><input className={inp} value={descripcion} onChange={(e) => setDescripcion(e.target.value)} /></div>
-
-      <div className="grid sm:grid-cols-[1fr_auto] gap-3 items-end">
-        <div><label className={lbl}>Factura (PDF o foto, opcional)</label><input type="file" accept="application/pdf,image/*" onChange={(e) => setFile(e.target.files?.[0] ?? null)} className="text-sm text-cacao-soft" /></div>
-        <button type="button" onClick={guardar} disabled={busy} className="rounded-lg bg-cacao text-white px-6 py-2.5 text-xs uppercase tracking-widest hover:bg-terracotta disabled:bg-marfil disabled:text-cacao-mute">
-          {busy ? "Guardando…" : "Registrar"}
+      <div className="flex gap-2">
+        <button type="button" onClick={guardar} disabled={busy} className="rounded-lg bg-cacao text-white px-5 py-2.5 text-xs uppercase tracking-widest hover:bg-terracotta disabled:bg-marfil disabled:text-cacao-mute">
+          {busy ? "Guardando…" : "Guardar"}
         </button>
+        <button type="button" onClick={onCancelar} className="rounded-lg ring-1 ring-marfil text-cacao px-5 py-2.5 text-xs uppercase tracking-widest">Cancelar</button>
       </div>
-    </section>
+    </div>
   );
 }
