@@ -1489,17 +1489,17 @@ type Ingreso = {
 };
 
 function SeccionIngresos() {
-  const [vista, setVista] = useState<"ingresos" | "categorias">("ingresos");
+  const [vista, setVista] = useState<"ingresos" | "importar" | "categorias">("ingresos");
   return (
     <div className="space-y-4">
       <div className="flex gap-1 rounded-lg ring-1 ring-marfil p-1 w-fit">
-        {([["ingresos", "Ingresos"], ["categorias", "Categorías"]] as const).map(([k, label]) => (
+        {([["ingresos", "Ingresos"], ["importar", "Importar (Setux)"], ["categorias", "Categorías"]] as const).map(([k, label]) => (
           <button key={k} type="button" onClick={() => setVista(k)} className={`rounded-md px-3 py-1.5 text-xs uppercase tracking-widest ${vista === k ? "bg-cacao text-white" : "text-cacao hover:bg-marfil-soft"}`}>
             {label}
           </button>
         ))}
       </div>
-      {vista === "ingresos" ? <IngresosMes /> : <CategoriasIngresoCatalogo />}
+      {vista === "ingresos" ? <IngresosMes /> : vista === "importar" ? <ImportarSetux /> : <CategoriasIngresoCatalogo />}
     </div>
   );
 }
@@ -1958,5 +1958,200 @@ function DesgloseCaja({
         </div>
       )}
     </section>
+  );
+}
+
+// ── Importar ventas de Setux ────────────────────────────────────────
+// Beatriz sube el PDF diario de Setux; el servidor lo lee y muestra la vista
+// previa; ella pone la tasa €→USD y confirma → crea un ingreso por método.
+type LineaSetuxUI = { metodo: string; metodoBonito: string; cantidad: number | null; total: number; incluir: boolean };
+type ReporteSetuxUI = { fecha: string | null; desde: string | null; hasta: string | null; usuario: string | null; total: number | null };
+
+function ImportarSetux() {
+  const [cargando, setCargando] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [reporte, setReporte] = useState<ReporteSetuxUI | null>(null);
+  const [lineas, setLineas] = useState<LineaSetuxUI[]>([]);
+  const [fecha, setFecha] = useState("");
+  const [tasa, setTasa] = useState("");
+  const [categorias, setCategorias] = useState<CategoriaIngreso[]>([]);
+  const [categoriaId, setCategoriaId] = useState("");
+  const [guardando, setGuardando] = useState(false);
+  const [conflicto, setConflicto] = useState<number | null>(null);
+
+  useEffect(() => {
+    let a = true;
+    (async () => {
+      try {
+        const r = await fetch("/api/admin/categorias-ingreso");
+        const d = await r.json();
+        if (a) {
+          const cats: CategoriaIngreso[] = d.categorias ?? [];
+          setCategorias(cats);
+          const ventas = cats.find((c) => c.nombre.toLowerCase() === "ventas");
+          if (ventas) setCategoriaId(ventas.id);
+        }
+      } catch {
+        /* sin categorías igual se puede guardar */
+      }
+    })();
+    return () => { a = false; };
+  }, []);
+
+  function limpiar() {
+    setReporte(null);
+    setLineas([]);
+    setFecha("");
+    setConflicto(null);
+  }
+
+  async function subir(file: File) {
+    setError(null);
+    setMsg(null);
+    setConflicto(null);
+    setCargando(true);
+    try {
+      const b64 = await new Promise<string>((resolve, reject) => {
+        const fr = new FileReader();
+        fr.onload = () => resolve(String(fr.result));
+        fr.onerror = () => reject(new Error("no se pudo leer"));
+        fr.readAsDataURL(file);
+      });
+      const r = await fetch("/api/admin/importar-setux", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pdf_base64: b64 }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "No se pudo leer el PDF.");
+      const rep = d.reporte;
+      setReporte({ fecha: rep.fecha, desde: rep.desde, hasta: rep.hasta, usuario: rep.usuario, total: rep.total });
+      setFecha(rep.fecha ?? "");
+      setLineas((rep.lineas as Omit<LineaSetuxUI, "incluir">[]).map((l) => ({ ...l, incluir: true })));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error");
+      limpiar();
+    } finally {
+      setCargando(false);
+    }
+  }
+
+  const tasaNum = parseMonto(tasa);
+  const incluidas = lineas.filter((l) => l.incluir);
+  const totalEUR = incluidas.reduce((s, l) => s + l.total, 0);
+  const totalUSD = tasaNum ? totalEUR * tasaNum : null;
+
+  async function registrar(reemplazar: boolean) {
+    if (!fecha) { setError("Falta la fecha del reporte."); return; }
+    if (incluidas.length === 0) { setError("Marca al menos un método para registrar."); return; }
+    setGuardando(true);
+    setError(null);
+    try {
+      const cat = categorias.find((c) => c.id === categoriaId);
+      const r = await fetch("/api/admin/importar-setux", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fecha,
+          tasa: tasaNum,
+          categoria_id: categoriaId || null,
+          categoria_nombre: cat?.nombre ?? null,
+          reemplazar,
+          lineas: incluidas.map((l) => ({ metodo: l.metodoBonito, total: l.total, cantidad: l.cantidad })),
+        }),
+      });
+      const d = await r.json();
+      if (r.status === 409 && d.yaExiste) { setConflicto(d.cuantos ?? 0); setGuardando(false); return; }
+      if (!r.ok) throw new Error(d.error || "No se pudo registrar.");
+      setMsg(`Listo: ${d.creados} ingreso${d.creados === 1 ? "" : "s"} del ${fmtFecha(fecha)} guardado${d.creados === 1 ? "" : "s"}.`);
+      limpiar();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error");
+    } finally {
+      setGuardando(false);
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      {error && <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419]">{error}</div>}
+      {msg && <div className="rounded-lg bg-[#F1F4ED] ring-1 ring-[#C9D6BC] p-3 text-sm text-[#2F4A1F]">{msg}</div>}
+
+      {!reporte ? (
+        <div className="rounded-2xl bg-white ring-1 ring-marfil p-6 text-center">
+          <p className="font-display text-[11px] tracking-[0.3em] uppercase text-cacao-mute mb-1">Importar ventas del día</p>
+          <p className="text-sm text-cacao-soft mb-4 font-serif italic">Sube el PDF “Consolidado de ventas por formas de pago” de Setux.</p>
+          <label className="inline-block rounded-lg bg-cacao text-white px-5 py-2.5 text-xs uppercase tracking-widest hover:bg-terracotta cursor-pointer">
+            {cargando ? "Leyendo…" : "Elegir PDF"}
+            <input type="file" accept="application/pdf,.pdf" className="hidden" disabled={cargando} onChange={(e) => { const f = e.target.files?.[0]; if (f) subir(f); e.target.value = ""; }} />
+          </label>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <div className="rounded-2xl bg-white ring-1 ring-marfil p-4 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <span className="font-display text-[10px] tracking-[0.25em] uppercase text-cacao-mute">Vista previa</span>
+              <button type="button" onClick={limpiar} className="text-xs uppercase tracking-widest text-cacao-soft hover:text-cacao">Cambiar PDF</button>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <Campo label="Fecha del reporte"><input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" /></Campo>
+              <Campo label="Tasa €→USD">
+                <input inputMode="decimal" value={tasa} onChange={(e) => setTasa(e.target.value)} placeholder="ej. 1,08" className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
+              </Campo>
+              <Campo label="Categoría">
+                <select value={categoriaId} onChange={(e) => setCategoriaId(e.target.value)} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
+                  <option value="">Sin categoría</option>
+                  {categorias.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+                </select>
+              </Campo>
+            </div>
+            {reporte.usuario && <p className="text-[11px] text-cacao-mute">Usuario: {reporte.usuario}{reporte.desde && reporte.hasta && reporte.desde !== reporte.hasta ? ` · rango ${fmtFecha(reporte.desde)} → ${fmtFecha(reporte.hasta)}` : ""}</p>}
+          </div>
+
+          <section className="rounded-2xl bg-white ring-1 ring-marfil overflow-hidden">
+            <div className="px-4 py-2.5 font-display text-[10px] tracking-[0.25em] uppercase text-cacao-mute border-b border-marfil grid grid-cols-[auto_1fr_auto_auto] gap-3 items-center">
+              <span></span><span>Método</span><span className="text-right">Ventas</span><span className="text-right">Total</span>
+            </div>
+            <ul className="divide-y divide-marfil">
+              {lineas.map((l, i) => (
+                <li key={i} className={`px-4 py-2.5 grid grid-cols-[auto_1fr_auto_auto] gap-3 items-center ${l.incluir ? "" : "opacity-40"}`}>
+                  <input type="checkbox" checked={l.incluir} onChange={() => setLineas((ls) => ls.map((x, j) => (j === i ? { ...x, incluir: !x.incluir } : x)))} className="accent-[#0F0F0F]" />
+                  <span className="text-cacao text-sm">{l.metodoBonito}</span>
+                  <span className="text-cacao-mute text-sm text-right tabular-nums">{l.cantidad ?? "—"}</span>
+                  <span className="text-cacao text-sm text-right tabular-nums">{fmtMonto(l.total, "EUR")}</span>
+                </li>
+              ))}
+            </ul>
+            <div className="px-4 py-2.5 border-t border-marfil grid grid-cols-[auto_1fr_auto_auto] gap-3 items-center text-sm">
+              <span></span>
+              <span className="font-medium text-cacao">Total a registrar</span>
+              <span></span>
+              <span className="text-right font-medium text-cacao tabular-nums">
+                {fmtMonto(totalEUR, "EUR")}{totalUSD != null && <span className="block text-[11px] text-cacao-mute">≈ {fmtMonto(totalUSD, "USD")}</span>}
+              </span>
+            </div>
+          </section>
+
+          {reporte.total != null && Math.abs(reporte.total - lineas.reduce((s, l) => s + l.total, 0)) > 0.01 && (
+            <p className="text-[11px] text-cacao-mute">Nota: el total del PDF ({fmtMonto(reporte.total, "EUR")}) no coincide con la suma de las líneas leídas; revisa antes de guardar.</p>
+          )}
+
+          {conflicto != null ? (
+            <div className="rounded-xl bg-[#FBF3E2] ring-1 ring-[#E7D3A1] p-3 flex flex-wrap items-center justify-between gap-3">
+              <span className="text-sm text-[#7A5A18]">Ya importaste ventas de este día ({conflicto} ingreso{conflicto === 1 ? "" : "s"}). ¿Reemplazarlas?</span>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => registrar(true)} disabled={guardando} className="rounded-lg bg-terracotta text-white px-4 py-2 text-xs uppercase tracking-widest">Reemplazar</button>
+                <button type="button" onClick={() => setConflicto(null)} className="rounded-lg ring-1 ring-marfil text-cacao px-4 py-2 text-xs uppercase tracking-widest">Cancelar</button>
+              </div>
+            </div>
+          ) : (
+            <button type="button" onClick={() => registrar(false)} disabled={guardando} className="rounded-lg bg-cacao text-white px-5 py-2.5 text-xs uppercase tracking-widest hover:bg-terracotta disabled:bg-marfil disabled:text-cacao-mute">
+              {guardando ? "Registrando…" : `Registrar ${incluidas.length} ingreso${incluidas.length === 1 ? "" : "s"} del día`}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
