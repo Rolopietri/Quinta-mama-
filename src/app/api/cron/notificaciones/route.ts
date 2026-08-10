@@ -82,8 +82,11 @@ export async function GET(request: Request) {
   const errores: string[] = [];
 
   // Recordatorio de cuentas por cobrar: en los últimos 5 días del mes, si hay
-  // cuentas abiertas, avisa a los correos de ADMIN_ALERTA_EMAILS (coma-separados).
-  const alertaTo = (process.env.ADMIN_ALERTA_EMAILS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  // cuentas abiertas, avisa a los correos configurados. Se leen del panel
+  // (admin_config.alerta_correos) y, si no hay, de ADMIN_ALERTA_EMAILS.
+  const cfgR = await sb.from("admin_config").select("valor").eq("clave", "alerta_correos").maybeSingle();
+  const fuenteCorreos = (cfgR.data?.valor as string | undefined) || process.env.ADMIN_ALERTA_EMAILS || "";
+  const alertaTo = fuenteCorreos.split(",").map((s) => s.trim()).filter(Boolean);
   let cxcAviso = 0;
   if (alertaTo.length) {
     const [y, m, d] = hoy.split("-").map((x) => parseInt(x, 10));

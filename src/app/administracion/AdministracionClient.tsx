@@ -1890,15 +1890,29 @@ function SeccionEstado() {
     return () => { a = false; };
   }, [mes]);
 
-  const totalIngresos = ingresos.reduce((s, e) => s + (e.monto_usd ?? 0), 0);
-  const totalEgresos = egresos.reduce((s, e) => s + (e.monto_usd ?? 0), 0);
-  const balance = totalIngresos - totalEgresos;
-  const fijasUSD = egresos.filter((e) => e.clasificacion === "fija").reduce((s, e) => s + (e.monto_usd ?? 0), 0);
-  const variablesUSD = egresos.filter((e) => e.clasificacion === "variable").reduce((s, e) => s + (e.monto_usd ?? 0), 0);
-  const sinTasa = ingresos.some((e) => e.monto != null && e.monto_usd == null) || egresos.some((e) => e.monto != null && e.monto_usd == null);
+  // Totales por moneda (sin forzar conversión): Setux en €, alquileres en $, etc.
+  const sumaMoneda = (arr: (Ingreso | Egreso)[]) => {
+    const m: Record<string, number> = {};
+    for (const e of arr) { const k = e.moneda || "EUR"; m[k] = (m[k] ?? 0) + (e.monto ?? 0); }
+    return m;
+  };
+  const ingByMon = sumaMoneda(ingresos);
+  const egrByMon = sumaMoneda(egresos);
+  const ORDEN = ["EUR", "USD", "Bs"];
+  const conValor = (k: string) => (ingByMon[k] ?? 0) > 0.005 || (egrByMon[k] ?? 0) > 0.005;
+  const monedas = ORDEN.filter(conValor).concat(
+    [...new Set([...Object.keys(ingByMon), ...Object.keys(egrByMon)])].filter((k) => !ORDEN.includes(k) && conValor(k)),
+  );
 
-  const ingPorCat = agrupar(ingresos.map((e) => [e.categoria_nombre || "Sin categoría", e.monto_usd ?? 0]));
-  const egrPorCat = agrupar(egresos.map((e) => [e.categoria_nombre || "Sin categoría", e.monto_usd ?? 0]));
+  const catPorMoneda = (arr: (Ingreso | Egreso)[]): [string, Record<string, number>][] => {
+    const o: Record<string, Record<string, number>> = {};
+    for (const e of arr) {
+      const cat = e.categoria_nombre || "Sin categoría";
+      const k = e.moneda || "EUR";
+      (o[cat] ??= {})[k] = (o[cat][k] ?? 0) + (e.monto ?? 0);
+    }
+    return Object.entries(o);
+  };
 
   return (
     <div className="space-y-4">
@@ -1915,24 +1929,27 @@ function SeccionEstado() {
       ) : (
         <>
           <div className="grid gap-3 sm:grid-cols-3">
-            <ResumenCaja titulo="Ingresos" valor={fmtMonto(totalIngresos, "USD")} />
-            <ResumenCaja titulo="Egresos" valor={fmtMonto(totalEgresos, "USD")} />
-            <div className={`rounded-2xl ring-1 p-4 ${balance >= 0 ? "bg-[#0F0F0F] text-[#EDE7E0] ring-[#0F0F0F]" : "bg-[#F9EBE7] text-[#7A2419] ring-[#E8C5BC]"}`}>
-              <div className={`font-display text-[9px] tracking-[0.25em] uppercase ${balance >= 0 ? "text-[#9A938B]" : "text-[#B06B5C]"}`}>Balance del mes</div>
-              <div className="text-lg font-medium mt-1">{balance < 0 ? `− ${fmtMonto(Math.abs(balance), "USD")}` : fmtMonto(balance, "USD")}</div>
+            <CajaMonedas titulo="Ingresos" datos={ingByMon} monedas={monedas} />
+            <CajaMonedas titulo="Egresos" datos={egrByMon} monedas={monedas} />
+            <div className="rounded-2xl ring-1 p-4 bg-[#0F0F0F] text-[#EDE7E0] ring-[#0F0F0F]">
+              <div className="font-display text-[9px] tracking-[0.25em] uppercase text-[#9A938B]">Balance del mes</div>
+              <div className="mt-1 space-y-0.5">
+                {monedas.length === 0 ? (
+                  <div className="text-lg font-medium">—</div>
+                ) : (
+                  monedas.map((k) => {
+                    const bal = (ingByMon[k] ?? 0) - (egrByMon[k] ?? 0);
+                    return <div key={k} className={`text-lg font-medium leading-tight ${bal < 0 ? "text-[#E7A99B]" : ""}`}>{bal < 0 ? `− ${fmtMonto(Math.abs(bal), k)}` : fmtMonto(bal, k)}</div>;
+                  })
+                )}
+              </div>
+              {monedas.length > 1 && <div className="text-[10px] text-[#9A938B] mt-1.5">Balance por moneda (no se mezclan).</div>}
             </div>
           </div>
 
-          {sinTasa && <p className="text-[11px] text-cacao-mute">Hay montos sin tasa: no se suman al balance en USD hasta que les pongas la tasa.</p>}
-
           <div className="grid gap-4 sm:grid-cols-2">
-            <DesgloseCaja titulo="Ingresos por categoría" filas={ingPorCat} total={totalIngresos} />
-            <DesgloseCaja
-              titulo="Egresos por categoría"
-              filas={egrPorCat}
-              total={totalEgresos}
-              pie={[["Fijas", fijasUSD], ["Variables", variablesUSD]]}
-            />
+            <DesglosePorMoneda titulo="Ingresos por categoría" filas={catPorMoneda(ingresos)} orden={ORDEN} />
+            <DesglosePorMoneda titulo="Egresos por categoría" filas={catPorMoneda(egresos)} orden={ORDEN} />
           </div>
 
           {ingresos.length === 0 && egresos.length === 0 && (
@@ -1946,22 +1963,22 @@ function SeccionEstado() {
   );
 }
 
-function agrupar(pares: [string, number][]): [string, number][] {
-  const m = pares.reduce<Record<string, number>>((acc, [k, v]) => { acc[k] = (acc[k] ?? 0) + v; return acc; }, {});
-  return Object.entries(m).sort((a, b) => b[1] - a[1]);
+function CajaMonedas({ titulo, datos, monedas }: { titulo: string; datos: Record<string, number>; monedas: string[] }) {
+  return (
+    <div className="rounded-2xl bg-white ring-1 ring-marfil p-4">
+      <div className="font-display text-[9px] tracking-[0.25em] uppercase text-cacao-mute">{titulo}</div>
+      <div className="mt-1 space-y-0.5">
+        {monedas.length === 0 ? (
+          <div className="text-lg font-medium text-cacao">—</div>
+        ) : (
+          monedas.map((k) => <div key={k} className="text-lg font-medium text-cacao leading-tight">{fmtMonto(datos[k] ?? 0, k)}</div>)
+        )}
+      </div>
+    </div>
+  );
 }
 
-function DesgloseCaja({
-  titulo,
-  filas,
-  total,
-  pie,
-}: {
-  titulo: string;
-  filas: [string, number][];
-  total: number;
-  pie?: [string, number][];
-}) {
+function DesglosePorMoneda({ titulo, filas, orden }: { titulo: string; filas: [string, Record<string, number>][]; orden: string[] }) {
   return (
     <section className="rounded-2xl bg-white ring-1 ring-marfil overflow-hidden">
       <div className="px-4 py-2.5 font-display text-[10px] tracking-[0.25em] uppercase text-cacao-mute border-b border-marfil">{titulo}</div>
@@ -1969,23 +1986,15 @@ function DesgloseCaja({
         <p className="p-4 text-sm text-cacao-soft italic font-serif">Nada este mes.</p>
       ) : (
         <ul className="divide-y divide-marfil">
-          {filas.map(([nombre, val]) => (
+          {filas.map(([nombre, pm]) => (
             <li key={nombre} className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm">
               <span className="text-cacao-soft">{nombre}</span>
-              <span className="text-cacao whitespace-nowrap">
-                {fmtMonto(val, "USD")}
-                {total > 0 && <span className="text-cacao-mute ml-2">{Math.round((val / total) * 100)}%</span>}
+              <span className="text-cacao text-right whitespace-nowrap">
+                {orden.filter((k) => (pm[k] ?? 0) > 0.005).concat(Object.keys(pm).filter((k) => !orden.includes(k) && (pm[k] ?? 0) > 0.005)).map((k) => fmtMonto(pm[k], k)).join(" · ")}
               </span>
             </li>
           ))}
         </ul>
-      )}
-      {pie && filas.length > 0 && (
-        <div className="border-t border-marfil px-4 py-2.5 flex flex-wrap gap-x-4 gap-y-1">
-          {pie.map(([k, v]) => (
-            <span key={k} className="text-[11px] text-cacao-mute">{k}: <span className="text-cacao">{fmtMonto(v, "USD")}</span></span>
-          ))}
-        </div>
       )}
     </section>
   );
@@ -2274,6 +2283,8 @@ function SeccionCuentasCobrar() {
   const [devalInput, setDevalInput] = useState("");
   const [devalPct, setDevalPct] = useState<number | null>(null);
   const [guardandoDeval, setGuardandoDeval] = useState(false);
+  const [correosInput, setCorreosInput] = useState("");
+  const [guardandoCorreos, setGuardandoCorreos] = useState(false);
   const [tick, setTick] = useState(0);
   const recargar = useCallback(() => setTick((t) => t + 1), []);
 
@@ -2301,12 +2312,32 @@ function SeccionCuentasCobrar() {
         const d = await r.json();
         const v = d.config?.devaluacion_mensual;
         if (a && v != null && v !== "") { setDevalInput(String(v)); setDevalPct(Number(String(v).replace(",", "."))); }
+        if (a && d.config?.alerta_correos) setCorreosInput(String(d.config.alerta_correos));
       } catch {
         /* el ajuste es opcional */
       }
     })();
     return () => { a = false; };
   }, []);
+
+  async function guardarCorreos() {
+    setGuardandoCorreos(true);
+    setError(null);
+    try {
+      const limpio = correosInput.split(",").map((s) => s.trim()).filter(Boolean).join(", ");
+      await fetch("/api/admin/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clave: "alerta_correos", valor: limpio }),
+      });
+      setCorreosInput(limpio);
+      setMsg(limpio ? "Correos de alerta guardados." : "Se quitaron los correos de alerta.");
+    } catch {
+      setError("No se pudieron guardar los correos.");
+    } finally {
+      setGuardandoCorreos(false);
+    }
+  }
 
   async function guardarDeval() {
     setGuardandoDeval(true);
@@ -2406,6 +2437,16 @@ function SeccionCuentasCobrar() {
         </div>
         <button type="button" onClick={guardarDeval} disabled={guardandoDeval} className="rounded-lg bg-cacao text-white px-4 py-2 text-xs uppercase tracking-widest hover:bg-terracotta disabled:bg-marfil disabled:text-cacao-mute">{guardandoDeval ? "Guardando…" : "Guardar"}</button>
         <p className="text-[11px] text-cacao-mute flex-1 min-w-[12rem]">Cámbialo cuando cambie la realidad. Solo se usa aquí, para estimar cuánto pierdes por tardar en cobrar. Déjalo vacío para no usarlo.</p>
+      </div>
+
+      {/* Correos del recordatorio (5 días antes del cierre) */}
+      <div className="rounded-2xl bg-white ring-1 ring-marfil p-4 space-y-2">
+        <label className="block font-display text-[10px] tracking-[0.2em] uppercase text-cacao-mute">Correos para el recordatorio de cobros</label>
+        <div className="flex flex-wrap items-center gap-2">
+          <input value={correosInput} onChange={(e) => setCorreosInput(e.target.value)} placeholder="beatriz@…, lucia@…, tu@…" className="flex-1 min-w-[16rem] border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
+          <button type="button" onClick={guardarCorreos} disabled={guardandoCorreos} className="rounded-lg bg-cacao text-white px-4 py-2 text-xs uppercase tracking-widest hover:bg-terracotta disabled:bg-marfil disabled:text-cacao-mute">{guardandoCorreos ? "Guardando…" : "Guardar"}</button>
+        </div>
+        <p className="text-[11px] text-cacao-mute">Separados por coma. Reciben el aviso en los últimos 5 días del mes si hay cuentas por cobrar abiertas.</p>
       </div>
 
       {devalPct != null && devalPct > 0 && perdidaTotal > 0.005 && (
