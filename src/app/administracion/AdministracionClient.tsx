@@ -22,7 +22,7 @@ export function AdministracionClient() {
   const [estado, setEstado] = useState<"cargando" | "sin-config" | "bloqueado" | "abierto">("cargando");
 
   useEffect(() => {
-    fetch("/api/admin/session")
+    fetch("/api/admin/session", { cache: "no-store" })
       .then((r) => r.json())
       .then((d: { configurado: boolean; authed: boolean }) => {
         setEstado(!d.configurado ? "sin-config" : d.authed ? "abierto" : "bloqueado");
@@ -225,7 +225,7 @@ function SeccionProveedores() {
     let a = true;
     (async () => {
       try {
-        const r = await fetch("/api/admin/proveedores");
+        const r = await fetch("/api/admin/proveedores", { cache: "no-store" });
         const d = await r.json();
         if (a) setProveedores(d.proveedores ?? []);
       } catch {
@@ -559,7 +559,7 @@ function NuevaSolicitud() {
     let a = true;
     (async () => {
       try {
-        const r = await fetch("/api/admin/proveedores");
+        const r = await fetch("/api/admin/proveedores", { cache: "no-store" });
         const d = await r.json();
         if (a) setProveedores(d.proveedores ?? []);
       } catch {
@@ -815,7 +815,7 @@ function HistorialSolicitudes() {
     let a = true;
     (async () => {
       try {
-        const r = await fetch("/api/admin/solicitudes");
+        const r = await fetch("/api/admin/solicitudes", { cache: "no-store" });
         const d = await r.json();
         if (a) setSolicitudes(d.solicitudes ?? []);
       } catch {
@@ -830,7 +830,7 @@ function HistorialSolicitudes() {
   async function abrir(id: string) {
     setError(null);
     try {
-      const r = await fetch(`/api/admin/solicitudes?id=${id}`);
+      const r = await fetch(`/api/admin/solicitudes?id=${id}`, { cache: "no-store" });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error);
       setAbierta(d.solicitud);
@@ -998,7 +998,7 @@ function ConfirmarPago({
     let a = true;
     (async () => {
       try {
-        const r = await fetch("/api/admin/categorias");
+        const r = await fetch("/api/admin/categorias", { cache: "no-store" });
         const d = await r.json();
         if (a) setCategorias(d.categorias ?? []);
       } catch {
@@ -1147,9 +1147,9 @@ function EgresosMes() {
     (async () => {
       try {
         const [re, rc, rp] = await Promise.all([
-          fetch(`/api/admin/egresos?mes=${mes}`),
-          fetch("/api/admin/categorias"),
-          fetch("/api/admin/proveedores"),
+          fetch(`/api/admin/egresos?mes=${mes}`, { cache: "no-store" }),
+          fetch("/api/admin/categorias", { cache: "no-store" }),
+          fetch("/api/admin/proveedores", { cache: "no-store" }),
         ]);
         const [de, dc, dp] = await Promise.all([re.json(), rc.json(), rp.json()]);
         if (a) {
@@ -1394,7 +1394,7 @@ function CategoriasCatalogo() {
     let a = true;
     (async () => {
       try {
-        const r = await fetch("/api/admin/categorias");
+        const r = await fetch("/api/admin/categorias", { cache: "no-store" });
         const d = await r.json();
         if (a) setCategorias(d.categorias ?? []);
       } catch {
@@ -1527,8 +1527,8 @@ function IngresosMes() {
     (async () => {
       try {
         const [ri, rc] = await Promise.all([
-          fetch(`/api/admin/ingresos?mes=${mes}`),
-          fetch("/api/admin/categorias-ingreso"),
+          fetch(`/api/admin/ingresos?mes=${mes}`, { cache: "no-store" }),
+          fetch("/api/admin/categorias-ingreso", { cache: "no-store" }),
         ]);
         const [di, dc] = await Promise.all([ri.json(), rc.json()]);
         if (a) {
@@ -1544,12 +1544,14 @@ function IngresosMes() {
     return () => { a = false; };
   }, [mes, tick]);
 
+  // El panel de ingresos trabaja en euros (lo que da Setux y siempre tiene
+  // valor). El dólar es referencia y solo aparece si hay tasa.
+  const eurDe = (e: Ingreso) => (e.moneda === "EUR" ? e.monto ?? 0 : 0);
+  const totalEUR = ingresos.reduce((s, e) => s + eurDe(e), 0);
   const totalUSD = ingresos.reduce((s, e) => s + (e.monto_usd ?? 0), 0);
-  const totalEUR = ingresos.filter((e) => e.moneda === "EUR").reduce((s, e) => s + (e.monto ?? 0), 0);
-  const sinTasa = ingresos.some((e) => e.monto != null && e.monto_usd == null);
   const porCategoria = ingresos.reduce<Record<string, number>>((acc, e) => {
     const k = e.categoria_nombre || "Sin categoría";
-    acc[k] = (acc[k] ?? 0) + (e.monto_usd ?? 0);
+    acc[k] = (acc[k] ?? 0) + eurDe(e);
     return acc;
   }, {});
   const desglose = Object.entries(porCategoria).sort((a, b) => b[1] - a[1]);
@@ -1591,7 +1593,7 @@ function IngresosMes() {
       {msg && <div className="rounded-lg bg-[#F1F4ED] ring-1 ring-[#C9D6BC] p-3 text-sm text-[#2F4A1F]">{msg}</div>}
 
       <div className="grid gap-3 sm:grid-cols-3">
-        <ResumenCaja titulo="Total del mes" valor={fmtMonto(totalUSD, "USD")} sub={totalEUR > 0 ? `${fmtMonto(totalEUR, "EUR")} en Setux` : undefined} fuerte />
+        <ResumenCaja titulo="Total del mes" valor={fmtMonto(totalEUR, "EUR")} sub={totalUSD > 0 ? `≈ ${fmtMonto(totalUSD, "USD")}` : undefined} fuerte />
         <div className="sm:col-span-2 rounded-2xl bg-white ring-1 ring-marfil p-4">
           <div className="font-display text-[9px] tracking-[0.25em] uppercase text-cacao-mute mb-2">Por categoría</div>
           {desglose.length === 0 ? (
@@ -1601,14 +1603,13 @@ function IngresosMes() {
               {desglose.map(([nombre, val]) => (
                 <li key={nombre} className="flex justify-between text-sm">
                   <span className="text-cacao-soft">{nombre}</span>
-                  <span className="text-cacao">{fmtMonto(val, "USD")}</span>
+                  <span className="text-cacao">{fmtMonto(val, "EUR")}</span>
                 </li>
               ))}
             </ul>
           )}
         </div>
       </div>
-      {sinTasa && <p className="text-[11px] text-cacao-mute">Hay ingresos sin tasa: no se suman al total en USD hasta que les pongas la tasa.</p>}
 
       <section className="rounded-2xl bg-white ring-1 ring-marfil overflow-hidden">
         {cargando ? (
@@ -1765,7 +1766,7 @@ function CategoriasIngresoCatalogo() {
     let a = true;
     (async () => {
       try {
-        const r = await fetch("/api/admin/categorias-ingreso");
+        const r = await fetch("/api/admin/categorias-ingreso", { cache: "no-store" });
         const d = await r.json();
         if (a) setCategorias(d.categorias ?? []);
       } catch {
@@ -1850,8 +1851,8 @@ function SeccionEstado() {
     (async () => {
       try {
         const [ri, re] = await Promise.all([
-          fetch(`/api/admin/ingresos?mes=${mes}`),
-          fetch(`/api/admin/egresos?mes=${mes}`),
+          fetch(`/api/admin/ingresos?mes=${mes}`, { cache: "no-store" }),
+          fetch(`/api/admin/egresos?mes=${mes}`, { cache: "no-store" }),
         ]);
         const [di, de] = await Promise.all([ri.json(), re.json()]);
         if (a) {
@@ -1991,7 +1992,7 @@ function ImportarSetux() {
     let a = true;
     (async () => {
       try {
-        const r = await fetch("/api/admin/categorias-ingreso");
+        const r = await fetch("/api/admin/categorias-ingreso", { cache: "no-store" });
         const d = await r.json();
         if (a) {
           const cats: CategoriaIngreso[] = d.categorias ?? [];
@@ -2208,7 +2209,7 @@ function AlertaCobrar({ refreshKey, onIr }: { refreshKey: string; onIr: () => vo
     let a = true;
     (async () => {
       try {
-        const r = await fetch("/api/admin/cuentas-cobrar?abiertas=1");
+        const r = await fetch("/api/admin/cuentas-cobrar?abiertas=1", { cache: "no-store" });
         const d = await r.json();
         if (a) setAbiertas(d.cuentas ?? []);
       } catch {
@@ -2258,7 +2259,7 @@ function SeccionCuentasCobrar() {
     let a = true;
     (async () => {
       try {
-        const r = await fetch("/api/admin/cuentas-cobrar");
+        const r = await fetch("/api/admin/cuentas-cobrar", { cache: "no-store" });
         const d = await r.json();
         if (a) setCuentas(d.cuentas ?? []);
       } catch {
@@ -2274,7 +2275,7 @@ function SeccionCuentasCobrar() {
     let a = true;
     (async () => {
       try {
-        const r = await fetch("/api/admin/config");
+        const r = await fetch("/api/admin/config", { cache: "no-store" });
         const d = await r.json();
         const v = d.config?.devaluacion_mensual;
         if (a && v != null && v !== "") { setDevalInput(String(v)); setDevalPct(Number(String(v).replace(",", "."))); }
