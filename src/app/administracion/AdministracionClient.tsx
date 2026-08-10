@@ -171,6 +171,8 @@ function Panel({ onSalir }: { onSalir: () => void }) {
         <SeccionIngresos />
       ) : seccion === "estado" ? (
         <SeccionEstado />
+      ) : seccion === "historico" ? (
+        <SeccionHistorico />
       ) : (
         <EnConstruccion seccion={actual.label} />
       )}
@@ -2514,6 +2516,220 @@ function SeccionCuentasCobrar() {
           </ul>
         )}
       </section>
+    </div>
+  );
+}
+
+// ── Históricos, comparación e indicadores ───────────────────────────
+type MesHist = { mes: string; ingresos: Record<string, number>; egresos: Record<string, number> };
+
+function mesCorto(iso: string): string {
+  const [y, m] = iso.split("-").map((x) => parseInt(x, 10));
+  const meses = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+  return `${meses[m - 1] ?? ""} ${String(y).slice(2)}`;
+}
+function pctCambio(cur: number, prev: number): number | null {
+  if (prev === 0) return null;
+  return ((cur - prev) / Math.abs(prev)) * 100;
+}
+
+function SeccionHistorico() {
+  const [meses, setMeses] = useState<MesHist[]>([]);
+  const [monedas, setMonedas] = useState<string[]>([]);
+  const [moneda, setMoneda] = useState<string>("");
+  const [obs, setObs] = useState<Record<string, string>>({});
+  const [obsMes, setObsMes] = useState<string>("");
+  const [obsTexto, setObsTexto] = useState("");
+  const [guardandoObs, setGuardandoObs] = useState(false);
+  const [cargando, setCargando] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    let a = true;
+    (async () => {
+      try {
+        const [rh, rc] = await Promise.all([
+          fetch("/api/admin/historico", { cache: "no-store" }),
+          fetch("/api/admin/config", { cache: "no-store" }),
+        ]);
+        const [dh, dc] = await Promise.all([rh.json(), rc.json()]);
+        if (!a) return;
+        const ms: MesHist[] = dh.meses ?? [];
+        const mons: string[] = dh.monedas ?? [];
+        setMeses(ms);
+        setMonedas(mons);
+        setMoneda(mons[0] ?? "EUR");
+        const observaciones: Record<string, string> = {};
+        for (const [k, v] of Object.entries((dc.config ?? {}) as Record<string, string>)) {
+          if (k.startsWith("obs_") && v) observaciones[k.slice(4)] = v;
+        }
+        setObs(observaciones);
+        const ultimo = ms.length ? ms[ms.length - 1].mes : mesActualISO();
+        setObsMes(ultimo);
+        setObsTexto(observaciones[ultimo] ?? "");
+      } catch {
+        if (a) setError("No se pudo cargar el histórico.");
+      } finally {
+        if (a) setCargando(false);
+      }
+    })();
+    return () => { a = false; };
+  }, []);
+
+  async function guardarObs() {
+    setGuardandoObs(true);
+    setError(null);
+    try {
+      await fetch("/api/admin/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clave: `obs_${obsMes}`, valor: obsTexto }),
+      });
+      setObs((o) => ({ ...o, [obsMes]: obsTexto }));
+      setMsg("Observación guardada.");
+    } catch {
+      setError("No se pudo guardar la observación.");
+    } finally {
+      setGuardandoObs(false);
+    }
+  }
+
+  if (cargando) return <p className="rounded-2xl bg-white ring-1 ring-marfil p-5 text-cacao-soft italic font-serif">Cargando…</p>;
+
+  const serie = meses.slice(-12).map((m) => {
+    const ing = m.ingresos[moneda] ?? 0;
+    const egr = m.egresos[moneda] ?? 0;
+    return { mes: m.mes, ing, egr, bal: ing - egr };
+  });
+  const conMovim = serie.filter((s) => s.ing !== 0 || s.egr !== 0);
+  const max = Math.max(...serie.flatMap((s) => [s.ing, s.egr]), 1);
+  const promIng = conMovim.length ? conMovim.reduce((s, x) => s + x.ing, 0) / conMovim.length : 0;
+  const promBal = conMovim.length ? conMovim.reduce((s, x) => s + x.bal, 0) / conMovim.length : 0;
+  const mejor = conMovim.length ? conMovim.reduce((a, b) => (b.bal > a.bal ? b : a)) : null;
+  const peor = conMovim.length ? conMovim.reduce((a, b) => (b.bal < a.bal ? b : a)) : null;
+  const ult = serie.length ? serie[serie.length - 1] : null;
+  const pen = serie.length > 1 ? serie[serie.length - 2] : null;
+
+  return (
+    <div className="space-y-4">
+      {error && <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419]">{error}</div>}
+      {msg && <div className="rounded-lg bg-[#F1F4ED] ring-1 ring-[#C9D6BC] p-3 text-sm text-[#2F4A1F]">{msg}</div>}
+
+      {/* Selector de moneda */}
+      {monedas.length > 1 && (
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] uppercase tracking-widest text-cacao-mute">Moneda:</span>
+          <div className="flex gap-1 rounded-lg ring-1 ring-marfil p-1">
+            {monedas.map((m) => (
+              <button key={m} type="button" onClick={() => setMoneda(m)} className={`rounded-md px-3 py-1 text-xs uppercase tracking-widest ${moneda === m ? "bg-cacao text-white" : "text-cacao hover:bg-marfil-soft"}`}>{m}</button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {conMovim.length === 0 ? (
+        <p className="rounded-2xl bg-white ring-1 ring-marfil p-8 text-center text-cacao-soft italic font-serif">Aún no hay suficientes datos en {moneda} para el histórico. Registra ingresos y egresos y aquí verás la evolución.</p>
+      ) : (
+        <>
+          {/* Indicadores */}
+          <div className="grid gap-3 sm:grid-cols-4">
+            <ResumenCaja titulo="Promedio ingresos" valor={fmtMonto(promIng, moneda)} fuerte />
+            <ResumenCaja titulo="Promedio balance" valor={fmtMonto(promBal, moneda)} />
+            <ResumenCaja titulo="Mejor mes" valor={mejor ? fmtMonto(mejor.bal, moneda) : "—"} sub={mejor ? nombreMes(mejor.mes) : undefined} />
+            <ResumenCaja titulo="Peor mes" valor={peor ? fmtMonto(peor.bal, moneda) : "—"} sub={peor ? nombreMes(peor.mes) : undefined} />
+          </div>
+
+          {/* Comparación último vs anterior */}
+          {ult && pen && (
+            <div className="rounded-2xl bg-white ring-1 ring-marfil p-4">
+              <div className="font-display text-[9px] tracking-[0.25em] uppercase text-cacao-mute mb-2">{nombreMes(pen.mes)} → {nombreMes(ult.mes)}</div>
+              <div className="grid grid-cols-3 gap-3">
+                <Comparacion titulo="Ingresos" cur={ult.ing} prev={pen.ing} moneda={moneda} />
+                <Comparacion titulo="Egresos" cur={ult.egr} prev={pen.egr} moneda={moneda} invertir />
+                <Comparacion titulo="Balance" cur={ult.bal} prev={pen.bal} moneda={moneda} />
+              </div>
+            </div>
+          )}
+
+          {/* Gráfico de barras */}
+          <div className="rounded-2xl bg-white ring-1 ring-marfil p-4">
+            <div className="flex items-center gap-4 mb-3 text-[11px] text-cacao-mute">
+              <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-[#0F0F0F]" />Ingresos</span>
+              <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-[#C0563F]" />Egresos</span>
+            </div>
+            <div className="flex gap-3 overflow-x-auto pb-1">
+              {serie.map((s) => (
+                <div key={s.mes} className="flex flex-col items-center gap-1 flex-1 min-w-[2.75rem]">
+                  <div className="flex items-end justify-center gap-1 h-40 w-full">
+                    <div className="w-3.5 bg-[#0F0F0F] rounded-t" style={{ height: `${Math.max((s.ing / max) * 100, s.ing > 0 ? 2 : 0)}%` }} title={`Ingresos: ${fmtMonto(s.ing, moneda)}`} />
+                    <div className="w-3.5 bg-[#C0563F] rounded-t" style={{ height: `${Math.max((s.egr / max) * 100, s.egr > 0 ? 2 : 0)}%` }} title={`Egresos: ${fmtMonto(s.egr, moneda)}`} />
+                  </div>
+                  <span className="text-[10px] text-cacao-mute whitespace-nowrap">{mesCorto(s.mes)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Tabla */}
+          <section className="rounded-2xl bg-white ring-1 ring-marfil overflow-hidden">
+            <div className="grid grid-cols-4 gap-2 px-4 py-2.5 font-display text-[9px] tracking-[0.2em] uppercase text-cacao-mute border-b border-marfil">
+              <span>Mes</span><span className="text-right">Ingresos</span><span className="text-right">Egresos</span><span className="text-right">Balance</span>
+            </div>
+            <ul className="divide-y divide-marfil">
+              {[...serie].reverse().map((s) => (
+                <li key={s.mes} className="grid grid-cols-4 gap-2 px-4 py-2.5 text-sm">
+                  <span className="text-cacao">{nombreMes(s.mes)}</span>
+                  <span className="text-right text-cacao tabular-nums">{fmtMonto(s.ing, moneda)}</span>
+                  <span className="text-right text-cacao-soft tabular-nums">{fmtMonto(s.egr, moneda)}</span>
+                  <span className={`text-right tabular-nums ${s.bal < 0 ? "text-terracotta" : "text-cacao"}`}>{s.bal < 0 ? `− ${fmtMonto(Math.abs(s.bal), moneda)}` : fmtMonto(s.bal, moneda)}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        </>
+      )}
+
+      {/* Observaciones del mes */}
+      <div className="rounded-2xl bg-white ring-1 ring-marfil p-4 space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <label className="font-display text-[10px] tracking-[0.2em] uppercase text-cacao-mute">Observación del mes</label>
+          <select
+            value={obsMes}
+            onChange={(e) => { setObsMes(e.target.value); setObsTexto(obs[e.target.value] ?? ""); }}
+            className="border border-marfil rounded-lg px-2 py-1.5 text-sm text-cacao bg-white"
+          >
+            {(meses.length ? meses.map((m) => m.mes) : [mesActualISO()]).slice().reverse().map((m) => (
+              <option key={m} value={m}>{nombreMes(m)}</option>
+            ))}
+          </select>
+        </div>
+        <textarea
+          value={obsTexto}
+          onChange={(e) => setObsTexto(e.target.value)}
+          rows={3}
+          placeholder="Notas del mes: qué pasó, por qué subió/bajó, cosas a recordar…"
+          className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao"
+        />
+        <button type="button" onClick={guardarObs} disabled={guardandoObs} className="rounded-lg bg-cacao text-white px-4 py-2 text-xs uppercase tracking-widest hover:bg-terracotta disabled:bg-marfil disabled:text-cacao-mute">{guardandoObs ? "Guardando…" : "Guardar observación"}</button>
+      </div>
+    </div>
+  );
+}
+
+function Comparacion({ titulo, cur, prev, moneda, invertir }: { titulo: string; cur: number; prev: number; moneda: string; invertir?: boolean }) {
+  const p = pctCambio(cur, prev);
+  const subio = cur > prev;
+  // Para egresos, subir es "malo" (invertir el color).
+  const bueno = invertir ? !subio : subio;
+  const color = cur === prev ? "text-cacao-mute" : bueno ? "text-[#2F4A1F]" : "text-terracotta";
+  return (
+    <div>
+      <div className="font-display text-[9px] tracking-[0.2em] uppercase text-cacao-mute">{titulo}</div>
+      <div className="text-cacao font-medium mt-0.5">{cur < 0 ? `− ${fmtMonto(Math.abs(cur), moneda)}` : fmtMonto(cur, moneda)}</div>
+      <div className={`text-[11px] ${color}`}>
+        {p == null ? "—" : `${subio ? "↑" : cur < prev ? "↓" : ""} ${Math.abs(p).toFixed(0)}%`}
+      </div>
     </div>
   );
 }
