@@ -160,6 +160,8 @@ function Panel({ onSalir }: { onSalir: () => void }) {
         <SeccionProveedores />
       ) : seccion === "solicitudes" ? (
         <SeccionSolicitudes />
+      ) : seccion === "egresos" ? (
+        <SeccionEgresos />
       ) : (
         <EnConstruccion seccion={actual.label} />
       )}
@@ -872,6 +874,12 @@ function HistorialSolicitudes() {
             </div>
           </div>
           {error && <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419]">{error}</div>}
+          {abierta.estado === "pendiente" && (
+            <ConfirmarPago
+              solicitud={abierta}
+              onListo={() => { setAbierta((s) => (s ? { ...s, estado: "procesada" } : s)); recargar(); }}
+            />
+          )}
           <ul className="divide-y divide-marfil">
             {provs.map((l, i) => (
               <li key={l.id} className="py-3">
@@ -940,4 +948,520 @@ function fmtFecha(iso: string): string {
   if (!y || !m || !d) return iso ?? "";
   const meses = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
   return `${d} ${meses[m - 1] ?? ""} ${y}`;
+}
+
+// ── Categorías y egresos (tipos compartidos) ────────────────────────
+type Categoria = { id: string; nombre: string; clasificacion: "fija" | "variable" };
+type Egreso = {
+  id: string;
+  fecha: string;
+  concepto: string | null;
+  categoria_id: string | null;
+  categoria_nombre: string | null;
+  clasificacion: "fija" | "variable" | null;
+  proveedor_id: string | null;
+  proveedor_nombre: string | null;
+  monto: number | null;
+  moneda: string | null;
+  tasa: number | null;
+  monto_usd: number | null;
+  metodo: string | null;
+  factura: string | null;
+  nota: string | null;
+  solicitud_linea_id: string | null;
+};
+
+// Confirmar pago de una solicitud pendiente → registrar egresos y marcar procesada.
+function ConfirmarPago({
+  solicitud,
+  onListo,
+}: {
+  solicitud: SolicitudCab & { lineas: LineaGuardada[] };
+  onListo: () => void;
+}) {
+  const [categorias, setCategorias] = useState<Categoria[]>([]);
+  const [asig, setAsig] = useState<Record<string, string>>({}); // linea.id → categoria_id
+  const [abierto, setAbierto] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let a = true;
+    (async () => {
+      try {
+        const r = await fetch("/api/admin/categorias");
+        const d = await r.json();
+        if (a) setCategorias(d.categorias ?? []);
+      } catch {
+        /* sin catálogo igual se puede registrar sin categoría */
+      }
+    })();
+    return () => { a = false; };
+  }, []);
+
+  async function confirmar() {
+    setBusy(true);
+    setError(null);
+    try {
+      const egresos = solicitud.lineas.map((l) => {
+        const cat = categorias.find((c) => c.id === asig[l.id]);
+        return {
+          fecha: solicitud.fecha,
+          concepto: l.concepto ?? (l.tipo === "proveedor" ? l.proveedor_nombre : null),
+          categoria_id: cat?.id ?? null,
+          categoria_nombre: cat?.nombre ?? null,
+          clasificacion: cat?.clasificacion ?? null,
+          proveedor_id: l.proveedor_id,
+          proveedor_nombre: l.proveedor_nombre,
+          monto: l.monto,
+          moneda: l.moneda,
+          tasa: l.tasa,
+          metodo: l.metodo,
+          factura: l.factura,
+          nota: l.nota,
+          solicitud_linea_id: l.id,
+        };
+      });
+      const r = await fetch("/api/admin/egresos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ egresos }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "No se pudieron registrar los egresos.");
+      await fetch("/api/admin/solicitudes", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: solicitud.id, estado: "procesada" }),
+      });
+      onListo();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!abierto) {
+    return (
+      <div className="rounded-xl bg-marfil-soft ring-1 ring-marfil p-3 flex items-center justify-between gap-3">
+        <span className="text-sm text-cacao-soft">¿Ya se pagó? Registra los egresos de esta solicitud.</span>
+        <button type="button" onClick={() => setAbierto(true)} className="rounded-lg bg-cacao text-white px-4 py-2 text-xs uppercase tracking-widest hover:bg-terracotta shrink-0">Confirmar pago</button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl bg-marfil-soft ring-1 ring-marfil p-4 space-y-3">
+      <p className="font-display text-[10px] tracking-[0.25em] uppercase text-cacao-mute">Confirmar pago · asigna categoría a cada renglón</p>
+      {error && <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-2.5 text-sm text-[#7A2419]">{error}</div>}
+      <ul className="space-y-2">
+        {solicitud.lineas.map((l) => (
+          <li key={l.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white ring-1 ring-marfil px-3 py-2">
+            <div className="min-w-0">
+              <div className="text-sm text-cacao truncate">{l.proveedor_nombre || l.concepto || "(renglón)"}</div>
+              <div className="text-[11px] text-cacao-mute">{l.monto != null ? fmtMonto(l.monto, l.moneda || "Bs") : "—"}</div>
+            </div>
+            <select
+              value={asig[l.id] ?? ""}
+              onChange={(e) => setAsig((a) => ({ ...a, [l.id]: e.target.value }))}
+              className="border border-marfil rounded-lg px-2 py-1.5 text-sm text-cacao bg-white"
+            >
+              <option value="">Sin categoría</option>
+              <optgroup label="Fijas">
+                {categorias.filter((c) => c.clasificacion === "fija").map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+              </optgroup>
+              <optgroup label="Variables">
+                {categorias.filter((c) => c.clasificacion === "variable").map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+              </optgroup>
+            </select>
+          </li>
+        ))}
+      </ul>
+      <div className="flex gap-2">
+        <button type="button" onClick={confirmar} disabled={busy} className="rounded-lg bg-cacao text-white px-4 py-2 text-xs uppercase tracking-widest hover:bg-terracotta disabled:bg-marfil disabled:text-cacao-mute">
+          {busy ? "Registrando…" : `Registrar ${solicitud.lineas.length} egreso${solicitud.lineas.length === 1 ? "" : "s"}`}
+        </button>
+        <button type="button" onClick={() => setAbierto(false)} className="rounded-lg ring-1 ring-marfil text-cacao px-4 py-2 text-xs uppercase tracking-widest">Cancelar</button>
+      </div>
+    </div>
+  );
+}
+
+// ── Egresos ─────────────────────────────────────────────────────────
+function mesActualISO(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+function nombreMes(iso: string): string {
+  const [y, m] = iso.split("-").map((x) => parseInt(x, 10));
+  const meses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+  return `${meses[m - 1] ?? ""} ${y}`;
+}
+function moverMes(iso: string, delta: number): string {
+  const [y, m] = iso.split("-").map((x) => parseInt(x, 10));
+  const d = new Date(Date.UTC(y, m - 1 + delta, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+function SeccionEgresos() {
+  const [vista, setVista] = useState<"egresos" | "categorias">("egresos");
+  return (
+    <div className="space-y-4">
+      <div className="flex gap-1 rounded-lg ring-1 ring-marfil p-1 w-fit">
+        {([["egresos", "Egresos"], ["categorias", "Categorías"]] as const).map(([k, label]) => (
+          <button key={k} type="button" onClick={() => setVista(k)} className={`rounded-md px-3 py-1.5 text-xs uppercase tracking-widest ${vista === k ? "bg-cacao text-white" : "text-cacao hover:bg-marfil-soft"}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+      {vista === "egresos" ? <EgresosMes /> : <CategoriasCatalogo />}
+    </div>
+  );
+}
+
+function EgresosMes() {
+  const [mes, setMes] = useState<string>(mesActualISO());
+  const [egresos, setEgresos] = useState<Egreso[]>([]);
+  const [categorias, setCategorias] = useState<Categoria[]>([]);
+  const [proveedores, setProveedores] = useState<Proveedor[]>([]);
+  const [cargando, setCargando] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [modo, setModo] = useState<"lista" | "form">("lista");
+  const [editando, setEditando] = useState<Egreso | null>(null);
+  const [tick, setTick] = useState(0);
+  const recargar = useCallback(() => setTick((t) => t + 1), []);
+
+  useEffect(() => {
+    let a = true;
+    (async () => {
+      try {
+        const [re, rc, rp] = await Promise.all([
+          fetch(`/api/admin/egresos?mes=${mes}`),
+          fetch("/api/admin/categorias"),
+          fetch("/api/admin/proveedores"),
+        ]);
+        const [de, dc, dp] = await Promise.all([re.json(), rc.json(), rp.json()]);
+        if (a) {
+          setEgresos(de.egresos ?? []);
+          setCategorias(dc.categorias ?? []);
+          setProveedores(dp.proveedores ?? []);
+        }
+      } catch {
+        if (a) setError("No se pudieron cargar los egresos.");
+      } finally {
+        if (a) setCargando(false);
+      }
+    })();
+    return () => { a = false; };
+  }, [mes, tick]);
+
+  const totalUSD = egresos.reduce((s, e) => s + (e.monto_usd ?? 0), 0);
+  const fijasUSD = egresos.filter((e) => e.clasificacion === "fija").reduce((s, e) => s + (e.monto_usd ?? 0), 0);
+  const variablesUSD = egresos.filter((e) => e.clasificacion === "variable").reduce((s, e) => s + (e.monto_usd ?? 0), 0);
+  const sinTasa = egresos.some((e) => e.monto != null && e.monto_usd == null);
+
+  async function borrar(id: string) {
+    try {
+      await fetch(`/api/admin/egresos?id=${id}`, { method: "DELETE" });
+      setMsg("Egreso eliminado.");
+      recargar();
+    } catch {
+      setError("No se pudo eliminar.");
+    }
+  }
+
+  if (modo === "form") {
+    return (
+      <FormEgreso
+        inicial={editando}
+        mes={mes}
+        categorias={categorias}
+        proveedores={proveedores}
+        onCancelar={() => { setModo("lista"); setEditando(null); }}
+        onGuardado={(esEdicion) => { setModo("lista"); setEditando(null); setMsg(esEdicion ? "Egreso actualizado." : "Egreso registrado."); recargar(); }}
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={() => { setCargando(true); setMes((m) => moverMes(m, -1)); }} className="rounded-lg ring-1 ring-marfil px-2.5 py-1.5 text-cacao hover:bg-marfil-soft" aria-label="Mes anterior">←</button>
+          <span className="font-cinzel text-base text-cacao min-w-[9rem] text-center">{nombreMes(mes)}</span>
+          <button type="button" onClick={() => { setCargando(true); setMes((m) => moverMes(m, 1)); }} className="rounded-lg ring-1 ring-marfil px-2.5 py-1.5 text-cacao hover:bg-marfil-soft" aria-label="Mes siguiente">→</button>
+        </div>
+        <button type="button" onClick={() => { setEditando(null); setModo("form"); }} className="rounded-lg bg-cacao text-white px-4 py-2 text-xs uppercase tracking-widest hover:bg-terracotta">+ Registrar egreso</button>
+      </div>
+
+      {error && <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419]">{error}</div>}
+      {msg && <div className="rounded-lg bg-[#F1F4ED] ring-1 ring-[#C9D6BC] p-3 text-sm text-[#2F4A1F]">{msg}</div>}
+
+      <div className="grid grid-cols-3 gap-3">
+        <ResumenCaja titulo="Total del mes" valor={fmtMonto(totalUSD, "USD")} fuerte />
+        <ResumenCaja titulo="Fijas" valor={fmtMonto(fijasUSD, "USD")} />
+        <ResumenCaja titulo="Variables" valor={fmtMonto(variablesUSD, "USD")} />
+      </div>
+      {sinTasa && <p className="text-[11px] text-cacao-mute">Hay egresos sin tasa: no se suman al total en USD hasta que les pongas la tasa.</p>}
+
+      <section className="rounded-2xl bg-white ring-1 ring-marfil overflow-hidden">
+        {cargando ? (
+          <p className="p-5 text-cacao-soft italic font-serif">Cargando…</p>
+        ) : egresos.length === 0 ? (
+          <p className="p-8 text-center text-cacao-soft italic font-serif">No hay egresos en {nombreMes(mes)}.</p>
+        ) : (
+          <ul className="divide-y divide-marfil">
+            {egresos.map((e) => (
+              <li key={e.id} className="flex items-start gap-3 p-3.5">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className="text-cacao font-medium truncate">{e.proveedor_nombre || e.concepto || "(egreso)"}</span>
+                    <span className="text-cacao whitespace-nowrap">{e.monto != null ? fmtMonto(e.monto, e.moneda || "Bs") : "—"}</span>
+                  </div>
+                  <div className="text-[11px] text-cacao-mute mt-1 flex flex-wrap gap-x-2">
+                    <span>{fmtFecha(e.fecha)}</span>
+                    {e.categoria_nombre && <span>· {e.categoria_nombre}</span>}
+                    {e.clasificacion && <span>· {e.clasificacion}</span>}
+                    {e.monto_usd != null && e.moneda !== "USD" && <span>· ≈ {fmtMonto(e.monto_usd, "USD")}</span>}
+                    {e.solicitud_linea_id && <span>· de solicitud</span>}
+                  </div>
+                  {e.concepto && e.proveedor_nombre && <div className="text-xs text-cacao-soft mt-0.5">{e.concepto}</div>}
+                </div>
+                <div className="flex gap-2 shrink-0">
+                  <button type="button" onClick={() => { setEditando(e); setModo("form"); }} className="text-cacao-soft hover:text-cacao text-sm" aria-label="Editar">✎</button>
+                  <button type="button" onClick={() => borrar(e.id)} className="text-cacao-soft hover:text-terracotta text-sm" aria-label="Eliminar">✕</button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function ResumenCaja({ titulo, valor, fuerte }: { titulo: string; valor: string; fuerte?: boolean }) {
+  return (
+    <div className={`rounded-2xl ring-1 p-4 ${fuerte ? "bg-[#0F0F0F] text-[#EDE7E0] ring-[#0F0F0F]" : "bg-white text-cacao ring-marfil"}`}>
+      <div className={`font-display text-[9px] tracking-[0.25em] uppercase ${fuerte ? "text-[#9A938B]" : "text-cacao-mute"}`}>{titulo}</div>
+      <div className="text-lg font-medium mt-1">{valor}</div>
+    </div>
+  );
+}
+
+function FormEgreso({
+  inicial,
+  mes,
+  categorias,
+  proveedores,
+  onGuardado,
+  onCancelar,
+}: {
+  inicial: Egreso | null;
+  mes: string;
+  categorias: Categoria[];
+  proveedores: Proveedor[];
+  onGuardado: (esEdicion: boolean) => void;
+  onCancelar: () => void;
+}) {
+  const esEdicion = !!inicial;
+  const [f, setF] = useState({
+    fecha: inicial?.fecha ?? `${mes}-01`,
+    categoria_id: inicial?.categoria_id ?? "",
+    proveedor_id: inicial?.proveedor_id ?? "",
+    concepto: inicial?.concepto ?? "",
+    monto: inicial?.monto != null ? String(inicial.monto) : "",
+    moneda: inicial?.moneda ?? "Bs",
+    tasa: inicial?.tasa != null ? String(inicial.tasa) : "",
+    metodo: inicial?.metodo ?? "Transferencia",
+    factura: inicial?.factura ?? "",
+    nota: inicial?.nota ?? "",
+  });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function set<K extends keyof typeof f>(k: K, v: string) { setF((o) => ({ ...o, [k]: v })); }
+
+  async function guardar() {
+    if (parseMonto(f.monto) == null) { setError("Pon un monto."); return; }
+    setBusy(true);
+    setError(null);
+    try {
+      const cat = categorias.find((c) => c.id === f.categoria_id);
+      const prov = proveedores.find((p) => p.id === f.proveedor_id);
+      const cuerpo = {
+        ...(esEdicion ? { id: inicial!.id } : {}),
+        fecha: f.fecha,
+        concepto: f.concepto,
+        categoria_id: f.categoria_id || null,
+        categoria_nombre: cat?.nombre ?? null,
+        clasificacion: cat?.clasificacion ?? null,
+        proveedor_id: f.proveedor_id || null,
+        proveedor_nombre: prov?.nombre ?? null,
+        monto: parseMonto(f.monto),
+        moneda: f.moneda,
+        tasa: parseMonto(f.tasa),
+        metodo: f.metodo,
+        factura: f.factura,
+        nota: f.nota,
+      };
+      const r = await fetch("/api/admin/egresos", {
+        method: esEdicion ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(esEdicion ? cuerpo : { egreso: cuerpo }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "Error guardando");
+      onGuardado(esEdicion);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="rounded-2xl bg-white ring-1 ring-marfil p-5 max-w-lg space-y-3">
+      <h2 className="font-display text-xs tracking-[0.3em] uppercase text-cacao-mute">{esEdicion ? "Editar egreso" : "Registrar egreso"}</h2>
+      {error && <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-2.5 text-sm text-[#7A2419]">{error}</div>}
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Campo label="Fecha"><input type="date" value={f.fecha} onChange={(e) => set("fecha", e.target.value)} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" /></Campo>
+        <Campo label="Categoría">
+          <select value={f.categoria_id} onChange={(e) => set("categoria_id", e.target.value)} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
+            <option value="">Sin categoría</option>
+            <optgroup label="Fijas">{categorias.filter((c) => c.clasificacion === "fija").map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}</optgroup>
+            <optgroup label="Variables">{categorias.filter((c) => c.clasificacion === "variable").map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}</optgroup>
+          </select>
+        </Campo>
+      </div>
+      <Campo label="Proveedor (opcional)">
+        <select value={f.proveedor_id} onChange={(e) => set("proveedor_id", e.target.value)} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
+          <option value="">— Ninguno —</option>
+          {proveedores.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+        </select>
+      </Campo>
+      <Campo label="Concepto"><input value={f.concepto} onChange={(e) => set("concepto", e.target.value)} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" /></Campo>
+      <div className="grid grid-cols-3 gap-2">
+        <Campo label="Monto"><input inputMode="decimal" value={f.monto} onChange={(e) => set("monto", e.target.value)} placeholder="0,00" className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" /></Campo>
+        <Campo label="Moneda">
+          <select value={f.moneda} onChange={(e) => set("moneda", e.target.value)} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
+            {MONEDAS.map((m) => <option key={m} value={m}>{m}</option>)}
+          </select>
+        </Campo>
+        <Campo label="Tasa a USD">
+          <input inputMode="decimal" value={f.tasa} onChange={(e) => set("tasa", e.target.value)} disabled={f.moneda === "USD"} placeholder={f.moneda === "USD" ? "—" : ""} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao disabled:bg-marfil-soft" />
+        </Campo>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Campo label="Método">
+          <select value={f.metodo} onChange={(e) => set("metodo", e.target.value)} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
+            {METODOS.map((m) => <option key={m} value={m}>{m}</option>)}
+          </select>
+        </Campo>
+        <Campo label="Factura (opcional)"><input value={f.factura} onChange={(e) => set("factura", e.target.value)} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" /></Campo>
+      </div>
+      <Campo label="Nota (opcional)"><input value={f.nota} onChange={(e) => set("nota", e.target.value)} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" /></Campo>
+      <div className="flex gap-2 pt-1">
+        <button type="button" onClick={guardar} disabled={busy} className="rounded-lg bg-cacao text-white px-5 py-2.5 text-xs uppercase tracking-widest hover:bg-terracotta disabled:bg-marfil disabled:text-cacao-mute">{busy ? "Guardando…" : "Guardar"}</button>
+        <button type="button" onClick={onCancelar} className="rounded-lg ring-1 ring-marfil text-cacao px-5 py-2.5 text-xs uppercase tracking-widest">Cancelar</button>
+      </div>
+    </div>
+  );
+}
+
+function CategoriasCatalogo() {
+  const [categorias, setCategorias] = useState<Categoria[]>([]);
+  const [cargando, setCargando] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [nombre, setNombre] = useState("");
+  const [clasificacion, setClasificacion] = useState<"fija" | "variable">("variable");
+  const [tick, setTick] = useState(0);
+  const recargar = useCallback(() => setTick((t) => t + 1), []);
+
+  useEffect(() => {
+    let a = true;
+    (async () => {
+      try {
+        const r = await fetch("/api/admin/categorias");
+        const d = await r.json();
+        if (a) setCategorias(d.categorias ?? []);
+      } catch {
+        if (a) setError("No se pudieron cargar las categorías.");
+      } finally {
+        if (a) setCargando(false);
+      }
+    })();
+    return () => { a = false; };
+  }, [tick]);
+
+  async function agregar() {
+    if (!nombre.trim()) return;
+    try {
+      const r = await fetch("/api/admin/categorias", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nombre: nombre.trim(), clasificacion }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error);
+      setNombre("");
+      recargar();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo agregar.");
+    }
+  }
+  async function eliminar(id: string) {
+    try {
+      await fetch(`/api/admin/categorias?id=${id}`, { method: "DELETE" });
+      recargar();
+    } catch {
+      setError("No se pudo eliminar.");
+    }
+  }
+
+  const fijas = categorias.filter((c) => c.clasificacion === "fija");
+  const variables = categorias.filter((c) => c.clasificacion === "variable");
+
+  return (
+    <div className="space-y-4">
+      {error && <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419]">{error}</div>}
+      <div className="rounded-2xl bg-white ring-1 ring-marfil p-4 flex flex-wrap items-end gap-2">
+        <div className="flex-1 min-w-[10rem]">
+          <label className="block font-display text-[10px] tracking-[0.2em] uppercase text-cacao-mute mb-1">Nueva categoría</label>
+          <input value={nombre} onChange={(e) => setNombre(e.target.value)} onKeyDown={(e) => e.key === "Enter" && agregar()} placeholder="Nombre" className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
+        </div>
+        <select value={clasificacion} onChange={(e) => setClasificacion(e.target.value as "fija" | "variable")} className="border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
+          <option value="fija">Fija</option>
+          <option value="variable">Variable</option>
+        </select>
+        <button type="button" onClick={agregar} className="rounded-lg bg-cacao text-white px-4 py-2 text-xs uppercase tracking-widest hover:bg-terracotta">Agregar</button>
+      </div>
+
+      {cargando ? (
+        <p className="rounded-2xl bg-white ring-1 ring-marfil p-5 text-cacao-soft italic font-serif">Cargando…</p>
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2">
+          {([["Fijas", fijas], ["Variables", variables]] as const).map(([titulo, lista]) => (
+            <section key={titulo} className="rounded-2xl bg-white ring-1 ring-marfil overflow-hidden">
+              <div className="px-4 py-2.5 font-display text-[10px] tracking-[0.25em] uppercase text-cacao-mute border-b border-marfil">{titulo}</div>
+              {lista.length === 0 ? (
+                <p className="p-4 text-sm text-cacao-soft italic font-serif">Ninguna todavía.</p>
+              ) : (
+                <ul className="divide-y divide-marfil">
+                  {lista.map((c) => (
+                    <li key={c.id} className="flex items-center justify-between gap-2 px-4 py-2.5">
+                      <span className="text-cacao text-sm">{c.nombre}</span>
+                      <button type="button" onClick={() => eliminar(c.id)} className="text-cacao-soft hover:text-terracotta text-sm" aria-label="Eliminar">✕</button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }

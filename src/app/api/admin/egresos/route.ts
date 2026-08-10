@@ -1,0 +1,114 @@
+import { NextResponse, type NextRequest } from "next/server";
+import { tokenValido, ADMIN_COOKIE } from "@/lib/admin-auth";
+import { createServiceClient } from "@/lib/supabase/admin-service";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+function autorizado(req: NextRequest): boolean {
+  return tokenValido(req.cookies.get(ADMIN_COOKIE)?.value);
+}
+function texto(v: unknown): string | null {
+  return typeof v === "string" && v.trim() ? v.trim() : null;
+}
+function numero(v: unknown): number | null {
+  if (typeof v === "number" && isFinite(v)) return v;
+  if (typeof v === "string" && v.trim()) {
+    const n = Number(v.replace(",", "."));
+    return isFinite(n) ? n : null;
+  }
+  return null;
+}
+// Equivalente en USD según moneda y tasa (misma regla que el cliente).
+function equivUSD(monto: number | null, moneda: string | null, tasa: number | null): number | null {
+  if (monto == null) return null;
+  if (moneda === "USD") return monto;
+  if (moneda === "Bs") return tasa && tasa > 0 ? monto / tasa : null;
+  if (moneda === "EUR") return tasa && tasa > 0 ? monto * tasa : null;
+  return null;
+}
+
+function fila(e: Record<string, unknown>): Record<string, unknown> {
+  const monto = numero(e.monto);
+  const moneda = texto(e.moneda);
+  const tasa = numero(e.tasa);
+  const usd = equivUSD(monto, moneda, tasa);
+  return {
+    fecha: texto(e.fecha) ?? undefined,
+    concepto: texto(e.concepto),
+    categoria_id: texto(e.categoria_id),
+    categoria_nombre: texto(e.categoria_nombre),
+    clasificacion: e.clasificacion === "fija" ? "fija" : e.clasificacion === "variable" ? "variable" : null,
+    proveedor_id: texto(e.proveedor_id),
+    proveedor_nombre: texto(e.proveedor_nombre),
+    monto,
+    moneda,
+    tasa,
+    monto_usd: usd == null ? null : Math.round(usd * 100) / 100,
+    metodo: texto(e.metodo),
+    factura: texto(e.factura),
+    nota: texto(e.nota),
+    solicitud_linea_id: texto(e.solicitud_linea_id),
+  };
+}
+
+// GET ?mes=YYYY-MM → egresos de ese mes (o todos si no se pasa mes).
+export async function GET(req: NextRequest) {
+  if (!autorizado(req)) return NextResponse.json({ error: "no autorizado" }, { status: 401 });
+  const sb = createServiceClient();
+  if (!sb) return NextResponse.json({ error: "servidor no configurado" }, { status: 500 });
+
+  let q = sb.from("admin_egreso").select("*").order("fecha", { ascending: false }).order("created_at", { ascending: false });
+  const mes = new URL(req.url).searchParams.get("mes"); // "2026-08"
+  if (mes && /^\d{4}-\d{2}$/.test(mes)) {
+    const [y, m] = mes.split("-").map((x) => parseInt(x, 10));
+    const desde = `${mes}-01`;
+    const finMes = new Date(Date.UTC(y, m, 0)).getUTCDate(); // último día del mes
+    const hasta = `${mes}-${String(finMes).padStart(2, "0")}`;
+    q = q.gte("fecha", desde).lte("fecha", hasta);
+  }
+  const { data, error } = await q;
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ egresos: data ?? [] });
+}
+
+// POST → un egreso {egreso:{...}} o varios {egresos:[...]} (confirmar solicitud).
+export async function POST(req: NextRequest) {
+  if (!autorizado(req)) return NextResponse.json({ error: "no autorizado" }, { status: 401 });
+  const sb = createServiceClient();
+  if (!sb) return NextResponse.json({ error: "servidor no configurado" }, { status: 500 });
+  const b = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+  const lista = Array.isArray(b.egresos)
+    ? (b.egresos as Record<string, unknown>[])
+    : b.egreso && typeof b.egreso === "object"
+      ? [b.egreso as Record<string, unknown>]
+      : [];
+  if (lista.length === 0) return NextResponse.json({ error: "No hay egresos que registrar." }, { status: 400 });
+  const filas = lista.map(fila);
+  const { data, error } = await sb.from("admin_egreso").insert(filas).select("*");
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ egresos: data ?? [] });
+}
+
+export async function PATCH(req: NextRequest) {
+  if (!autorizado(req)) return NextResponse.json({ error: "no autorizado" }, { status: 401 });
+  const sb = createServiceClient();
+  if (!sb) return NextResponse.json({ error: "servidor no configurado" }, { status: 500 });
+  const b = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+  const id = texto(b.id);
+  if (!id) return NextResponse.json({ error: "falta id" }, { status: 400 });
+  const { data, error } = await sb.from("admin_egreso").update(fila(b)).eq("id", id).select("*").single();
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ egreso: data });
+}
+
+export async function DELETE(req: NextRequest) {
+  if (!autorizado(req)) return NextResponse.json({ error: "no autorizado" }, { status: 401 });
+  const sb = createServiceClient();
+  if (!sb) return NextResponse.json({ error: "servidor no configurado" }, { status: 500 });
+  const id = new URL(req.url).searchParams.get("id");
+  if (!id) return NextResponse.json({ error: "falta id" }, { status: 400 });
+  const { error } = await sb.from("admin_egreso").delete().eq("id", id);
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ ok: true });
+}
