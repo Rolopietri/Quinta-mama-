@@ -162,6 +162,8 @@ function Panel({ onSalir }: { onSalir: () => void }) {
         <SeccionSolicitudes />
       ) : seccion === "egresos" ? (
         <SeccionEgresos />
+      ) : seccion === "ingresos" ? (
+        <SeccionIngresos />
       ) : (
         <EnConstruccion seccion={actual.label} />
       )}
@@ -1461,6 +1463,364 @@ function CategoriasCatalogo() {
             </section>
           ))}
         </div>
+      )}
+    </div>
+  );
+}
+
+// ── Ingresos ────────────────────────────────────────────────────────
+type CategoriaIngreso = { id: string; nombre: string };
+type Ingreso = {
+  id: string;
+  fecha: string;
+  concepto: string | null;
+  categoria_id: string | null;
+  categoria_nombre: string | null;
+  pagador: string | null;
+  monto: number | null;
+  moneda: string | null;
+  tasa: number | null;
+  monto_usd: number | null;
+  metodo: string | null;
+  factura: string | null;
+  nota: string | null;
+};
+
+function SeccionIngresos() {
+  const [vista, setVista] = useState<"ingresos" | "categorias">("ingresos");
+  return (
+    <div className="space-y-4">
+      <div className="flex gap-1 rounded-lg ring-1 ring-marfil p-1 w-fit">
+        {([["ingresos", "Ingresos"], ["categorias", "Categorías"]] as const).map(([k, label]) => (
+          <button key={k} type="button" onClick={() => setVista(k)} className={`rounded-md px-3 py-1.5 text-xs uppercase tracking-widest ${vista === k ? "bg-cacao text-white" : "text-cacao hover:bg-marfil-soft"}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+      {vista === "ingresos" ? <IngresosMes /> : <CategoriasIngresoCatalogo />}
+    </div>
+  );
+}
+
+function IngresosMes() {
+  const [mes, setMes] = useState<string>(mesActualISO());
+  const [ingresos, setIngresos] = useState<Ingreso[]>([]);
+  const [categorias, setCategorias] = useState<CategoriaIngreso[]>([]);
+  const [cargando, setCargando] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [modo, setModo] = useState<"lista" | "form">("lista");
+  const [editando, setEditando] = useState<Ingreso | null>(null);
+  const [tick, setTick] = useState(0);
+  const recargar = useCallback(() => setTick((t) => t + 1), []);
+
+  useEffect(() => {
+    let a = true;
+    (async () => {
+      try {
+        const [ri, rc] = await Promise.all([
+          fetch(`/api/admin/ingresos?mes=${mes}`),
+          fetch("/api/admin/categorias-ingreso"),
+        ]);
+        const [di, dc] = await Promise.all([ri.json(), rc.json()]);
+        if (a) {
+          setIngresos(di.ingresos ?? []);
+          setCategorias(dc.categorias ?? []);
+        }
+      } catch {
+        if (a) setError("No se pudieron cargar los ingresos.");
+      } finally {
+        if (a) setCargando(false);
+      }
+    })();
+    return () => { a = false; };
+  }, [mes, tick]);
+
+  const totalUSD = ingresos.reduce((s, e) => s + (e.monto_usd ?? 0), 0);
+  const sinTasa = ingresos.some((e) => e.monto != null && e.monto_usd == null);
+  const porCategoria = ingresos.reduce<Record<string, number>>((acc, e) => {
+    const k = e.categoria_nombre || "Sin categoría";
+    acc[k] = (acc[k] ?? 0) + (e.monto_usd ?? 0);
+    return acc;
+  }, {});
+  const desglose = Object.entries(porCategoria).sort((a, b) => b[1] - a[1]);
+
+  async function borrar(id: string) {
+    try {
+      await fetch(`/api/admin/ingresos?id=${id}`, { method: "DELETE" });
+      setMsg("Ingreso eliminado.");
+      recargar();
+    } catch {
+      setError("No se pudo eliminar.");
+    }
+  }
+
+  if (modo === "form") {
+    return (
+      <FormIngreso
+        inicial={editando}
+        mes={mes}
+        categorias={categorias}
+        onCancelar={() => { setModo("lista"); setEditando(null); }}
+        onGuardado={(esEdicion) => { setModo("lista"); setEditando(null); setMsg(esEdicion ? "Ingreso actualizado." : "Ingreso registrado."); recargar(); }}
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={() => { setCargando(true); setMes((m) => moverMes(m, -1)); }} className="rounded-lg ring-1 ring-marfil px-2.5 py-1.5 text-cacao hover:bg-marfil-soft" aria-label="Mes anterior">←</button>
+          <span className="font-cinzel text-base text-cacao min-w-[9rem] text-center">{nombreMes(mes)}</span>
+          <button type="button" onClick={() => { setCargando(true); setMes((m) => moverMes(m, 1)); }} className="rounded-lg ring-1 ring-marfil px-2.5 py-1.5 text-cacao hover:bg-marfil-soft" aria-label="Mes siguiente">→</button>
+        </div>
+        <button type="button" onClick={() => { setEditando(null); setModo("form"); }} className="rounded-lg bg-cacao text-white px-4 py-2 text-xs uppercase tracking-widest hover:bg-terracotta">+ Registrar ingreso</button>
+      </div>
+
+      {error && <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419]">{error}</div>}
+      {msg && <div className="rounded-lg bg-[#F1F4ED] ring-1 ring-[#C9D6BC] p-3 text-sm text-[#2F4A1F]">{msg}</div>}
+
+      <div className="grid gap-3 sm:grid-cols-3">
+        <ResumenCaja titulo="Total del mes" valor={fmtMonto(totalUSD, "USD")} fuerte />
+        <div className="sm:col-span-2 rounded-2xl bg-white ring-1 ring-marfil p-4">
+          <div className="font-display text-[9px] tracking-[0.25em] uppercase text-cacao-mute mb-2">Por categoría</div>
+          {desglose.length === 0 ? (
+            <p className="text-sm text-cacao-soft italic font-serif">Sin ingresos este mes.</p>
+          ) : (
+            <ul className="space-y-1">
+              {desglose.map(([nombre, val]) => (
+                <li key={nombre} className="flex justify-between text-sm">
+                  <span className="text-cacao-soft">{nombre}</span>
+                  <span className="text-cacao">{fmtMonto(val, "USD")}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+      {sinTasa && <p className="text-[11px] text-cacao-mute">Hay ingresos sin tasa: no se suman al total en USD hasta que les pongas la tasa.</p>}
+
+      <section className="rounded-2xl bg-white ring-1 ring-marfil overflow-hidden">
+        {cargando ? (
+          <p className="p-5 text-cacao-soft italic font-serif">Cargando…</p>
+        ) : ingresos.length === 0 ? (
+          <p className="p-8 text-center text-cacao-soft italic font-serif">No hay ingresos en {nombreMes(mes)}.</p>
+        ) : (
+          <ul className="divide-y divide-marfil">
+            {ingresos.map((e) => (
+              <li key={e.id} className="flex items-start gap-3 p-3.5">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className="text-cacao font-medium truncate">{e.pagador || e.concepto || e.categoria_nombre || "(ingreso)"}</span>
+                    <span className="text-cacao whitespace-nowrap">{e.monto != null ? fmtMonto(e.monto, e.moneda || "Bs") : "—"}</span>
+                  </div>
+                  <div className="text-[11px] text-cacao-mute mt-1 flex flex-wrap gap-x-2">
+                    <span>{fmtFecha(e.fecha)}</span>
+                    {e.categoria_nombre && <span>· {e.categoria_nombre}</span>}
+                    {e.metodo && <span>· {e.metodo}</span>}
+                    {e.monto_usd != null && e.moneda !== "USD" && <span>· ≈ {fmtMonto(e.monto_usd, "USD")}</span>}
+                  </div>
+                  {e.concepto && e.pagador && <div className="text-xs text-cacao-soft mt-0.5">{e.concepto}</div>}
+                </div>
+                <div className="flex gap-2 shrink-0">
+                  <button type="button" onClick={() => { setEditando(e); setModo("form"); }} className="text-cacao-soft hover:text-cacao text-sm" aria-label="Editar">✎</button>
+                  <button type="button" onClick={() => borrar(e.id)} className="text-cacao-soft hover:text-terracotta text-sm" aria-label="Eliminar">✕</button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function FormIngreso({
+  inicial,
+  mes,
+  categorias,
+  onGuardado,
+  onCancelar,
+}: {
+  inicial: Ingreso | null;
+  mes: string;
+  categorias: CategoriaIngreso[];
+  onGuardado: (esEdicion: boolean) => void;
+  onCancelar: () => void;
+}) {
+  const esEdicion = !!inicial;
+  const [f, setF] = useState({
+    fecha: inicial?.fecha ?? `${mes}-01`,
+    categoria_id: inicial?.categoria_id ?? "",
+    pagador: inicial?.pagador ?? "",
+    concepto: inicial?.concepto ?? "",
+    monto: inicial?.monto != null ? String(inicial.monto) : "",
+    moneda: inicial?.moneda ?? "Bs",
+    tasa: inicial?.tasa != null ? String(inicial.tasa) : "",
+    metodo: inicial?.metodo ?? "Transferencia",
+    factura: inicial?.factura ?? "",
+    nota: inicial?.nota ?? "",
+  });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  function set<K extends keyof typeof f>(k: K, v: string) { setF((o) => ({ ...o, [k]: v })); }
+
+  async function guardar() {
+    if (parseMonto(f.monto) == null) { setError("Pon un monto."); return; }
+    setBusy(true);
+    setError(null);
+    try {
+      const cat = categorias.find((c) => c.id === f.categoria_id);
+      const cuerpo = {
+        ...(esEdicion ? { id: inicial!.id } : {}),
+        fecha: f.fecha,
+        concepto: f.concepto,
+        categoria_id: f.categoria_id || null,
+        categoria_nombre: cat?.nombre ?? null,
+        pagador: f.pagador,
+        monto: parseMonto(f.monto),
+        moneda: f.moneda,
+        tasa: parseMonto(f.tasa),
+        metodo: f.metodo,
+        factura: f.factura,
+        nota: f.nota,
+      };
+      const r = await fetch("/api/admin/ingresos", {
+        method: esEdicion ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(esEdicion ? cuerpo : { ingreso: cuerpo }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "Error guardando");
+      onGuardado(esEdicion);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="rounded-2xl bg-white ring-1 ring-marfil p-5 max-w-lg space-y-3">
+      <h2 className="font-display text-xs tracking-[0.3em] uppercase text-cacao-mute">{esEdicion ? "Editar ingreso" : "Registrar ingreso"}</h2>
+      {error && <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-2.5 text-sm text-[#7A2419]">{error}</div>}
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Campo label="Fecha"><input type="date" value={f.fecha} onChange={(e) => set("fecha", e.target.value)} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" /></Campo>
+        <Campo label="Categoría">
+          <select value={f.categoria_id} onChange={(e) => set("categoria_id", e.target.value)} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
+            <option value="">Sin categoría</option>
+            {categorias.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+          </select>
+        </Campo>
+      </div>
+      <Campo label="Pagador / Inquilino (opcional)"><input value={f.pagador} onChange={(e) => set("pagador", e.target.value)} placeholder="Quién pagó" className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" /></Campo>
+      <Campo label="Concepto"><input value={f.concepto} onChange={(e) => set("concepto", e.target.value)} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" /></Campo>
+      <div className="grid grid-cols-3 gap-2">
+        <Campo label="Monto"><input inputMode="decimal" value={f.monto} onChange={(e) => set("monto", e.target.value)} placeholder="0,00" className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" /></Campo>
+        <Campo label="Moneda">
+          <select value={f.moneda} onChange={(e) => set("moneda", e.target.value)} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
+            {MONEDAS.map((m) => <option key={m} value={m}>{m}</option>)}
+          </select>
+        </Campo>
+        <Campo label="Tasa a USD">
+          <input inputMode="decimal" value={f.tasa} onChange={(e) => set("tasa", e.target.value)} disabled={f.moneda === "USD"} placeholder={f.moneda === "USD" ? "—" : ""} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao disabled:bg-marfil-soft" />
+        </Campo>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Campo label="Método">
+          <select value={f.metodo} onChange={(e) => set("metodo", e.target.value)} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
+            {METODOS.map((m) => <option key={m} value={m}>{m}</option>)}
+          </select>
+        </Campo>
+        <Campo label="Recibo / Factura (opcional)"><input value={f.factura} onChange={(e) => set("factura", e.target.value)} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" /></Campo>
+      </div>
+      <Campo label="Nota (opcional)"><input value={f.nota} onChange={(e) => set("nota", e.target.value)} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" /></Campo>
+      <div className="flex gap-2 pt-1">
+        <button type="button" onClick={guardar} disabled={busy} className="rounded-lg bg-cacao text-white px-5 py-2.5 text-xs uppercase tracking-widest hover:bg-terracotta disabled:bg-marfil disabled:text-cacao-mute">{busy ? "Guardando…" : "Guardar"}</button>
+        <button type="button" onClick={onCancelar} className="rounded-lg ring-1 ring-marfil text-cacao px-5 py-2.5 text-xs uppercase tracking-widest">Cancelar</button>
+      </div>
+    </div>
+  );
+}
+
+function CategoriasIngresoCatalogo() {
+  const [categorias, setCategorias] = useState<CategoriaIngreso[]>([]);
+  const [cargando, setCargando] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [nombre, setNombre] = useState("");
+  const [tick, setTick] = useState(0);
+  const recargar = useCallback(() => setTick((t) => t + 1), []);
+
+  useEffect(() => {
+    let a = true;
+    (async () => {
+      try {
+        const r = await fetch("/api/admin/categorias-ingreso");
+        const d = await r.json();
+        if (a) setCategorias(d.categorias ?? []);
+      } catch {
+        if (a) setError("No se pudieron cargar las categorías.");
+      } finally {
+        if (a) setCargando(false);
+      }
+    })();
+    return () => { a = false; };
+  }, [tick]);
+
+  async function agregar() {
+    if (!nombre.trim()) return;
+    try {
+      const r = await fetch("/api/admin/categorias-ingreso", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nombre: nombre.trim() }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error);
+      setNombre("");
+      recargar();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo agregar.");
+    }
+  }
+  async function eliminar(id: string) {
+    try {
+      await fetch(`/api/admin/categorias-ingreso?id=${id}`, { method: "DELETE" });
+      recargar();
+    } catch {
+      setError("No se pudo eliminar.");
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      {error && <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419]">{error}</div>}
+      <div className="rounded-2xl bg-white ring-1 ring-marfil p-4 flex flex-wrap items-end gap-2">
+        <div className="flex-1 min-w-[10rem]">
+          <label className="block font-display text-[10px] tracking-[0.2em] uppercase text-cacao-mute mb-1">Nueva categoría de ingreso</label>
+          <input value={nombre} onChange={(e) => setNombre(e.target.value)} onKeyDown={(e) => e.key === "Enter" && agregar()} placeholder="Nombre" className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
+        </div>
+        <button type="button" onClick={agregar} className="rounded-lg bg-cacao text-white px-4 py-2 text-xs uppercase tracking-widest hover:bg-terracotta">Agregar</button>
+      </div>
+
+      {cargando ? (
+        <p className="rounded-2xl bg-white ring-1 ring-marfil p-5 text-cacao-soft italic font-serif">Cargando…</p>
+      ) : (
+        <section className="rounded-2xl bg-white ring-1 ring-marfil overflow-hidden">
+          {categorias.length === 0 ? (
+            <p className="p-4 text-sm text-cacao-soft italic font-serif">Ninguna todavía.</p>
+          ) : (
+            <ul className="divide-y divide-marfil">
+              {categorias.map((c) => (
+                <li key={c.id} className="flex items-center justify-between gap-2 px-4 py-2.5">
+                  <span className="text-cacao text-sm">{c.nombre}</span>
+                  <button type="button" onClick={() => eliminar(c.id)} className="text-cacao-soft hover:text-terracotta text-sm" aria-label="Eliminar">✕</button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
       )}
     </div>
   );
