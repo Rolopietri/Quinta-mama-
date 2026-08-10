@@ -1544,17 +1544,25 @@ function IngresosMes() {
     return () => { a = false; };
   }, [mes, tick]);
 
-  // El panel de ingresos trabaja en euros (lo que da Setux y siempre tiene
-  // valor). El dólar es referencia y solo aparece si hay tasa.
-  const eurDe = (e: Ingreso) => (e.moneda === "EUR" ? e.monto ?? 0 : 0);
-  const totalEUR = ingresos.reduce((s, e) => s + eurDe(e), 0);
-  const totalUSD = ingresos.reduce((s, e) => s + (e.monto_usd ?? 0), 0);
-  const porCategoria = ingresos.reduce<Record<string, number>>((acc, e) => {
-    const k = e.categoria_nombre || "Sin categoría";
-    acc[k] = (acc[k] ?? 0) + eurDe(e);
-    return acc;
-  }, {});
-  const desglose = Object.entries(porCategoria).sort((a, b) => b[1] - a[1]);
+  // Los ingresos vienen en distintas monedas reales: Setux en euros, los
+  // alquileres de inquilinos en dólares, etc. No se fuerzan a una sola: se
+  // totaliza POR MONEDA para no distorsionar con tasas inventadas.
+  const ORDEN_MONEDA = ["EUR", "USD", "Bs"];
+  const totalesPorMoneda: Record<string, number> = {};
+  for (const e of ingresos) {
+    const k = e.moneda || "EUR";
+    totalesPorMoneda[k] = (totalesPorMoneda[k] ?? 0) + (e.monto ?? 0);
+  }
+  const monedasPresentes = ORDEN_MONEDA.filter((k) => (totalesPorMoneda[k] ?? 0) > 0.005)
+    .concat(Object.keys(totalesPorMoneda).filter((k) => !ORDEN_MONEDA.includes(k) && (totalesPorMoneda[k] ?? 0) > 0.005));
+  // Desglose por categoría, guardando el monto por moneda dentro de cada una.
+  const porCat: Record<string, Record<string, number>> = {};
+  for (const e of ingresos) {
+    const cat = e.categoria_nombre || "Sin categoría";
+    const k = e.moneda || "EUR";
+    (porCat[cat] ??= {})[k] = (porCat[cat][k] ?? 0) + (e.monto ?? 0);
+  }
+  const desglose = Object.entries(porCat);
 
   async function borrar(id: string) {
     try {
@@ -1593,17 +1601,31 @@ function IngresosMes() {
       {msg && <div className="rounded-lg bg-[#F1F4ED] ring-1 ring-[#C9D6BC] p-3 text-sm text-[#2F4A1F]">{msg}</div>}
 
       <div className="grid gap-3 sm:grid-cols-3">
-        <ResumenCaja titulo="Total del mes" valor={fmtMonto(totalEUR, "EUR")} sub={totalUSD > 0 ? `≈ ${fmtMonto(totalUSD, "USD")}` : undefined} fuerte />
+        <div className="rounded-2xl bg-[#0F0F0F] text-[#EDE7E0] ring-1 ring-[#0F0F0F] p-4">
+          <div className="font-display text-[9px] tracking-[0.25em] uppercase text-[#9A938B]">Total del mes</div>
+          {monedasPresentes.length === 0 ? (
+            <div className="text-lg font-medium mt-1">—</div>
+          ) : (
+            <div className="mt-1 space-y-0.5">
+              {monedasPresentes.map((k) => (
+                <div key={k} className="text-lg font-medium leading-tight">{fmtMonto(totalesPorMoneda[k], k)}</div>
+              ))}
+            </div>
+          )}
+          {monedasPresentes.length > 1 && <div className="text-[10px] text-[#9A938B] mt-1.5">Cada moneda por separado (Setux en €, alquileres en $).</div>}
+        </div>
         <div className="sm:col-span-2 rounded-2xl bg-white ring-1 ring-marfil p-4">
           <div className="font-display text-[9px] tracking-[0.25em] uppercase text-cacao-mute mb-2">Por categoría</div>
           {desglose.length === 0 ? (
             <p className="text-sm text-cacao-soft italic font-serif">Sin ingresos este mes.</p>
           ) : (
             <ul className="space-y-1">
-              {desglose.map(([nombre, val]) => (
-                <li key={nombre} className="flex justify-between text-sm">
+              {desglose.map(([nombre, porMoneda]) => (
+                <li key={nombre} className="flex justify-between gap-3 text-sm">
                   <span className="text-cacao-soft">{nombre}</span>
-                  <span className="text-cacao">{fmtMonto(val, "EUR")}</span>
+                  <span className="text-cacao text-right">
+                    {ORDEN_MONEDA.filter((k) => (porMoneda[k] ?? 0) > 0.005).map((k) => fmtMonto(porMoneda[k], k)).join(" · ")}
+                  </span>
                 </li>
               ))}
             </ul>
