@@ -164,6 +164,8 @@ function Panel({ onSalir }: { onSalir: () => void }) {
         <SeccionEgresos />
       ) : seccion === "ingresos" ? (
         <SeccionIngresos />
+      ) : seccion === "estado" ? (
+        <SeccionEstado />
       ) : (
         <EnConstruccion seccion={actual.label} />
       )}
@@ -1823,5 +1825,138 @@ function CategoriasIngresoCatalogo() {
         </section>
       )}
     </div>
+  );
+}
+
+// ── Estado de Cuenta ────────────────────────────────────────────────
+// Cruza ingresos y egresos del mes (todo en USD) y saca el balance.
+// No guarda nada: solo lee lo ya registrado en las otras secciones.
+function SeccionEstado() {
+  const [mes, setMes] = useState<string>(mesActualISO());
+  const [ingresos, setIngresos] = useState<Ingreso[]>([]);
+  const [egresos, setEgresos] = useState<Egreso[]>([]);
+  const [cargando, setCargando] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let a = true;
+    (async () => {
+      try {
+        const [ri, re] = await Promise.all([
+          fetch(`/api/admin/ingresos?mes=${mes}`),
+          fetch(`/api/admin/egresos?mes=${mes}`),
+        ]);
+        const [di, de] = await Promise.all([ri.json(), re.json()]);
+        if (a) {
+          setIngresos(di.ingresos ?? []);
+          setEgresos(de.egresos ?? []);
+        }
+      } catch {
+        if (a) setError("No se pudo cargar el estado de cuenta.");
+      } finally {
+        if (a) setCargando(false);
+      }
+    })();
+    return () => { a = false; };
+  }, [mes]);
+
+  const totalIngresos = ingresos.reduce((s, e) => s + (e.monto_usd ?? 0), 0);
+  const totalEgresos = egresos.reduce((s, e) => s + (e.monto_usd ?? 0), 0);
+  const balance = totalIngresos - totalEgresos;
+  const fijasUSD = egresos.filter((e) => e.clasificacion === "fija").reduce((s, e) => s + (e.monto_usd ?? 0), 0);
+  const variablesUSD = egresos.filter((e) => e.clasificacion === "variable").reduce((s, e) => s + (e.monto_usd ?? 0), 0);
+  const sinTasa = ingresos.some((e) => e.monto != null && e.monto_usd == null) || egresos.some((e) => e.monto != null && e.monto_usd == null);
+
+  const ingPorCat = agrupar(ingresos.map((e) => [e.categoria_nombre || "Sin categoría", e.monto_usd ?? 0]));
+  const egrPorCat = agrupar(egresos.map((e) => [e.categoria_nombre || "Sin categoría", e.monto_usd ?? 0]));
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2">
+        <button type="button" onClick={() => { setCargando(true); setMes((m) => moverMes(m, -1)); }} className="rounded-lg ring-1 ring-marfil px-2.5 py-1.5 text-cacao hover:bg-marfil-soft" aria-label="Mes anterior">←</button>
+        <span className="font-cinzel text-base text-cacao min-w-[9rem] text-center">{nombreMes(mes)}</span>
+        <button type="button" onClick={() => { setCargando(true); setMes((m) => moverMes(m, 1)); }} className="rounded-lg ring-1 ring-marfil px-2.5 py-1.5 text-cacao hover:bg-marfil-soft" aria-label="Mes siguiente">→</button>
+      </div>
+
+      {error && <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419]">{error}</div>}
+
+      {cargando ? (
+        <p className="rounded-2xl bg-white ring-1 ring-marfil p-5 text-cacao-soft italic font-serif">Cargando…</p>
+      ) : (
+        <>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <ResumenCaja titulo="Ingresos" valor={fmtMonto(totalIngresos, "USD")} />
+            <ResumenCaja titulo="Egresos" valor={fmtMonto(totalEgresos, "USD")} />
+            <div className={`rounded-2xl ring-1 p-4 ${balance >= 0 ? "bg-[#0F0F0F] text-[#EDE7E0] ring-[#0F0F0F]" : "bg-[#F9EBE7] text-[#7A2419] ring-[#E8C5BC]"}`}>
+              <div className={`font-display text-[9px] tracking-[0.25em] uppercase ${balance >= 0 ? "text-[#9A938B]" : "text-[#B06B5C]"}`}>Balance del mes</div>
+              <div className="text-lg font-medium mt-1">{balance < 0 ? `− ${fmtMonto(Math.abs(balance), "USD")}` : fmtMonto(balance, "USD")}</div>
+            </div>
+          </div>
+
+          {sinTasa && <p className="text-[11px] text-cacao-mute">Hay montos sin tasa: no se suman al balance en USD hasta que les pongas la tasa.</p>}
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <DesgloseCaja titulo="Ingresos por categoría" filas={ingPorCat} total={totalIngresos} />
+            <DesgloseCaja
+              titulo="Egresos por categoría"
+              filas={egrPorCat}
+              total={totalEgresos}
+              pie={[["Fijas", fijasUSD], ["Variables", variablesUSD]]}
+            />
+          </div>
+
+          {ingresos.length === 0 && egresos.length === 0 && (
+            <p className="rounded-2xl bg-white ring-1 ring-marfil p-8 text-center text-cacao-soft italic font-serif">
+              Sin movimientos en {nombreMes(mes)}. Registra ingresos y egresos y aquí verás el balance.
+            </p>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function agrupar(pares: [string, number][]): [string, number][] {
+  const m = pares.reduce<Record<string, number>>((acc, [k, v]) => { acc[k] = (acc[k] ?? 0) + v; return acc; }, {});
+  return Object.entries(m).sort((a, b) => b[1] - a[1]);
+}
+
+function DesgloseCaja({
+  titulo,
+  filas,
+  total,
+  pie,
+}: {
+  titulo: string;
+  filas: [string, number][];
+  total: number;
+  pie?: [string, number][];
+}) {
+  return (
+    <section className="rounded-2xl bg-white ring-1 ring-marfil overflow-hidden">
+      <div className="px-4 py-2.5 font-display text-[10px] tracking-[0.25em] uppercase text-cacao-mute border-b border-marfil">{titulo}</div>
+      {filas.length === 0 ? (
+        <p className="p-4 text-sm text-cacao-soft italic font-serif">Nada este mes.</p>
+      ) : (
+        <ul className="divide-y divide-marfil">
+          {filas.map(([nombre, val]) => (
+            <li key={nombre} className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm">
+              <span className="text-cacao-soft">{nombre}</span>
+              <span className="text-cacao whitespace-nowrap">
+                {fmtMonto(val, "USD")}
+                {total > 0 && <span className="text-cacao-mute ml-2">{Math.round((val / total) * 100)}%</span>}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {pie && filas.length > 0 && (
+        <div className="border-t border-marfil px-4 py-2.5 flex flex-wrap gap-x-4 gap-y-1">
+          {pie.map(([k, v]) => (
+            <span key={k} className="text-[11px] text-cacao-mute">{k}: <span className="text-cacao">{fmtMonto(v, "USD")}</span></span>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
