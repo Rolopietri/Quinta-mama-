@@ -2195,6 +2195,11 @@ function hoyISO(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
+function diasHastaCierre(): number {
+  const d = new Date();
+  const ultimo = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+  return Math.max(0, ultimo - d.getDate());
+}
 
 // Banner de alerta: aparece arriba del panel cuando hay cuentas por cobrar.
 function AlertaCobrar({ refreshKey, onIr }: { refreshKey: string; onIr: () => void }) {
@@ -2243,6 +2248,9 @@ function SeccionCuentasCobrar() {
   const [cobrando, setCobrando] = useState<string | null>(null);
   const [fechaCobro, setFechaCobro] = useState(hoyISO());
   const [tasaCobro, setTasaCobro] = useState("");
+  const [devalInput, setDevalInput] = useState("");
+  const [devalPct, setDevalPct] = useState<number | null>(null);
+  const [guardandoDeval, setGuardandoDeval] = useState(false);
   const [tick, setTick] = useState(0);
   const recargar = useCallback(() => setTick((t) => t + 1), []);
 
@@ -2262,10 +2270,51 @@ function SeccionCuentasCobrar() {
     return () => { a = false; };
   }, [tick]);
 
+  useEffect(() => {
+    let a = true;
+    (async () => {
+      try {
+        const r = await fetch("/api/admin/config");
+        const d = await r.json();
+        const v = d.config?.devaluacion_mensual;
+        if (a && v != null && v !== "") { setDevalInput(String(v)); setDevalPct(Number(String(v).replace(",", "."))); }
+      } catch {
+        /* el ajuste es opcional */
+      }
+    })();
+    return () => { a = false; };
+  }, []);
+
+  async function guardarDeval() {
+    setGuardandoDeval(true);
+    setError(null);
+    try {
+      const val = parseMonto(devalInput);
+      await fetch("/api/admin/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clave: "devaluacion_mensual", valor: val != null ? String(val) : "" }),
+      });
+      setDevalPct(val);
+      setMsg(val ? `Devaluación mensual estimada: ${val}%.` : "Ajuste de devaluación desactivado.");
+    } catch {
+      setError("No se pudo guardar el ajuste.");
+    } finally {
+      setGuardandoDeval(false);
+    }
+  }
+
   const abiertas = cuentas.filter((c) => !c.cobrada);
   const totalUsd = abiertas.reduce((s, c) => s + (c.monto_usd ?? 0), 0);
   const totalEur = abiertas.filter((c) => c.moneda === "EUR").reduce((s, c) => s + (c.monto ?? 0), 0);
   const lista = verTodas ? cuentas : abiertas;
+
+  // Merma por devaluación si esperas hasta el cierre del mes.
+  const diasCierre = diasHastaCierre();
+  const factorEspera = devalPct && devalPct > 0 ? Math.pow(1 - devalPct / 100, diasCierre / 30) : 1;
+  const perdidaDe = (c: CuentaCobrar): number | null =>
+    devalPct && devalPct > 0 && c.monto_usd != null ? c.monto_usd * (1 - factorEspera) : null;
+  const perdidaTotal = abiertas.reduce((s, c) => s + (perdidaDe(c) ?? 0), 0);
 
   function abrirCobro(c: CuentaCobrar) {
     setCobrando(c.id);
@@ -2323,6 +2372,27 @@ function SeccionCuentasCobrar() {
         </div>
       </div>
 
+      {/* Ajuste de devaluación (lo defines tú) */}
+      <div className="rounded-2xl bg-white ring-1 ring-marfil p-4 flex flex-wrap items-end gap-3">
+        <div>
+          <label className="block font-display text-[10px] tracking-[0.2em] uppercase text-cacao-mute mb-1">Devaluación mensual estimada</label>
+          <div className="flex items-center gap-1">
+            <input inputMode="decimal" value={devalInput} onChange={(e) => setDevalInput(e.target.value)} placeholder="ej. 8" className="w-24 border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
+            <span className="text-cacao-soft">%</span>
+          </div>
+        </div>
+        <button type="button" onClick={guardarDeval} disabled={guardandoDeval} className="rounded-lg bg-cacao text-white px-4 py-2 text-xs uppercase tracking-widest hover:bg-terracotta disabled:bg-marfil disabled:text-cacao-mute">{guardandoDeval ? "Guardando…" : "Guardar"}</button>
+        <p className="text-[11px] text-cacao-mute flex-1 min-w-[12rem]">Cámbialo cuando cambie la realidad. Solo se usa aquí, para estimar cuánto pierdes por tardar en cobrar. Déjalo vacío para no usarlo.</p>
+      </div>
+
+      {devalPct != null && devalPct > 0 && perdidaTotal > 0.005 && (
+        <div className="rounded-2xl bg-[#FBF3E2] ring-1 ring-[#E7D3A1] p-4">
+          <p className="text-[#7A5A18]">
+            Si no cobras antes del cierre {diasCierre > 0 ? `(faltan ~${diasCierre} día${diasCierre === 1 ? "" : "s"})` : "(el mes cierra hoy)"}, podrías perder ≈ <strong>{fmtMonto(perdidaTotal, "USD")}</strong> por devaluación.
+          </p>
+        </div>
+      )}
+
       <section className="rounded-2xl bg-white ring-1 ring-marfil overflow-hidden">
         {cargando ? (
           <p className="p-5 text-cacao-soft italic font-serif">Cargando…</p>
@@ -2340,6 +2410,9 @@ function SeccionCuentasCobrar() {
                       {c.deudor && <span>· {c.deudor}</span>}
                       {c.monto_usd != null && <span>· ≈ {fmtMonto(c.monto_usd, "USD")}</span>}
                       {c.cobrada && <span>· cobrada {c.fecha_cobro ? fmtFecha(c.fecha_cobro) : ""}</span>}
+                      {!c.cobrada && perdidaDe(c) != null && perdidaDe(c)! > 0.005 && (
+                        <span className="text-[#9A4C3D]">· pierdes ≈ {fmtMonto(perdidaDe(c)!, "USD")} si esperas al cierre</span>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center gap-3 shrink-0">
