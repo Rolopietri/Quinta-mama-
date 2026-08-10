@@ -5,7 +5,7 @@
 // clave, y todo lo financiero se lee/escribe por /api/admin/* (que exige el
 // token). Menú desplegable con las secciones; se van construyendo por fases.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 
 type Seccion = "proveedores" | "solicitudes" | "ingresos" | "egresos" | "estado" | "historico";
 const SECCIONES: { id: Seccion; label: string; grupo?: string }[] = [
@@ -158,6 +158,8 @@ function Panel({ onSalir }: { onSalir: () => void }) {
 
       {seccion === "proveedores" ? (
         <SeccionProveedores />
+      ) : seccion === "solicitudes" ? (
+        <SeccionSolicitudes />
       ) : (
         <EnConstruccion seccion={actual.label} />
       )}
@@ -407,4 +409,535 @@ function FormProveedor({
       </div>
     </div>
   );
+}
+
+// ── Solicitudes de pago ─────────────────────────────────────────────
+// Una solicitud junta uno o varios pagos (líneas). Cada línea puede venir
+// de un proveedor de la base (con sus datos) o ser un concepto adicional.
+// De aquí sale el texto de WhatsApp para pedir los pagos, y se guarda el
+// historial (pendiente → procesada). Moneda original + conversión a USD.
+
+const MONEDAS = ["Bs", "USD", "EUR"] as const;
+const METODOS = ["Transferencia", "Pago móvil", "Zelle", "Efectivo", "USDT", "Otro"] as const;
+const TASA_TIPOS = ["dólar", "del día", "promedio", "VNC", "USDT", "otra"] as const;
+
+type LineaForm = {
+  uid: string;
+  tipo: "proveedor" | "adicional";
+  proveedor_id: string | null;
+  proveedor_nombre: string;
+  datos_registrados: boolean;
+  concepto: string;
+  monto: string;
+  moneda: string;
+  metodo: string;
+  tasa: string;
+  tasa_tipo: string;
+  factura: string;
+  nota: string;
+};
+
+type SolicitudCab = { id: string; fecha: string; estado: string; nota: string | null };
+type LineaGuardada = Omit<LineaForm, "uid" | "monto" | "tasa"> & {
+  id: string;
+  orden: number;
+  monto: number | null;
+  tasa: number | null;
+};
+
+let uidSeq = 0;
+function nuevaLinea(tipo: "proveedor" | "adicional"): LineaForm {
+  uidSeq += 1;
+  return {
+    uid: `l${uidSeq}`,
+    tipo,
+    proveedor_id: null,
+    proveedor_nombre: "",
+    datos_registrados: false,
+    concepto: "",
+    monto: "",
+    moneda: "Bs",
+    metodo: tipo === "proveedor" ? "Transferencia" : "",
+    tasa: "",
+    tasa_tipo: "dólar",
+    factura: "",
+    nota: "",
+  };
+}
+
+function parseMonto(s: string): number | null {
+  const t = (s ?? "").toString().trim();
+  if (!t) return null;
+  // Acepta "80.265,79" (es-VE) o "80265.79": quita miles y normaliza coma.
+  const limpio = t.replace(/\./g, "").replace(",", ".");
+  const n = Number(/[.,]/.test(t) ? limpio : t.replace(",", "."));
+  return isFinite(n) ? n : null;
+}
+
+function fmtMonto(monto: number, moneda: string): string {
+  if (moneda === "USD") return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(monto);
+  const n = new Intl.NumberFormat("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(monto);
+  if (moneda === "EUR") return `${n} €`;
+  return `${n} Bs`;
+}
+
+// Equivalente en USD de una línea, si se puede calcular (si no, null).
+function equivUSD(monto: number | null, moneda: string, tasa: number | null): number | null {
+  if (monto == null) return null;
+  if (moneda === "USD") return monto;
+  if (moneda === "Bs") return tasa && tasa > 0 ? monto / tasa : null;
+  if (moneda === "EUR") return tasa && tasa > 0 ? monto * tasa : null;
+  return null;
+}
+
+function textoSolicitud(lineas: LineaForm[]): string {
+  const provs = lineas.filter((l) => l.tipo === "proveedor");
+  const adics = lineas.filter((l) => l.tipo === "adicional");
+  const bloques: string[] = [];
+  provs.forEach((l, i) => {
+    const m = parseMonto(l.monto);
+    const b: string[] = [`${i + 1}. Proveedor: ${l.proveedor_nombre || "(sin nombre)"}`];
+    if (l.concepto) b.push(`Concepto: ${l.concepto}`);
+    b.push(`Monto: ${m != null ? fmtMonto(m, l.moneda) : "(sin monto)"}`);
+    if (l.metodo) b.push(`Método: ${l.metodo}`);
+    if (l.factura) b.push(`Factura: ${l.factura}`);
+    if (l.nota) b.push(`NOTA: ${l.nota}`);
+    b.push(l.datos_registrados ? "✓ Datos registrados" : "✕ Faltan datos");
+    bloques.push(b.join("\n"));
+  });
+  if (adics.length) {
+    const items = adics.map((l) => {
+      const m = parseMonto(l.monto);
+      return `${l.concepto || "(concepto)"}: ${m != null ? fmtMonto(m, l.moneda) : "(sin monto)"}`;
+    });
+    bloques.push(["Adicionales:", ...items].join("\n"));
+  }
+  return bloques.join("\n\n");
+}
+
+function SeccionSolicitudes() {
+  const [vista, setVista] = useState<"nueva" | "historial">("nueva");
+  return (
+    <div className="space-y-4">
+      <div className="flex gap-1 rounded-lg ring-1 ring-marfil p-1 w-fit">
+        {([["nueva", "Nueva solicitud"], ["historial", "Historial"]] as const).map(([k, label]) => (
+          <button
+            key={k}
+            type="button"
+            onClick={() => setVista(k)}
+            className={`rounded-md px-3 py-1.5 text-xs uppercase tracking-widest ${vista === k ? "bg-cacao text-white" : "text-cacao hover:bg-marfil-soft"}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {vista === "nueva" ? <NuevaSolicitud /> : <HistorialSolicitudes />}
+    </div>
+  );
+}
+
+function NuevaSolicitud() {
+  const [proveedores, setProveedores] = useState<Proveedor[]>([]);
+  const [lineas, setLineas] = useState<LineaForm[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [copiado, setCopiado] = useState(false);
+  const [guardando, setGuardando] = useState(false);
+
+  useEffect(() => {
+    let a = true;
+    (async () => {
+      try {
+        const r = await fetch("/api/admin/proveedores");
+        const d = await r.json();
+        if (a) setProveedores(d.proveedores ?? []);
+      } catch {
+        /* la lista de proveedores es opcional para armar el texto */
+      }
+    })();
+    return () => { a = false; };
+  }, []);
+
+  function actualizar(uid: string, cambios: Partial<LineaForm>) {
+    setLineas((ls) => ls.map((l) => (l.uid === uid ? { ...l, ...cambios } : l)));
+  }
+  function elegirProveedor(uid: string, id: string) {
+    const p = proveedores.find((x) => x.id === id);
+    if (!p) { actualizar(uid, { proveedor_id: null, proveedor_nombre: "", datos_registrados: false }); return; }
+    actualizar(uid, {
+      proveedor_id: p.id,
+      proveedor_nombre: p.nombre,
+      concepto: p.concepto ?? "",
+      datos_registrados: !!(p.numero_cuenta && p.banco),
+    });
+  }
+  function quitar(uid: string) {
+    setLineas((ls) => ls.filter((l) => l.uid !== uid));
+  }
+
+  const texto = textoSolicitud(lineas);
+  const totalUSD = lineas.reduce((acc, l) => {
+    const e = equivUSD(parseMonto(l.monto), l.moneda, parseMonto(l.tasa));
+    return e != null ? acc + e : acc;
+  }, 0);
+  const faltanTasa = lineas.some((l) => parseMonto(l.monto) != null && equivUSD(parseMonto(l.monto), l.moneda, parseMonto(l.tasa)) == null);
+
+  async function copiar() {
+    try {
+      await navigator.clipboard.writeText(texto);
+      setCopiado(true);
+      setTimeout(() => setCopiado(false), 2000);
+    } catch {
+      setError("No se pudo copiar. Selecciona el texto y cópialo a mano.");
+    }
+  }
+
+  async function guardar() {
+    if (lineas.length === 0) { setError("Agrega al menos una línea."); return; }
+    setGuardando(true);
+    setError(null);
+    setMsg(null);
+    try {
+      const payload = {
+        lineas: lineas.map((l) => ({
+          tipo: l.tipo,
+          proveedor_id: l.proveedor_id,
+          proveedor_nombre: l.proveedor_nombre,
+          datos_registrados: l.datos_registrados,
+          concepto: l.concepto,
+          monto: parseMonto(l.monto),
+          moneda: l.moneda,
+          metodo: l.metodo,
+          tasa: parseMonto(l.tasa),
+          tasa_tipo: l.tasa_tipo,
+          factura: l.factura,
+          nota: l.nota,
+        })),
+      };
+      const r = await fetch("/api/admin/solicitudes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "Error guardando");
+      setMsg("Solicitud guardada en el historial (pendiente).");
+      setLineas([]);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error");
+    } finally {
+      setGuardando(false);
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap gap-2">
+        <button type="button" onClick={() => setLineas((l) => [...l, nuevaLinea("proveedor")])} className="rounded-lg bg-cacao text-white px-4 py-2 text-xs uppercase tracking-widest hover:bg-terracotta">+ Agregar proveedor al pago</button>
+        <button type="button" onClick={() => setLineas((l) => [...l, nuevaLinea("adicional")])} className="rounded-lg ring-1 ring-marfil text-cacao px-4 py-2 text-xs uppercase tracking-widest hover:bg-marfil-soft">+ Concepto adicional</button>
+      </div>
+
+      {error && <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419]">{error}</div>}
+      {msg && <div className="rounded-lg bg-[#F1F4ED] ring-1 ring-[#C9D6BC] p-3 text-sm text-[#2F4A1F]">{msg}</div>}
+
+      {lineas.length === 0 ? (
+        <p className="rounded-2xl bg-white ring-1 ring-marfil p-8 text-center text-cacao-soft italic font-serif">
+          Aún no hay pagos en esta solicitud. Agrega un proveedor o un concepto adicional.
+        </p>
+      ) : (
+        <div className="space-y-3">
+          {lineas.map((l, i) => (
+            <LineaEditor
+              key={l.uid}
+              linea={l}
+              indice={i + 1}
+              proveedores={proveedores}
+              onCambio={(c) => actualizar(l.uid, c)}
+              onElegirProveedor={(id) => elegirProveedor(l.uid, id)}
+              onQuitar={() => quitar(l.uid)}
+            />
+          ))}
+        </div>
+      )}
+
+      {lineas.length > 0 && (
+        <>
+          <div className="rounded-2xl bg-[#0F0F0F] text-[#EDE7E0] p-4">
+            <div className="flex items-center justify-between mb-2">
+              <span className="font-display text-[10px] tracking-[0.3em] uppercase text-[#9A938B]">Texto para WhatsApp</span>
+              <button type="button" onClick={copiar} className="rounded-md bg-[#EDE7E0] text-[#0F0F0F] px-3 py-1.5 text-[11px] uppercase tracking-widest hover:bg-white">
+                {copiado ? "✓ Copiado" : "Copiar texto"}
+              </button>
+            </div>
+            <pre className="whitespace-pre-wrap font-mono text-sm leading-relaxed">{texto || "…"}</pre>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-xs text-cacao-mute">
+              Total ≈ {fmtMonto(totalUSD, "USD")}
+              {faltanTasa ? " · faltan tasas para incluir todo" : ""}
+            </p>
+            <button type="button" onClick={guardar} disabled={guardando} className="rounded-lg bg-cacao text-white px-5 py-2.5 text-xs uppercase tracking-widest hover:bg-terracotta disabled:bg-marfil disabled:text-cacao-mute">
+              {guardando ? "Guardando…" : "Guardar en historial"}
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function LineaEditor({
+  linea,
+  indice,
+  proveedores,
+  onCambio,
+  onElegirProveedor,
+  onQuitar,
+}: {
+  linea: LineaForm;
+  indice: number;
+  proveedores: Proveedor[];
+  onCambio: (c: Partial<LineaForm>) => void;
+  onElegirProveedor: (id: string) => void;
+  onQuitar: () => void;
+}) {
+  const esProv = linea.tipo === "proveedor";
+  return (
+    <div className="rounded-2xl bg-white ring-1 ring-marfil p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <span className="font-display text-[10px] tracking-[0.25em] uppercase text-cacao-mute">
+          {esProv ? `Pago ${indice} · Proveedor` : "Concepto adicional"}
+        </span>
+        <div className="flex items-center gap-2">
+          {esProv && (
+            <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] uppercase tracking-widest ${linea.datos_registrados ? "bg-[#F1F4ED] text-[#2F4A1F]" : "bg-[#F9EBE7] text-[#7A2419]"}`}>
+              <span className={`h-1.5 w-1.5 rounded-full ${linea.datos_registrados ? "bg-[#4B7A2F]" : "bg-[#C0563F]"}`} />
+              {linea.datos_registrados ? "Datos registrados" : "Faltan datos"}
+            </span>
+          )}
+          <button type="button" onClick={onQuitar} className="text-cacao-soft hover:text-terracotta text-sm" aria-label="Quitar">✕</button>
+        </div>
+      </div>
+
+      {esProv && (
+        <div>
+          <label className="block font-display text-[10px] tracking-[0.2em] uppercase text-cacao-mute mb-1">Proveedor</label>
+          <select
+            value={linea.proveedor_id ?? ""}
+            onChange={(e) => onElegirProveedor(e.target.value)}
+            className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao bg-white"
+          >
+            <option value="">— Elegir de la base —</option>
+            {proveedores.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+          </select>
+        </div>
+      )}
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Campo label="Concepto">
+          <input value={linea.concepto} onChange={(e) => onCambio({ concepto: e.target.value })} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
+        </Campo>
+        <div className="grid grid-cols-2 gap-2">
+          <Campo label="Monto">
+            <input inputMode="decimal" value={linea.monto} onChange={(e) => onCambio({ monto: e.target.value })} placeholder="0,00" className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
+          </Campo>
+          <Campo label="Moneda">
+            <select value={linea.moneda} onChange={(e) => onCambio({ moneda: e.target.value })} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
+              {MONEDAS.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </Campo>
+        </div>
+      </div>
+
+      {esProv && (
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Campo label="Método de pago">
+            <select value={linea.metodo} onChange={(e) => onCambio({ metodo: e.target.value })} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
+              {METODOS.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </Campo>
+          <Campo label="Factura (opcional)">
+            <input value={linea.factura} onChange={(e) => onCambio({ factura: e.target.value })} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
+          </Campo>
+        </div>
+      )}
+
+      {linea.moneda !== "USD" && (
+        <div className="grid grid-cols-2 gap-2">
+          <Campo label="Tasa a USD (opcional)">
+            <input inputMode="decimal" value={linea.tasa} onChange={(e) => onCambio({ tasa: e.target.value })} placeholder={linea.moneda === "Bs" ? "Bs por USD" : "USD por EUR"} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
+          </Campo>
+          <Campo label="Tipo de tasa">
+            <select value={linea.tasa_tipo} onChange={(e) => onCambio({ tasa_tipo: e.target.value })} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
+              {TASA_TIPOS.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </Campo>
+        </div>
+      )}
+
+      <Campo label="Nota (opcional)">
+        <input value={linea.nota} onChange={(e) => onCambio({ nota: e.target.value })} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
+      </Campo>
+    </div>
+  );
+}
+
+function Campo({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div>
+      <label className="block font-display text-[10px] tracking-[0.2em] uppercase text-cacao-mute mb-1">{label}</label>
+      {children}
+    </div>
+  );
+}
+
+function HistorialSolicitudes() {
+  const [solicitudes, setSolicitudes] = useState<SolicitudCab[]>([]);
+  const [cargando, setCargando] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [abierta, setAbierta] = useState<(SolicitudCab & { lineas: LineaGuardada[] }) | null>(null);
+  const [tick, setTick] = useState(0);
+  const recargar = useCallback(() => setTick((t) => t + 1), []);
+
+  useEffect(() => {
+    let a = true;
+    (async () => {
+      try {
+        const r = await fetch("/api/admin/solicitudes");
+        const d = await r.json();
+        if (a) setSolicitudes(d.solicitudes ?? []);
+      } catch {
+        if (a) setError("No se pudo cargar el historial.");
+      } finally {
+        if (a) setCargando(false);
+      }
+    })();
+    return () => { a = false; };
+  }, [tick]);
+
+  async function abrir(id: string) {
+    setError(null);
+    try {
+      const r = await fetch(`/api/admin/solicitudes?id=${id}`);
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error);
+      setAbierta(d.solicitud);
+    } catch {
+      setError("No se pudo abrir la solicitud.");
+    }
+  }
+  async function cambiarEstado(id: string, estado: string) {
+    try {
+      await fetch("/api/admin/solicitudes", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, estado }),
+      });
+      setAbierta((s) => (s && s.id === id ? { ...s, estado } : s));
+      recargar();
+    } catch {
+      setError("No se pudo cambiar el estado.");
+    }
+  }
+  async function borrar(id: string) {
+    try {
+      await fetch(`/api/admin/solicitudes?id=${id}`, { method: "DELETE" });
+      setAbierta(null);
+      recargar();
+    } catch {
+      setError("No se pudo eliminar.");
+    }
+  }
+
+  if (abierta) {
+    const provs = abierta.lineas.filter((l) => l.tipo === "proveedor");
+    const adics = abierta.lineas.filter((l) => l.tipo === "adicional");
+    return (
+      <div className="space-y-4">
+        <button type="button" onClick={() => setAbierta(null)} className="text-xs uppercase tracking-widest text-cacao-soft hover:text-cacao">← Volver al historial</button>
+        <div className="rounded-2xl bg-white ring-1 ring-marfil p-5 space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h3 className="font-cinzel text-lg text-cacao">Solicitud del {fmtFecha(abierta.fecha)}</h3>
+              <EstadoPill estado={abierta.estado} />
+            </div>
+            <div className="flex gap-2">
+              {abierta.estado === "pendiente" ? (
+                <button type="button" onClick={() => cambiarEstado(abierta.id, "procesada")} className="rounded-lg bg-cacao text-white px-4 py-2 text-xs uppercase tracking-widest hover:bg-terracotta">Marcar procesada</button>
+              ) : (
+                <button type="button" onClick={() => cambiarEstado(abierta.id, "pendiente")} className="rounded-lg ring-1 ring-marfil text-cacao px-4 py-2 text-xs uppercase tracking-widest hover:bg-marfil-soft">Reabrir</button>
+              )}
+              <button type="button" onClick={() => borrar(abierta.id)} className="rounded-lg ring-1 ring-marfil text-cacao-soft px-4 py-2 text-xs uppercase tracking-widest hover:text-terracotta hover:ring-terracotta">Eliminar</button>
+            </div>
+          </div>
+          {error && <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419]">{error}</div>}
+          <ul className="divide-y divide-marfil">
+            {provs.map((l, i) => (
+              <li key={l.id} className="py-3">
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="text-cacao font-medium">{i + 1}. {l.proveedor_nombre || "(sin nombre)"}</span>
+                  <span className="text-cacao">{l.monto != null ? fmtMonto(l.monto, l.moneda || "Bs") : "—"}</span>
+                </div>
+                {l.concepto && <div className="text-xs text-cacao-soft mt-0.5">{l.concepto}</div>}
+                <div className="text-[11px] text-cacao-mute mt-1">
+                  {[l.metodo, l.factura && `Factura ${l.factura}`, l.datos_registrados ? "✓ datos registrados" : "✕ faltan datos"].filter(Boolean).join(" · ")}
+                </div>
+                {l.nota && <div className="text-[11px] text-cacao-mute mt-0.5 italic">NOTA: {l.nota}</div>}
+              </li>
+            ))}
+            {adics.map((l) => (
+              <li key={l.id} className="py-3 flex items-baseline justify-between gap-3">
+                <span className="text-cacao-soft">{l.concepto || "(concepto)"}</span>
+                <span className="text-cacao">{l.monto != null ? fmtMonto(l.monto, l.moneda || "Bs") : "—"}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {error && <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419]">{error}</div>}
+      {cargando ? (
+        <p className="rounded-2xl bg-white ring-1 ring-marfil p-5 text-cacao-soft italic font-serif">Cargando…</p>
+      ) : solicitudes.length === 0 ? (
+        <p className="rounded-2xl bg-white ring-1 ring-marfil p-8 text-center text-cacao-soft italic font-serif">Aún no hay solicitudes guardadas.</p>
+      ) : (
+        <ul className="rounded-2xl bg-white ring-1 ring-marfil overflow-hidden divide-y divide-marfil">
+          {solicitudes.map((s) => (
+            <li key={s.id}>
+              <button type="button" onClick={() => abrir(s.id)} className="flex w-full items-center justify-between gap-3 p-4 text-left hover:bg-marfil-soft">
+                <div>
+                  <div className="text-cacao">Solicitud del {fmtFecha(s.fecha)}</div>
+                  {s.nota && <div className="text-xs text-cacao-soft mt-0.5">{s.nota}</div>}
+                </div>
+                <EstadoPill estado={s.estado} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function EstadoPill({ estado }: { estado: string }) {
+  const procesada = estado === "procesada";
+  return (
+    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] uppercase tracking-widest ${procesada ? "bg-[#F1F4ED] text-[#2F4A1F]" : "bg-[#FBF3E2] text-[#7A5A18]"}`}>
+      <span className={`h-1.5 w-1.5 rounded-full ${procesada ? "bg-[#4B7A2F]" : "bg-[#C79A2E]"}`} />
+      {procesada ? "Procesada" : "Pendiente"}
+    </span>
+  );
+}
+
+function fmtFecha(iso: string): string {
+  // iso "2026-08-10" → "10 ago 2026" sin depender de zona horaria.
+  const [y, m, d] = (iso ?? "").split("-").map((x) => parseInt(x, 10));
+  if (!y || !m || !d) return iso ?? "";
+  const meses = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+  return `${d} ${meses[m - 1] ?? ""} ${y}`;
 }
