@@ -10,6 +10,18 @@ function autorizado(req: NextRequest): boolean {
   return tokenValido(req.cookies.get(ADMIN_COOKIE)?.value);
 }
 
+// Clasifica cada método del reporte:
+//  - 'excluir': RPP (cortesías, no son ingreso)
+//  - 'cobrar' : CXC (ventas a crédito → cuentas por cobrar)
+//  - 'ingreso': el resto (ventas del día)
+type Destino = "ingreso" | "cobrar" | "excluir";
+function destinoDe(metodo: string): Destino {
+  const k = metodo.trim().toUpperCase();
+  if (k === "RPP") return "excluir";
+  if (k.startsWith("CXC")) return "cobrar";
+  return "ingreso";
+}
+
 // POST { pdf_base64 } → lee el PDF y devuelve la vista previa (no guarda nada).
 export async function POST(req: NextRequest) {
   if (!autorizado(req)) return NextResponse.json({ error: "no autorizado" }, { status: 401 });
@@ -31,7 +43,11 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({
     reporte: {
       ...reporte,
-      lineas: reporte.lineas.map((l) => ({ ...l, metodoBonito: nombreMetodo(l.metodo) })),
+      lineas: reporte.lineas.map((l) => ({
+        ...l,
+        metodoBonito: nombreMetodo(l.metodo),
+        destino: destinoDe(l.metodo),
+      })),
     },
   });
 }
@@ -52,28 +68,45 @@ export async function PUT(req: NextRequest) {
   const lineas = Array.isArray(b.lineas) ? (b.lineas as Record<string, unknown>[]) : [];
   if (lineas.length === 0) return NextResponse.json({ error: "No hay métodos que registrar." }, { status: 400 });
 
-  // Dedupe: ¿ya hay ventas de Setux para ese día?
-  const { data: previos, error: eSel } = await sb
-    .from("admin_ingreso")
-    .select("id")
-    .eq("fuente", "setux")
-    .eq("fecha", fecha);
-  if (eSel) return NextResponse.json({ error: eSel.message }, { status: 500 });
-  if (previos && previos.length > 0 && b.reemplazar !== true) {
-    return NextResponse.json({ yaExiste: true, cuantos: previos.length }, { status: 409 });
+  const usdDe = (total: number) => (tasa ? Math.round(total * tasa * 100) / 100 : null);
+
+  // Dedupe: ¿ya hay algo de Setux para ese día (ingresos o cuentas por cobrar)?
+  const [{ data: prevIng, error: e1 }, { data: prevCxc, error: e2 }] = await Promise.all([
+    sb.from("admin_ingreso").select("id").eq("fuente", "setux").eq("fecha", fecha),
+    sb.from("admin_cuenta_cobrar").select("id").eq("fuente", "setux").eq("fecha", fecha),
+  ]);
+  if (e1 || e2) return NextResponse.json({ error: (e1 || e2)!.message }, { status: 500 });
+  const yaCuantos = (prevIng?.length ?? 0) + (prevCxc?.length ?? 0);
+  if (yaCuantos > 0 && b.reemplazar !== true) {
+    return NextResponse.json({ yaExiste: true, cuantos: yaCuantos }, { status: 409 });
   }
-  if (previos && previos.length > 0 && b.reemplazar === true) {
+  if (yaCuantos > 0 && b.reemplazar === true) {
     await sb.from("admin_ingreso").delete().eq("fuente", "setux").eq("fecha", fecha);
+    // no borra cuentas por cobrar ya cobradas (tienen ingreso enlazado)
+    await sb.from("admin_cuenta_cobrar").delete().eq("fuente", "setux").eq("fecha", fecha).eq("cobrada", false);
   }
 
-  const filas = lineas
-    .map((l) => {
-      const total = typeof l.total === "number" ? l.total : Number(l.total);
-      if (!isFinite(total)) return null;
-      const metodo = typeof l.metodo === "string" ? l.metodo : "";
-      const cantidad = typeof l.cantidad === "number" ? l.cantidad : null;
-      const usd = tasa ? Math.round(total * tasa * 100) / 100 : null;
-      return {
+  // Separar según destino (RPP se ignora; CXC va a cuentas por cobrar).
+  const ingresos: Record<string, unknown>[] = [];
+  const cobrar: Record<string, unknown>[] = [];
+  for (const l of lineas) {
+    const total = typeof l.total === "number" ? l.total : Number(l.total);
+    if (!isFinite(total)) continue;
+    const metodo = typeof l.metodo === "string" ? l.metodo : "";
+    if (destinoDe(metodo) === "excluir") continue;
+    const cantidad = typeof l.cantidad === "number" ? l.cantidad : null;
+    if (destinoDe(metodo) === "cobrar") {
+      cobrar.push({
+        fecha,
+        descripcion: `Ventas a crédito (CXC) del ${fecha}`,
+        monto: total,
+        moneda: "EUR",
+        tasa,
+        monto_usd: usdDe(total),
+        fuente: "setux",
+      });
+    } else {
+      ingresos.push({
         fecha,
         concepto: `Ventas ${metodo}`.trim(),
         categoria_id: categoriaId,
@@ -82,17 +115,25 @@ export async function PUT(req: NextRequest) {
         monto: total,
         moneda: "EUR",
         tasa,
-        monto_usd: usd,
+        monto_usd: usdDe(total),
         metodo,
         factura: null,
         nota: cantidad != null ? `${cantidad} transacciones (Setux)` : "Setux",
         fuente: "setux",
-      };
-    })
-    .filter((f): f is NonNullable<typeof f> => f !== null);
+      });
+    }
+  }
 
-  if (filas.length === 0) return NextResponse.json({ error: "No hay montos válidos." }, { status: 400 });
-  const { data, error } = await sb.from("admin_ingreso").insert(filas).select("id");
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ ok: true, creados: data?.length ?? 0 });
+  if (ingresos.length === 0 && cobrar.length === 0) {
+    return NextResponse.json({ error: "No hay montos válidos." }, { status: 400 });
+  }
+  if (ingresos.length) {
+    const { error } = await sb.from("admin_ingreso").insert(ingresos);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+  if (cobrar.length) {
+    const { error } = await sb.from("admin_cuenta_cobrar").insert(cobrar);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+  return NextResponse.json({ ok: true, creados: ingresos.length, porCobrar: cobrar.length });
 }

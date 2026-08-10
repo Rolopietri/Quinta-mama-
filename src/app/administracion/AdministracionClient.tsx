@@ -7,11 +7,12 @@
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 
-type Seccion = "proveedores" | "solicitudes" | "ingresos" | "egresos" | "estado" | "historico";
+type Seccion = "proveedores" | "solicitudes" | "ingresos" | "cobrar" | "egresos" | "estado" | "historico";
 const SECCIONES: { id: Seccion; label: string; grupo?: string }[] = [
   { id: "proveedores", label: "Proveedores", grupo: "Proveedores" },
   { id: "solicitudes", label: "Generar solicitud de pagos", grupo: "Proveedores" },
   { id: "ingresos", label: "Ingresos" },
+  { id: "cobrar", label: "Cuentas por cobrar" },
   { id: "egresos", label: "Egresos" },
   { id: "estado", label: "Estado de Cuenta" },
   { id: "historico", label: "Históricos y comparación" },
@@ -156,10 +157,14 @@ function Panel({ onSalir }: { onSalir: () => void }) {
         </div>
       </div>
 
+      <AlertaCobrar refreshKey={seccion} onIr={() => setSeccion("cobrar")} />
+
       {seccion === "proveedores" ? (
         <SeccionProveedores />
       ) : seccion === "solicitudes" ? (
         <SeccionSolicitudes />
+      ) : seccion === "cobrar" ? (
+        <SeccionCuentasCobrar />
       ) : seccion === "egresos" ? (
         <SeccionEgresos />
       ) : seccion === "ingresos" ? (
@@ -1246,11 +1251,12 @@ function EgresosMes() {
   );
 }
 
-function ResumenCaja({ titulo, valor, fuerte }: { titulo: string; valor: string; fuerte?: boolean }) {
+function ResumenCaja({ titulo, valor, sub, fuerte }: { titulo: string; valor: string; sub?: string; fuerte?: boolean }) {
   return (
     <div className={`rounded-2xl ring-1 p-4 ${fuerte ? "bg-[#0F0F0F] text-[#EDE7E0] ring-[#0F0F0F]" : "bg-white text-cacao ring-marfil"}`}>
       <div className={`font-display text-[9px] tracking-[0.25em] uppercase ${fuerte ? "text-[#9A938B]" : "text-cacao-mute"}`}>{titulo}</div>
       <div className="text-lg font-medium mt-1">{valor}</div>
+      {sub && <div className={`text-[11px] mt-0.5 ${fuerte ? "text-[#9A938B]" : "text-cacao-mute"}`}>{sub}</div>}
     </div>
   );
 }
@@ -1539,6 +1545,7 @@ function IngresosMes() {
   }, [mes, tick]);
 
   const totalUSD = ingresos.reduce((s, e) => s + (e.monto_usd ?? 0), 0);
+  const totalEUR = ingresos.filter((e) => e.moneda === "EUR").reduce((s, e) => s + (e.monto ?? 0), 0);
   const sinTasa = ingresos.some((e) => e.monto != null && e.monto_usd == null);
   const porCategoria = ingresos.reduce<Record<string, number>>((acc, e) => {
     const k = e.categoria_nombre || "Sin categoría";
@@ -1584,7 +1591,7 @@ function IngresosMes() {
       {msg && <div className="rounded-lg bg-[#F1F4ED] ring-1 ring-[#C9D6BC] p-3 text-sm text-[#2F4A1F]">{msg}</div>}
 
       <div className="grid gap-3 sm:grid-cols-3">
-        <ResumenCaja titulo="Total del mes" valor={fmtMonto(totalUSD, "USD")} fuerte />
+        <ResumenCaja titulo="Total del mes" valor={fmtMonto(totalUSD, "USD")} sub={totalEUR > 0 ? `${fmtMonto(totalEUR, "EUR")} en Setux` : undefined} fuerte />
         <div className="sm:col-span-2 rounded-2xl bg-white ring-1 ring-marfil p-4">
           <div className="font-display text-[9px] tracking-[0.25em] uppercase text-cacao-mute mb-2">Por categoría</div>
           {desglose.length === 0 ? (
@@ -1964,7 +1971,7 @@ function DesgloseCaja({
 // ── Importar ventas de Setux ────────────────────────────────────────
 // Beatriz sube el PDF diario de Setux; el servidor lo lee y muestra la vista
 // previa; ella pone la tasa €→USD y confirma → crea un ingreso por método.
-type LineaSetuxUI = { metodo: string; metodoBonito: string; cantidad: number | null; total: number; incluir: boolean };
+type LineaSetuxUI = { metodo: string; metodoBonito: string; cantidad: number | null; total: number; incluir: boolean; destino: "ingreso" | "cobrar" | "excluir" };
 type ReporteSetuxUI = { fecha: string | null; desde: string | null; hasta: string | null; usuario: string | null; total: number | null };
 
 function ImportarSetux() {
@@ -2028,7 +2035,8 @@ function ImportarSetux() {
       const rep = d.reporte;
       setReporte({ fecha: rep.fecha, desde: rep.desde, hasta: rep.hasta, usuario: rep.usuario, total: rep.total });
       setFecha(rep.fecha ?? "");
-      setLineas((rep.lineas as Omit<LineaSetuxUI, "incluir">[]).map((l) => ({ ...l, incluir: true })));
+      // RPP (cortesías) no se cuenta: llega desmarcado.
+      setLineas((rep.lineas as Omit<LineaSetuxUI, "incluir">[]).map((l) => ({ ...l, incluir: l.destino !== "excluir" })));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error");
       limpiar();
@@ -2038,9 +2046,10 @@ function ImportarSetux() {
   }
 
   const tasaNum = parseMonto(tasa);
-  const incluidas = lineas.filter((l) => l.incluir);
-  const totalEUR = incluidas.reduce((s, l) => s + l.total, 0);
-  const totalUSD = tasaNum ? totalEUR * tasaNum : null;
+  const incluidas = lineas.filter((l) => l.incluir && l.destino !== "excluir");
+  const ingresoEUR = incluidas.filter((l) => l.destino === "ingreso").reduce((s, l) => s + l.total, 0);
+  const cobrarEUR = incluidas.filter((l) => l.destino === "cobrar").reduce((s, l) => s + l.total, 0);
+  const totalUSD = tasaNum ? ingresoEUR * tasaNum : null;
 
   async function registrar(reemplazar: boolean) {
     if (!fecha) { setError("Falta la fecha del reporte."); return; }
@@ -2064,7 +2073,9 @@ function ImportarSetux() {
       const d = await r.json();
       if (r.status === 409 && d.yaExiste) { setConflicto(d.cuantos ?? 0); setGuardando(false); return; }
       if (!r.ok) throw new Error(d.error || "No se pudo registrar.");
-      setMsg(`Listo: ${d.creados} ingreso${d.creados === 1 ? "" : "s"} del ${fmtFecha(fecha)} guardado${d.creados === 1 ? "" : "s"}.`);
+      const partes = [`${d.creados} ingreso${d.creados === 1 ? "" : "s"}`];
+      if (d.porCobrar > 0) partes.push(`${d.porCobrar} cuenta${d.porCobrar === 1 ? "" : "s"} por cobrar`);
+      setMsg(`Listo (${fmtFecha(fecha)}): ${partes.join(" y ")}.`);
       limpiar();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error");
@@ -2115,21 +2126,31 @@ function ImportarSetux() {
             </div>
             <ul className="divide-y divide-marfil">
               {lineas.map((l, i) => (
-                <li key={i} className={`px-4 py-2.5 grid grid-cols-[auto_1fr_auto_auto] gap-3 items-center ${l.incluir ? "" : "opacity-40"}`}>
-                  <input type="checkbox" checked={l.incluir} onChange={() => setLineas((ls) => ls.map((x, j) => (j === i ? { ...x, incluir: !x.incluir } : x)))} className="accent-[#0F0F0F]" />
-                  <span className="text-cacao text-sm">{l.metodoBonito}</span>
+                <li key={i} className={`px-4 py-2.5 grid grid-cols-[auto_1fr_auto_auto] gap-3 items-center ${l.incluir && l.destino !== "excluir" ? "" : "opacity-40"}`}>
+                  <input type="checkbox" checked={l.incluir} disabled={l.destino === "excluir"} onChange={() => setLineas((ls) => ls.map((x, j) => (j === i ? { ...x, incluir: !x.incluir } : x)))} className="accent-[#0F0F0F]" />
+                  <span className="text-cacao text-sm">
+                    {l.metodoBonito}
+                    {l.destino === "cobrar" && <span className="ml-2 inline-block rounded-full bg-[#FBF3E2] text-[#7A5A18] text-[9px] uppercase tracking-widest px-2 py-0.5 align-middle">→ Por cobrar</span>}
+                    {l.destino === "excluir" && <span className="ml-2 inline-block rounded-full bg-marfil-soft text-cacao-mute text-[9px] uppercase tracking-widest px-2 py-0.5 align-middle">Cortesía · no cuenta</span>}
+                  </span>
                   <span className="text-cacao-mute text-sm text-right tabular-nums">{l.cantidad ?? "—"}</span>
                   <span className="text-cacao text-sm text-right tabular-nums">{fmtMonto(l.total, "EUR")}</span>
                 </li>
               ))}
             </ul>
-            <div className="px-4 py-2.5 border-t border-marfil grid grid-cols-[auto_1fr_auto_auto] gap-3 items-center text-sm">
-              <span></span>
-              <span className="font-medium text-cacao">Total a registrar</span>
-              <span></span>
-              <span className="text-right font-medium text-cacao tabular-nums">
-                {fmtMonto(totalEUR, "EUR")}{totalUSD != null && <span className="block text-[11px] text-cacao-mute">≈ {fmtMonto(totalUSD, "USD")}</span>}
-              </span>
+            <div className="px-4 py-2.5 border-t border-marfil space-y-1 text-sm">
+              <div className="grid grid-cols-[1fr_auto] gap-3">
+                <span className="font-medium text-cacao">Ingresos a registrar</span>
+                <span className="text-right font-medium text-cacao tabular-nums">
+                  {fmtMonto(ingresoEUR, "EUR")}{totalUSD != null && <span className="block text-[11px] text-cacao-mute">≈ {fmtMonto(totalUSD, "USD")}</span>}
+                </span>
+              </div>
+              {cobrarEUR > 0 && (
+                <div className="grid grid-cols-[1fr_auto] gap-3 text-[#7A5A18]">
+                  <span>A cuentas por cobrar (CXC)</span>
+                  <span className="text-right tabular-nums">{fmtMonto(cobrarEUR, "EUR")}</span>
+                </div>
+              )}
             </div>
           </section>
 
@@ -2147,11 +2168,215 @@ function ImportarSetux() {
             </div>
           ) : (
             <button type="button" onClick={() => registrar(false)} disabled={guardando} className="rounded-lg bg-cacao text-white px-5 py-2.5 text-xs uppercase tracking-widest hover:bg-terracotta disabled:bg-marfil disabled:text-cacao-mute">
-              {guardando ? "Registrando…" : `Registrar ${incluidas.length} ingreso${incluidas.length === 1 ? "" : "s"} del día`}
+              {guardando ? "Registrando…" : "Registrar ventas del día"}
             </button>
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Cuentas por cobrar (CXC) ────────────────────────────────────────
+type CuentaCobrar = {
+  id: string;
+  fecha: string;
+  descripcion: string | null;
+  deudor: string | null;
+  monto: number | null;
+  moneda: string | null;
+  tasa: number | null;
+  monto_usd: number | null;
+  cobrada: boolean;
+  fecha_cobro: string | null;
+};
+
+function hoyISO(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+// Banner de alerta: aparece arriba del panel cuando hay cuentas por cobrar.
+function AlertaCobrar({ refreshKey, onIr }: { refreshKey: string; onIr: () => void }) {
+  const [abiertas, setAbiertas] = useState<CuentaCobrar[]>([]);
+  useEffect(() => {
+    let a = true;
+    (async () => {
+      try {
+        const r = await fetch("/api/admin/cuentas-cobrar?abiertas=1");
+        const d = await r.json();
+        if (a) setAbiertas(d.cuentas ?? []);
+      } catch {
+        /* silencioso: la alerta es informativa */
+      }
+    })();
+    return () => { a = false; };
+  }, [refreshKey]);
+
+  if (abiertas.length === 0) return null;
+  const usd = abiertas.reduce((s, c) => s + (c.monto_usd ?? 0), 0);
+  const eur = abiertas.filter((c) => c.moneda === "EUR").reduce((s, c) => s + (c.monto ?? 0), 0);
+
+  return (
+    <div className="rounded-2xl bg-[#F9EBE7] ring-1 ring-[#E0A79B] p-4 flex flex-wrap items-center justify-between gap-3">
+      <div className="flex items-center gap-3">
+        <span className="h-2.5 w-2.5 rounded-full bg-[#C0563F] shrink-0" />
+        <div>
+          <p className="text-[#7A2419] font-medium">
+            Tienes {abiertas.length} cuenta{abiertas.length === 1 ? "" : "s"} por cobrar
+            {usd > 0 ? ` · ≈ ${fmtMonto(usd, "USD")}` : ""}{eur > 0 ? ` (${fmtMonto(eur, "EUR")})` : ""}
+          </p>
+          <p className="text-xs text-[#9A4C3D]">Cóbralas antes de que cierre el mes.</p>
+        </div>
+      </div>
+      <button type="button" onClick={onIr} className="rounded-lg bg-[#7A2419] text-white px-4 py-2 text-xs uppercase tracking-widest hover:bg-[#5F1B12] shrink-0">Ver cuentas</button>
+    </div>
+  );
+}
+
+function SeccionCuentasCobrar() {
+  const [cuentas, setCuentas] = useState<CuentaCobrar[]>([]);
+  const [cargando, setCargando] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [verTodas, setVerTodas] = useState(false);
+  const [cobrando, setCobrando] = useState<string | null>(null);
+  const [fechaCobro, setFechaCobro] = useState(hoyISO());
+  const [tasaCobro, setTasaCobro] = useState("");
+  const [tick, setTick] = useState(0);
+  const recargar = useCallback(() => setTick((t) => t + 1), []);
+
+  useEffect(() => {
+    let a = true;
+    (async () => {
+      try {
+        const r = await fetch("/api/admin/cuentas-cobrar");
+        const d = await r.json();
+        if (a) setCuentas(d.cuentas ?? []);
+      } catch {
+        if (a) setError("No se pudieron cargar las cuentas por cobrar.");
+      } finally {
+        if (a) setCargando(false);
+      }
+    })();
+    return () => { a = false; };
+  }, [tick]);
+
+  const abiertas = cuentas.filter((c) => !c.cobrada);
+  const totalUsd = abiertas.reduce((s, c) => s + (c.monto_usd ?? 0), 0);
+  const totalEur = abiertas.filter((c) => c.moneda === "EUR").reduce((s, c) => s + (c.monto ?? 0), 0);
+  const lista = verTodas ? cuentas : abiertas;
+
+  function abrirCobro(c: CuentaCobrar) {
+    setCobrando(c.id);
+    setFechaCobro(hoyISO());
+    setTasaCobro(c.tasa != null ? String(c.tasa) : "");
+  }
+  async function confirmarCobro(id: string) {
+    try {
+      const r = await fetch("/api/admin/cuentas-cobrar", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, accion: "cobrar", fecha_cobro: fechaCobro, tasa: parseMonto(tasaCobro) }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error);
+      setMsg("Cuenta cobrada: se registró como ingreso.");
+      setCobrando(null);
+      recargar();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo cobrar.");
+    }
+  }
+  async function reabrir(id: string) {
+    try {
+      await fetch("/api/admin/cuentas-cobrar", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, accion: "reabrir" }),
+      });
+      setMsg("Cuenta reabierta (se quitó el ingreso).");
+      recargar();
+    } catch {
+      setError("No se pudo reabrir.");
+    }
+  }
+  async function borrar(id: string) {
+    try {
+      await fetch(`/api/admin/cuentas-cobrar?id=${id}`, { method: "DELETE" });
+      recargar();
+    } catch {
+      setError("No se pudo eliminar.");
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      {error && <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419]">{error}</div>}
+      {msg && <div className="rounded-lg bg-[#F1F4ED] ring-1 ring-[#C9D6BC] p-3 text-sm text-[#2F4A1F]">{msg}</div>}
+
+      <div className="grid gap-3 sm:grid-cols-3">
+        <ResumenCaja titulo="Por cobrar (abiertas)" valor={fmtMonto(totalUsd, "USD")} sub={totalEur > 0 ? `${fmtMonto(totalEur, "EUR")} en Setux` : undefined} fuerte />
+        <div className="sm:col-span-2 rounded-2xl bg-white ring-1 ring-marfil p-4 flex items-center justify-between">
+          <p className="text-sm text-cacao-soft">{abiertas.length} cuenta{abiertas.length === 1 ? "" : "s"} abierta{abiertas.length === 1 ? "" : "s"}. Cóbralas antes del cierre del mes.</p>
+          <button type="button" onClick={() => setVerTodas((v) => !v)} className="rounded-lg ring-1 ring-marfil text-cacao px-3 py-1.5 text-xs uppercase tracking-widest hover:bg-marfil-soft shrink-0">{verTodas ? "Ver solo abiertas" : "Ver todas"}</button>
+        </div>
+      </div>
+
+      <section className="rounded-2xl bg-white ring-1 ring-marfil overflow-hidden">
+        {cargando ? (
+          <p className="p-5 text-cacao-soft italic font-serif">Cargando…</p>
+        ) : lista.length === 0 ? (
+          <p className="p-8 text-center text-cacao-soft italic font-serif">{verTodas ? "No hay cuentas por cobrar." : "No hay cuentas por cobrar abiertas."}</p>
+        ) : (
+          <ul className="divide-y divide-marfil">
+            {lista.map((c) => (
+              <li key={c.id} className="p-3.5">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-cacao font-medium">{c.descripcion || "Cuenta por cobrar"}</div>
+                    <div className="text-[11px] text-cacao-mute mt-1 flex flex-wrap gap-x-2">
+                      <span>{fmtFecha(c.fecha)}</span>
+                      {c.deudor && <span>· {c.deudor}</span>}
+                      {c.monto_usd != null && <span>· ≈ {fmtMonto(c.monto_usd, "USD")}</span>}
+                      {c.cobrada && <span>· cobrada {c.fecha_cobro ? fmtFecha(c.fecha_cobro) : ""}</span>}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3 shrink-0">
+                    <span className="text-cacao whitespace-nowrap">{c.monto != null ? fmtMonto(c.monto, c.moneda || "EUR") : "—"}</span>
+                    {!c.cobrada ? (
+                      <button type="button" onClick={() => abrirCobro(c)} className="rounded-lg bg-cacao text-white px-3 py-1.5 text-[11px] uppercase tracking-widest hover:bg-terracotta">Cobrar</button>
+                    ) : (
+                      <>
+                        <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] uppercase tracking-widest bg-[#F1F4ED] text-[#2F4A1F]">
+                          <span className="h-1.5 w-1.5 rounded-full bg-[#4B7A2F]" />Cobrada
+                        </span>
+                        <button type="button" onClick={() => reabrir(c.id)} className="text-cacao-soft hover:text-cacao text-sm" aria-label="Reabrir">↺</button>
+                      </>
+                    )}
+                    <button type="button" onClick={() => borrar(c.id)} className="text-cacao-soft hover:text-terracotta text-sm" aria-label="Eliminar">✕</button>
+                  </div>
+                </div>
+
+                {cobrando === c.id && !c.cobrada && (
+                  <div className="mt-3 rounded-xl bg-marfil-soft ring-1 ring-marfil p-3 flex flex-wrap items-end gap-3">
+                    <div>
+                      <label className="block font-display text-[10px] tracking-[0.2em] uppercase text-cacao-mute mb-1">Fecha de cobro</label>
+                      <input type="date" value={fechaCobro} onChange={(e) => setFechaCobro(e.target.value)} className="border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
+                    </div>
+                    <div>
+                      <label className="block font-display text-[10px] tracking-[0.2em] uppercase text-cacao-mute mb-1">Tasa €→USD</label>
+                      <input inputMode="decimal" value={tasaCobro} onChange={(e) => setTasaCobro(e.target.value)} placeholder="ej. 1,08" className="w-28 border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
+                    </div>
+                    <button type="button" onClick={() => confirmarCobro(c.id)} className="rounded-lg bg-cacao text-white px-4 py-2 text-xs uppercase tracking-widest hover:bg-terracotta">Confirmar cobro</button>
+                    <button type="button" onClick={() => setCobrando(null)} className="rounded-lg ring-1 ring-marfil text-cacao px-4 py-2 text-xs uppercase tracking-widest">Cancelar</button>
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
     </div>
   );
 }

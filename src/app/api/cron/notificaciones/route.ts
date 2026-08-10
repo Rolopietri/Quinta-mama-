@@ -81,6 +81,42 @@ export async function GET(request: Request) {
   let enviadas = 0;
   const errores: string[] = [];
 
+  // Recordatorio de cuentas por cobrar: en los últimos 5 días del mes, si hay
+  // cuentas abiertas, avisa a los correos de ADMIN_ALERTA_EMAILS (coma-separados).
+  const alertaTo = (process.env.ADMIN_ALERTA_EMAILS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  let cxcAviso = 0;
+  if (alertaTo.length) {
+    const [y, m, d] = hoy.split("-").map((x) => parseInt(x, 10));
+    const ultimoDia = new Date(Date.UTC(y, m, 0)).getUTCDate();
+    const faltan = ultimoDia - d; // días hasta el cierre del mes
+    if (faltan >= 0 && faltan <= 5) {
+      const cxcR = await sb.from("admin_cuenta_cobrar").select("monto_usd, monto, moneda").eq("cobrada", false);
+      const abiertas = cxcR.data ?? [];
+      if (abiertas.length > 0) {
+        const usd = abiertas.reduce((s, c) => s + (Number(c.monto_usd) || 0), 0);
+        const eur = abiertas
+          .filter((c) => c.moneda === "EUR")
+          .reduce((s, c) => s + (Number(c.monto) || 0), 0);
+        const subject = `Cuentas por cobrar antes del cierre · ${abiertas.length} pendiente${abiertas.length === 1 ? "" : "s"}`;
+        const text = [
+          `Faltan ${faltan} día${faltan === 1 ? "" : "s"} para que cierre el mes y hay cuentas por cobrar abiertas.`,
+          "",
+          `Cuentas abiertas: ${abiertas.length}`,
+          usd ? `Total aproximado: $${usd.toFixed(2)}` : "",
+          eur ? `(${eur.toFixed(2)} € en Setux)` : "",
+          "",
+          "Entra al Panel de Administración → Cuentas por cobrar para cobrarlas.",
+          "",
+          "— Administración · Quinta Mamá",
+        ].filter(Boolean).join("\n");
+        for (const to of alertaTo) {
+          const ok = await enviarResend(resendKey, from, to, subject, text);
+          if (ok) cxcAviso++;
+        }
+      }
+    }
+  }
+
   for (const t of tareas) {
     for (const pid of respPorTarea.get(t.id) ?? []) {
       const persona = personas.get(pid);
@@ -117,5 +153,5 @@ export async function GET(request: Request) {
     }
   }
 
-  return NextResponse.json({ enviadas, errores: errores.length });
+  return NextResponse.json({ enviadas, errores: errores.length, cxcAviso });
 }
