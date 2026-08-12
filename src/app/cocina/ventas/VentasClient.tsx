@@ -26,7 +26,7 @@ import {
 } from "@/lib/data/ventas";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { normalizarBusqueda } from "@/lib/text";
-import { CalendarIcon, ChevronIcon } from "@/components/icons";
+import { CalendarIcon, ChevronIcon, WarningIcon } from "@/components/icons";
 
 /** Fecha larga en español para los encabezados de grupo (ej. "21 jul 2026"). */
 function fmtFecha(fecha: string): string {
@@ -184,8 +184,13 @@ export function VentasClient() {
         setClasif(null);
         return;
       }
-      // Arrancamos con la interpretación que adivinó el parser (la del CSV).
-      setMontoEsTotal(filas[0]?.montoEsTotal ?? true);
+      // Por defecto interpretamos la columna de dinero como TOTAL de línea: es
+      // lo que trae el "detallado por producto" de Xetux (venta neta). Así el
+      // caso común queda bien sin depender de adivinar el encabezado, y para
+      // usar "precio por unidad" el usuario lo elige a propósito. Evita el bug
+      // de tomar el total como unitario y multiplicarlo por la cantidad
+      // (montos inflados).
+      setMontoEsTotal(true);
       setClasif(clasificarFilas(filas, recetasVendibles, clasifs, insumos));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error parseando CSV");
@@ -765,6 +770,19 @@ export function VentasClient() {
                   reporte. En el &ldquo;detallado por producto&rdquo; de Xetux es{" "}
                   <strong>total de línea</strong>.
                 </p>
+                {!montoEsTotal && (
+                  <p className="text-[11px] text-terracotta mt-1.5 flex items-start gap-1">
+                    <WarningIcon className="inline size-3.5 shrink-0 mt-[1px]" />
+                    <span>
+                      Estás interpretando la columna como{" "}
+                      <strong>precio por unidad</strong>: el sistema la
+                      multiplicará por la cantidad. En el reporte de Xetux por
+                      producto casi siempre es <strong>total de línea</strong>.
+                      Confirma que los totales de abajo cuadren con tu reporte
+                      antes de importar.
+                    </span>
+                  </p>
+                )}
               </div>
               <ul className="divide-y divide-marfil text-sm">
                 {clasif.map((c, i) => {
