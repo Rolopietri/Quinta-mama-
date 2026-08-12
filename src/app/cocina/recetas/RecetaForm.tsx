@@ -9,7 +9,7 @@ import {
   precioConIva,
   precioSinIva,
   categoriaInsumoLabel,
-  type CategoriaReceta,
+  categoriaRecetaLabel,
   type Insumo,
   type Receta,
   type RecetaIngrediente,
@@ -83,9 +83,11 @@ export function RecetaForm({
 
   const [nombre, setNombre] = useState(existing?.nombre ?? "");
   const [seccion, setSeccion] = useState<Seccion>(existing?.seccion ?? "cafetin");
-  const [categoria, setCategoria] = useState<CategoriaReceta | "">(
+  const [categoria, setCategoria] = useState<string>(
     existing?.categoria ?? "",
   );
+  // true cuando el usuario eligió "+ Nueva categoría…" en el desplegable.
+  const [creandoCategoria, setCreandoCategoria] = useState(false);
   const [perfil, setPerfil] = useState(existing?.perfil ?? "");
   const [porciones, setPorciones] = useState(
     String(existing?.porciones ?? 1),
@@ -174,6 +176,21 @@ export function RecetaForm({
     () => unidadesEnUso(insumos, recetasContexto).base,
     [insumos, recetasContexto],
   );
+
+  // Categorías para el desplegable: las sugeridas (por su slug) + cualquier
+  // categoría nueva que ya exista en otras recetas. Cada opción se muestra con
+  // su etiqueta legible vía categoriaRecetaLabel().
+  const categoriasDisponibles = useMemo(() => {
+    const conocidas = CATEGORIAS_RECETA.map((c) => c.value as string);
+    const set = new Set<string>();
+    recetasContexto.forEach((r) => {
+      if (r.categoria && !conocidas.includes(r.categoria)) set.add(r.categoria);
+    });
+    const nuevas = Array.from(set).sort((a, b) =>
+      categoriaRecetaLabel(a).localeCompare(categoriaRecetaLabel(b)),
+    );
+    return [...conocidas, ...nuevas];
+  }, [recetasContexto]);
 
   // Agrupar insumos por categoría, ordenados según CATEGORIAS_INSUMO
   const insumosPorCategoria = useMemo(() => {
@@ -414,7 +431,7 @@ export function RecetaForm({
       const input = {
         nombre: nombre.trim(),
         seccion,
-        categoria: (categoria || undefined) as CategoriaReceta | undefined,
+        categoria: categoria.trim() || undefined,
         perfil: perfil.trim() || undefined,
         porciones: Number(porciones) || 1,
         tiempoPrepMin: tiempoPrep ? Number(tiempoPrep) : undefined,
@@ -605,19 +622,39 @@ export function RecetaForm({
           <label className="text-sm text-cacao">
             Categoría
             <select
-              value={categoria}
-              onChange={(e) =>
-                setCategoria(e.target.value as CategoriaReceta | "")
-              }
+              value={creandoCategoria ? "__nueva__" : categoria}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v === "__nueva__") {
+                  setCreandoCategoria(true);
+                  setCategoria("");
+                } else {
+                  setCreandoCategoria(false);
+                  setCategoria(v);
+                }
+              }}
               className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2 bg-white"
             >
               <option value="">— Sin categoría —</option>
-              {CATEGORIAS_RECETA.map((c) => (
-                <option key={c.value} value={c.value}>
-                  {c.label}
+              {categoriasDisponibles.map((c) => (
+                <option key={c} value={c}>
+                  {categoriaRecetaLabel(c)}
                 </option>
               ))}
+              <option value="__nueva__">+ Nueva categoría…</option>
             </select>
+            {creandoCategoria && (
+              <input
+                type="text"
+                value={categoria}
+                onChange={(e) => setCategoria(e.target.value)}
+                placeholder="Nombre de la categoría nueva"
+                autoFocus
+                autoCapitalize="words"
+                spellCheck={false}
+                className="mt-2 w-full rounded-lg ring-1 ring-marfil px-3 py-2"
+              />
+            )}
           </label>
           <label className="text-sm text-cacao">
             Porciones

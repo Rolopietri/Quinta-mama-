@@ -5,7 +5,6 @@ import type {
   Receta,
   RecetaIngrediente,
   Seccion,
-  CategoriaReceta,
   Insumo,
 } from "@/lib/types";
 import { convertirParaCosto } from "@/lib/units";
@@ -68,7 +67,7 @@ function rowToReceta(r: RecetaRow, ings: RecetaIngrediente[]): Receta {
     id: r.id,
     nombre: r.nombre,
     seccion: r.seccion as Seccion,
-    categoria: (r.categoria as CategoriaReceta) ?? undefined,
+    categoria: r.categoria ?? undefined,
     perfil: r.perfil ?? undefined,
     porciones: r.porciones,
     tiempoPrepMin: r.tiempo_prep_min ?? undefined,
@@ -97,7 +96,7 @@ function rowToReceta(r: RecetaRow, ings: RecetaIngrediente[]): Receta {
 export type RecetaInput = {
   nombre: string;
   seccion: Seccion;
-  categoria?: CategoriaReceta;
+  categoria?: string;
   perfil?: string;
   porciones: number;
   tiempoPrepMin?: number;

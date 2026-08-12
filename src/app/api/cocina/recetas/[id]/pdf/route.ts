@@ -8,7 +8,6 @@ import type {
   Receta,
   RecetaIngrediente,
   Seccion,
-  CategoriaReceta,
 } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -95,7 +94,7 @@ export async function GET(
       id: rr.id,
       nombre: rr.nombre,
       seccion: rr.seccion as Seccion,
-      categoria: (rr.categoria as CategoriaReceta) ?? undefined,
+      categoria: rr.categoria ?? undefined,
       perfil: rr.perfil ?? undefined,
       porciones: rr.porciones,
       tiempoPrepMin: rr.tiempo_prep_min ?? undefined,

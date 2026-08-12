@@ -7,10 +7,10 @@ import {
   CATEGORIAS_RECETA,
   SECCIONES,
   precioConIva,
+  categoriaRecetaLabel,
   type Receta,
   type Insumo,
   type Seccion,
-  type CategoriaReceta,
 } from "@/lib/types";
 import { listRecetas, calcularCostoReceta } from "@/lib/data/recetas";
 import { listInsumos } from "@/lib/data/cocina";
@@ -35,11 +35,10 @@ export function RecetasList() {
   const [error, setError] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [filterSec, setFilterSec] = useState<Seccion | "todas">("todas");
-  /** "subreceta" es una categoría virtual — no es CategoriaReceta del enum,
-   *  pero filtra las recetas con esSubreceta=true. */
-  const [filterCat, setFilterCat] = useState<CategoriaReceta | "todas" | "subreceta">(
-    "todas",
-  );
+  /** El filtro puede ser: "todas", "subreceta" (categoría virtual: recetas con
+   *  esSubreceta=true), un slug de CATEGORIAS_RECETA, o una categoría nueva
+   *  (texto libre). Por eso el tipo es string. */
+  const [filterCat, setFilterCat] = useState<string>("todas");
 
   useEffect(() => {
     let cancelled = false;
@@ -120,6 +119,21 @@ export function RecetasList() {
     });
   }, [items, q, filterSec, filterCat]);
 
+  // Categorías para los pills de filtro: las sugeridas (por slug) + cualquier
+  // categoría nueva que ya exista en recetas (no sub-recetas).
+  const categoriasFiltro = useMemo(() => {
+    const conocidas = CATEGORIAS_RECETA.map((c) => c.value as string);
+    const set = new Set<string>();
+    items.forEach((r) => {
+      if (r.categoria && !r.esSubreceta && !conocidas.includes(r.categoria))
+        set.add(r.categoria);
+    });
+    const nuevas = Array.from(set).sort((a, b) =>
+      categoriaRecetaLabel(a).localeCompare(categoriaRecetaLabel(b)),
+    );
+    return [...conocidas, ...nuevas];
+  }, [items]);
+
   if (loading) {
     return (
       <div className="rounded-2xl bg-white ring-1 ring-marfil p-8 text-center text-cacao-soft">
@@ -181,17 +195,17 @@ export function RecetasList() {
           >
             Todas
           </button>
-          {CATEGORIAS_RECETA.map((c) => (
+          {categoriasFiltro.map((c) => (
             <button
-              key={c.value}
-              onClick={() => setFilterCat(c.value)}
+              key={c}
+              onClick={() => setFilterCat(c)}
               className={`px-3 py-1 rounded-full text-[11px] uppercase tracking-widest ring-1 ${
-                filterCat === c.value
+                filterCat === c
                   ? "bg-cacao text-white ring-cacao"
                   : "bg-white text-cacao-soft ring-marfil hover:bg-marfil-soft"
               }`}
             >
-              {c.label}
+              {categoriaRecetaLabel(c)}
             </button>
           ))}
           <button
@@ -247,7 +261,7 @@ export function RecetasList() {
                   <div className="font-display text-[10px] tracking-[0.3em] uppercase text-cacao-mute">
                     {r.esSubreceta
                       ? "Sub-receta"
-                      : `${r.categoria ?? "receta"} · ${r.seccion}`}
+                      : `${r.categoria ? categoriaRecetaLabel(r.categoria) : "receta"} · ${r.seccion}`}
                   </div>
                   <div className="text-xs text-cacao-soft">
                     {r.esSubreceta && r.rendimiento

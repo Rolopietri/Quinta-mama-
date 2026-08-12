@@ -31,6 +31,9 @@ type FormState = {
   precioTotalUsd: string;
   precioTotalBs: string;
   tasaBcvUsada: string;
+  // Cuál de los dos montos (Bs o $) escribió el usuario por última vez. Es la
+  // fuente de verdad: al cambiar la tasa se recalcula el OTRO a partir de este.
+  montoAnchor: "bs" | "usd";
   // IVA: "con" = el monto ya lo incluye (se guarda tal cual);
   // "sin" = el monto es la base y el sistema le suma el IVA para el costo real.
   ivaModo: "con" | "sin";
@@ -46,6 +49,12 @@ function todayISO() {
 function fmtQty(n: number): string {
   if (!Number.isFinite(n) || n < 0) return "";
   return String(Number(n.toFixed(4)));
+}
+
+/** Formatea un monto de dinero a 2 decimales para el campo enlazado. */
+function fmtMoney(n: number): string {
+  if (!Number.isFinite(n) || n < 0) return "";
+  return String(Number(n.toFixed(2)));
 }
 
 /** Fecha larga en español para los encabezados de grupo (ej. "21 jul 2026"). */
@@ -67,6 +76,7 @@ const emptyForm: FormState = {
   precioTotalUsd: "",
   precioTotalBs: "",
   tasaBcvUsada: "",
+  montoAnchor: "usd",
   ivaModo: "con",
   ivaPorc: "16",
   notas: "",
@@ -127,29 +137,36 @@ export function ComprasClient() {
     [insumos, form.insumoId],
   );
 
-  const pagaEnBs = useMemo(
-    () =>
-      form.modalidadPago === "bcv_dolar" ||
-      form.modalidadPago === "bcv_euro" ||
-      form.modalidadPago === "paralela",
-    [form.modalidadPago],
-  );
+  // Modalidad que se paga en Bs (para sugerir la tasa correcta del día).
+  const pagaEnBs =
+    form.modalidadPago === "bcv_dolar" ||
+    form.modalidadPago === "bcv_euro" ||
+    form.modalidadPago === "paralela";
+
+  // Tasa del día sugerida según la modalidad (BCV $, BCV € o paralela). Para las
+  // modalidades en USD usamos la BCV $ como tasa de referencia del día.
+  const tasaSugerida = useMemo(() => {
+    if (!tasa) return null;
+    if (form.modalidadPago === "bcv_euro") return tasa.eurBs ?? null;
+    if (form.modalidadPago === "paralela") return tasa.paralelaBs ?? null;
+    return tasa.usdBs;
+  }, [tasa, form.modalidadPago]);
 
   // Factor de IVA: 1 si el monto ya lo incluye ("con"); 1 + tasa/100 si hay que
   // sumárselo ("sin"). El total con IVA es lo que realmente se pagó y lo que
   // alimenta el costo del insumo.
   const factorIva =
     form.ivaModo === "sin" ? 1 + (Number(form.ivaPorc) || 0) / 100 : 1;
-  const montoBase = pagaEnBs
-    ? Number(form.precioTotalBs) || 0
-    : Number(form.precioTotalUsd) || 0;
-  const montoConIva = montoBase * factorIva;
   const tasaNum = Number(form.tasaBcvUsada) || 0;
-  const totalUsdConIva = pagaEnBs
-    ? tasaNum > 0
-      ? montoConIva / tasaNum
-      : 0
-    : montoConIva;
+  const bsBase = Number(form.precioTotalBs) || 0;
+  // Monto base en USD: si el usuario ancló en Bs, se deriva dividiendo por la
+  // tasa (a plena precisión); si ancló en $, es lo que escribió.
+  const usdBase =
+    form.montoAnchor === "bs" && tasaNum > 0
+      ? bsBase / tasaNum
+      : Number(form.precioTotalUsd) || 0;
+  const usdConIva = usdBase * factorIva;
+  const bsConIva = bsBase * factorIva;
 
   // Contenido del empaque del insumo elegido (unidades base por unidad de compra).
   const cantPorCompra = insumoSeleccionado?.cantidadPorCompra ?? 0;
@@ -189,6 +206,71 @@ export function ComprasClient() {
     }));
   }
 
+  // ── Convertidor de montos (Bs ↔ $) ──────────────────────────────────────
+  // Escribes el monto en la moneda de la factura y el otro se llena solo a la
+  // tasa. La "moneda de la factura" no tiene que coincidir con la modalidad de
+  // pago: puedes pagar en Bs con una factura en $ (o viceversa).
+
+  // Escribió el monto en Bs → deriva el de $.
+  function onMontoBs(v: string) {
+    const bs = Number(v);
+    setForm((f) => {
+      const t = Number(f.tasaBcvUsada);
+      return {
+        ...f,
+        precioTotalBs: v,
+        montoAnchor: "bs",
+        precioTotalUsd:
+          v.trim() !== "" && Number.isFinite(bs) && t > 0
+            ? fmtMoney(bs / t)
+            : v.trim() === ""
+              ? ""
+              : f.precioTotalUsd,
+      };
+    });
+  }
+
+  // Escribió el monto en $ → deriva el de Bs.
+  function onMontoUsd(v: string) {
+    const usd = Number(v);
+    setForm((f) => {
+      const t = Number(f.tasaBcvUsada);
+      return {
+        ...f,
+        precioTotalUsd: v,
+        montoAnchor: "usd",
+        precioTotalBs:
+          v.trim() !== "" && Number.isFinite(usd) && t > 0
+            ? fmtMoney(usd * t)
+            : v.trim() === ""
+              ? ""
+              : f.precioTotalBs,
+      };
+    });
+  }
+
+  // Cambió la tasa → recalcula el monto NO anclado a partir del anclado.
+  function onTasa(v: string) {
+    setForm((f) => recalcularConTasa(f, v));
+  }
+
+  // Devuelve el form con el monto derivado recalculado a partir del anclado.
+  function recalcularConTasa(f: FormState, tasaStr: string): FormState {
+    const t = Number(tasaStr);
+    const next = { ...f, tasaBcvUsada: tasaStr };
+    if (!(t > 0)) return next;
+    if (f.montoAnchor === "bs") {
+      const bs = Number(f.precioTotalBs);
+      if (f.precioTotalBs.trim() !== "" && Number.isFinite(bs))
+        next.precioTotalUsd = fmtMoney(bs / t);
+    } else {
+      const usd = Number(f.precioTotalUsd);
+      if (f.precioTotalUsd.trim() !== "" && Number.isFinite(usd))
+        next.precioTotalBs = fmtMoney(usd * t);
+    }
+    return next;
+  }
+
   // Agrupa las compras por fecha, conservando el orden (más recientes primero,
   // como vienen de la lista). Cada grupo trae su total en USD para el encabezado.
   const gruposPorFecha = useMemo(() => {
@@ -214,18 +296,35 @@ export function ComprasClient() {
     if (!form.insumoId || !form.fecha || !form.cantidad) return;
     setError(null);
 
-    // Si el monto se ingresó "sin IVA", le sumamos el IVA para guardar el total
-    // real pagado (que es el que cuenta para el costo del insumo).
-    let precioUsd = (Number(form.precioTotalUsd) || 0) * factorIva;
+    // El costo canónico siempre se guarda en USD. Si el usuario ancló en Bs, se
+    // deriva dividiendo por la tasa (a plena precisión); si ancló en $, es lo
+    // que escribió. Si el monto venía "sin IVA", le sumamos el IVA al total real
+    // pagado (que es el que cuenta para el costo del insumo).
+    const t = Number(form.tasaBcvUsada) || 0;
+    const bsBaseVal = Number(form.precioTotalBs) || 0;
+    const usdBaseVal = Number(form.precioTotalUsd) || 0;
+
+    let precioUsd: number;
     let precioBs: number | undefined;
     let tasaUsada: number | undefined;
 
-    if (pagaEnBs) {
-      precioBs = (Number(form.precioTotalBs) || 0) * factorIva;
-      tasaUsada = Number(form.tasaBcvUsada) || 0;
-      if (precioBs > 0 && tasaUsada > 0) {
-        precioUsd = precioBs / tasaUsada;
+    if (form.montoAnchor === "bs" && bsBaseVal > 0 && t > 0) {
+      precioBs = bsBaseVal * factorIva;
+      precioUsd = precioBs / t;
+      tasaUsada = t;
+    } else {
+      precioUsd = usdBaseVal * factorIva;
+      // Si además hay un equivalente en Bs y una tasa, lo guardamos como
+      // referencia (ej. pagaste en Bs una factura que venía en $).
+      if (bsBaseVal > 0 && t > 0) {
+        precioBs = bsBaseVal * factorIva;
+        tasaUsada = t;
       }
+    }
+
+    if (!(precioUsd > 0)) {
+      setError("Ingresa el monto de la factura (en Bs o en $).");
+      return;
     }
 
     // Dejamos constancia en las notas de que el IVA se agregó (así el historial
@@ -270,7 +369,10 @@ export function ComprasClient() {
     }
   }
 
-  // Auto-rellenar tasa cuando cambia modalidad
+  // Auto-rellenar la tasa del día cuando cambia la modalidad. Todas las
+  // modalidades reciben una tasa sugerida (las de USD usan la BCV $) para que el
+  // convertidor Bs↔$ funcione siempre. Recalcula el monto derivado con la tasa
+  // nueva para que los dos campos queden consistentes.
   function setModalidad(m: ModalidadPago) {
     setForm((prev) => {
       let tasaDef = prev.tasaBcvUsada;
@@ -278,8 +380,9 @@ export function ComprasClient() {
       else if (m === "bcv_euro" && tasa?.eurBs) tasaDef = String(tasa.eurBs);
       else if (m === "paralela" && tasa?.paralelaBs)
         tasaDef = String(tasa.paralelaBs);
-      else if (m === "efectivo" || m === "divisa") tasaDef = "";
-      return { ...prev, modalidadPago: m, tasaBcvUsada: tasaDef };
+      else if ((m === "efectivo" || m === "divisa") && tasa)
+        tasaDef = String(tasa.usdBs);
+      return { ...recalcularConTasa(prev, tasaDef), modalidadPago: m };
     });
   }
 
@@ -293,7 +396,16 @@ export function ComprasClient() {
 
       {!adding && (
         <button
-          onClick={() => setAdding(true)}
+          onClick={() => {
+            // Prefijamos la tasa BCV $ del día (modalidad default: USD divisa)
+            // para que el convertidor Bs↔$ funcione desde el inicio.
+            setForm({
+              ...emptyForm,
+              fecha: todayISO(),
+              tasaBcvUsada: tasa ? String(tasa.usdBs) : "",
+            });
+            setAdding(true);
+          }}
           className="w-full mb-5 rounded-xl bg-cacao text-white py-3 font-medium hover:bg-terracotta transition-colors"
         >
           + Registrar nueva compra
@@ -480,79 +592,103 @@ export function ComprasClient() {
             </span>
           </div>
 
-          {pagaEnBs ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <label className="text-sm text-cacao">
-                Monto en Bs
+          <div className="text-sm text-cacao">
+            Monto de la factura
+            <p className="text-xs text-cacao-mute mt-0.5">
+              Pon el monto tal como sale en la factura; el otro campo se calcula
+              solo a la tasa. La moneda de la factura no tiene que coincidir con
+              la forma de pago.
+            </p>
+            <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <label className="block">
+                <span className="text-xs text-cacao-mute flex items-center gap-1">
+                  Monto en Bs
+                  {pagaEnBs && (
+                    <span className="text-[10px] uppercase tracking-widest text-terracotta">
+                      · pago
+                    </span>
+                  )}
+                </span>
                 <input
                   type="number"
                   step="0.01"
                   min="0"
-                  required
+                  inputMode="decimal"
+                  placeholder="0"
                   value={form.precioTotalBs}
-                  onChange={(e) =>
-                    setForm({ ...form, precioTotalBs: e.target.value })
-                  }
+                  onChange={(e) => onMontoBs(e.target.value)}
                   className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2"
                 />
               </label>
-              <label className="text-sm text-cacao">
-                Tasa usada
+              <label className="block">
+                <span className="text-xs text-cacao-mute flex items-center gap-1">
+                  Monto en $
+                  {!pagaEnBs && (
+                    <span className="text-[10px] uppercase tracking-widest text-terracotta">
+                      · pago
+                    </span>
+                  )}
+                </span>
                 <input
                   type="number"
-                  step="0.0001"
+                  step="0.01"
                   min="0"
-                  required
-                  value={form.tasaBcvUsada}
-                  onChange={(e) =>
-                    setForm({ ...form, tasaBcvUsada: e.target.value })
-                  }
+                  inputMode="decimal"
+                  placeholder="0"
+                  value={form.precioTotalUsd}
+                  onChange={(e) => onMontoUsd(e.target.value)}
                   className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2"
                 />
-                <span className="text-xs text-cacao-mute block mt-1">
-                  Equivalente USD:{" "}
-                  <span className="text-cacao font-medium">
-                    ${totalUsdConIva.toFixed(2)}
-                  </span>
-                </span>
               </label>
-              {form.ivaModo === "sin" && montoBase > 0 && (
-                <p className="sm:col-span-2 text-[11px] text-cacao-mute -mt-1">
-                  Base Bs {montoBase.toFixed(2)} + IVA{" "}
-                  {Number(form.ivaPorc) || 0}% ={" "}
-                  <span className="text-cacao font-medium">
-                    Bs {montoConIva.toFixed(2)}
-                  </span>{" "}
-                  (total que se guarda)
-                </p>
-              )}
             </div>
-          ) : (
-            <label className="text-sm text-cacao block">
-              Monto en USD
+            <label className="block mt-3 text-sm text-cacao">
+              Tasa del día (Bs por $)
               <input
                 type="number"
-                step="0.01"
+                step="0.0001"
                 min="0"
-                required
-                value={form.precioTotalUsd}
-                onChange={(e) =>
-                  setForm({ ...form, precioTotalUsd: e.target.value })
-                }
+                inputMode="decimal"
+                value={form.tasaBcvUsada}
+                onChange={(e) => onTasa(e.target.value)}
                 className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2"
               />
-              {form.ivaModo === "sin" && montoBase > 0 && (
+              {tasaSugerida !== null && (
                 <span className="text-xs text-cacao-mute block mt-1">
-                  Base ${montoBase.toFixed(2)} + IVA {Number(form.ivaPorc) || 0}%
-                  ={" "}
-                  <span className="text-cacao font-medium">
-                    ${montoConIva.toFixed(2)}
-                  </span>{" "}
-                  (total que se guarda)
+                  Tasa BCV del día: Bs {tasaSugerida.toFixed(2)}.{" "}
+                  {tasaNum > 0 &&
+                  Math.abs(tasaNum - tasaSugerida) > 0.009 ? (
+                    <button
+                      type="button"
+                      onClick={() => onTasa(String(tasaSugerida))}
+                      className="underline hover:text-cacao"
+                    >
+                      usar la del día
+                    </button>
+                  ) : (
+                    "Ajústala si tu factura usó otra."
+                  )}
                 </span>
               )}
             </label>
-          )}
+            {(usdConIva > 0 || bsConIva > 0) && (
+              <div className="mt-3 rounded-lg bg-marfil-soft ring-1 ring-marfil px-3 py-2 text-sm">
+                <span className="text-cacao-mute">Total que se guarda: </span>
+                <span className="text-cacao font-medium">
+                  ${usdConIva.toFixed(2)}
+                </span>
+                {bsConIva > 0 && tasaNum > 0 && (
+                  <span className="text-cacao-soft">
+                    {" · "}Bs {bsConIva.toFixed(2)}
+                  </span>
+                )}
+                {form.ivaModo === "sin" && (
+                  <span className="text-cacao-mute">
+                    {" · "}incluye IVA {Number(form.ivaPorc) || 0}%
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
 
           <textarea
             placeholder="Notas (opcional)"

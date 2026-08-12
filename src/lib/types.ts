@@ -625,7 +625,9 @@ export type Receta = {
   id: string;
   nombre: string;
   seccion: Seccion;
-  categoria?: CategoriaReceta;
+  /** Categoría: una de las sugeridas en `CATEGORIAS_RECETA` o texto libre
+   *  (categoría nueva creada desde el formulario). Se guarda como texto. */
+  categoria?: string;
   perfil?: string;
   porciones: number;
   tiempoPrepMin?: number;
@@ -664,6 +666,19 @@ export const CATEGORIAS_RECETA: { value: CategoriaReceta; label: string }[] = [
   { value: "postre", label: "Postre" },
   { value: "otros", label: "Otros" },
 ];
+
+/** Etiquetas sugeridas de categoría de receta (para el desplegable del form). */
+export const CATEGORIAS_RECETA_SUGERIDAS: string[] = CATEGORIAS_RECETA.map(
+  (c) => c.label,
+);
+
+/** Muestra la categoría de receta: si es una de las conocidas devuelve su
+ *  etiqueta; si es texto libre (categoría nueva) lo devuelve tal cual. */
+export function categoriaRecetaLabel(categoria: string): string {
+  return (
+    CATEGORIAS_RECETA.find((c) => c.value === categoria)?.label ?? categoria
+  );
+}
 
 // ────────────────────────────────────────────────────────────────
 // COCINA — M3 Costeo + M4 Rentabilidad
