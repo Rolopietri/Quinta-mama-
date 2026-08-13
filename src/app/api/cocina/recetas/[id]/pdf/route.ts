@@ -129,7 +129,24 @@ export async function GET(
         "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNgAAIAAAUAAen63NgAAAAASUVORK5CYII=";
     }
 
-    const buffer = await renderToBuffer(RecetaPDF({ receta, logoSrc }));
+    // Foto del plato: la bajamos en el servidor y la embebemos como data URI.
+    // Así el render del PDF no depende de que react-pdf pueda hacer fetch, y si
+    // la imagen falla, el PDF igual se genera (solo sin foto).
+    let fotoSrc: string | undefined;
+    if (receta.fotoUrl && /^https?:\/\//i.test(receta.fotoUrl)) {
+      try {
+        const resp = await fetch(receta.fotoUrl);
+        if (resp.ok) {
+          const arrBuf = await resp.arrayBuffer();
+          const ct = resp.headers.get("content-type") || "image/jpeg";
+          fotoSrc = `data:${ct};base64,${Buffer.from(arrBuf).toString("base64")}`;
+        }
+      } catch {
+        fotoSrc = undefined;
+      }
+    }
+
+    const buffer = await renderToBuffer(RecetaPDF({ receta, logoSrc, fotoSrc }));
     const filename = `receta-${receta.nombre.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.pdf`;
     return new NextResponse(new Uint8Array(buffer), {
       status: 200,

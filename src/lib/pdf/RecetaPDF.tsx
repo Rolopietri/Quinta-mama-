@@ -143,6 +143,13 @@ const styles = StyleSheet.create({
     borderBottomColor: COLOR_MARFIL,
     marginVertical: 14,
   },
+  hero: {
+    width: "100%",
+    height: 210,
+    objectFit: "cover",
+    borderRadius: 4,
+    marginTop: 16,
+  },
   metaRow: {
     flexDirection: "row",
     gap: 20,
@@ -230,9 +237,11 @@ const styles = StyleSheet.create({
 export type RecetaPDFProps = {
   receta: Receta;
   logoSrc: string;
+  /** Foto del plato ya resuelta (data URI o URL). Opcional. */
+  fotoSrc?: string;
 };
 
-export function RecetaPDF({ receta: r, logoSrc }: RecetaPDFProps) {
+export function RecetaPDF({ receta: r, logoSrc, fotoSrc }: RecetaPDFProps) {
   const fechaActualizada = new Date(r.createdAt).toLocaleDateString("es-VE", {
     day: "numeric",
     month: "long",
@@ -299,6 +308,12 @@ export function RecetaPDF({ receta: r, logoSrc }: RecetaPDFProps) {
             </View>
           ) : null}
         </View>
+
+        {/* Foto del plato (opcional) */}
+        {fotoSrc ? (
+          // eslint-disable-next-line jsx-a11y/alt-text -- <Image> de @react-pdf/renderer, no es <img> de HTML y no admite alt
+          <Image style={styles.hero} src={fotoSrc} />
+        ) : null}
 
         <View style={styles.hr} />
 

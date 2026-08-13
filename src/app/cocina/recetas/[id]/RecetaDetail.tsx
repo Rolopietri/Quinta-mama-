@@ -190,6 +190,14 @@ export function RecetaDetail({ id }: { id: string }) {
             )}
           </div>
         </div>
+        {receta.fotoUrl && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={receta.fotoUrl}
+            alt={receta.nombre}
+            className="mt-4 w-full max-h-80 object-cover rounded-2xl ring-1 ring-marfil"
+          />
+        )}
       </section>
 
       {/* Acciones PDF */}

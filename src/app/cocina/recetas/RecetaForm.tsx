@@ -18,6 +18,7 @@ import {
 import {
   createReceta,
   updateReceta,
+  subirFotoReceta,
   listRecetas,
   costoPorUnidadSubreceta,
 } from "@/lib/data/recetas";
@@ -105,6 +106,9 @@ export function RecetaForm({
   const [presentacion, setPresentacion] = useState(existing?.presentacion ?? "");
   const [notasChef, setNotasChef] = useState(existing?.notasChef ?? "");
   const [variaciones, setVariaciones] = useState(existing?.variaciones ?? "");
+  // Foto de la receta (se muestra en el detalle y en el PDF).
+  const [fotoUrl, setFotoUrl] = useState(existing?.fotoUrl ?? "");
+  const [subiendoFoto, setSubiendoFoto] = useState(false);
   // Precio sugerido SIN IVA (es el canónico que se guarda en DB).
   const [precioSugerido, setPrecioSugerido] = useState(
     existing?.precioSugeridoUsd ? String(existing.precioSugeridoUsd) : "",
@@ -339,6 +343,21 @@ export function RecetaForm({
     setLineas((prev) => prev.filter((l) => l.key !== key));
   }
 
+  // Sube la foto elegida al bucket público y la deja en el form (vista previa).
+  async function onSelectFoto(file: File | null) {
+    if (!file) return;
+    setError(null);
+    setSubiendoFoto(true);
+    try {
+      const url = await subirFotoReceta(file);
+      setFotoUrl(url);
+    } catch (e) {
+      setError(extractError(e, "Error subiendo la foto"));
+    } finally {
+      setSubiendoFoto(false);
+    }
+  }
+
   // Costo por unidad base de cada subreceta, con la MISMA función recursiva del
   // backend (costoPorUnidadSubreceta). Así el costo en vivo incluye subrecetas
   // anidadas (antes se ignoraban y contaban como $0). Se calcula una sola vez y
@@ -441,6 +460,7 @@ export function RecetaForm({
         presentacion: presentacion.trim() || undefined,
         notasChef: notasChef.trim() || undefined,
         variaciones: variaciones.trim() || undefined,
+        fotoUrl: fotoUrl.trim() || undefined,
         precioSugeridoUsd: precioSugerido
           ? Number(precioSugerido)
           : undefined,
@@ -604,6 +624,63 @@ export function RecetaForm({
           onChange={(e) => setPerfil(e.target.value)}
           className="w-full rounded-lg ring-1 ring-marfil px-3 py-2"
         />
+
+        {/* Foto del plato — se muestra en el detalle y grande en el PDF. */}
+        <div className="rounded-lg ring-1 ring-marfil bg-marfil-soft p-3">
+          <div className="text-sm text-cacao font-medium mb-2">
+            Foto del plato{" "}
+            <span className="text-cacao-mute font-normal">
+              (se muestra en el detalle y en el PDF)
+            </span>
+          </div>
+          <div className="flex items-start gap-3">
+            <div className="shrink-0">
+              {fotoUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={fotoUrl}
+                  alt="Foto de la receta"
+                  className="h-28 w-40 rounded-lg object-cover bg-white ring-1 ring-marfil"
+                />
+              ) : (
+                <div className="h-28 w-40 rounded-lg ring-1 ring-dashed ring-marfil bg-white flex items-center justify-center text-xs text-cacao-mute">
+                  Sin foto
+                </div>
+              )}
+            </div>
+            <div className="flex flex-col gap-2">
+              <label className="cursor-pointer rounded-lg bg-white ring-1 ring-marfil px-3 py-1.5 text-sm text-cacao hover:bg-marfil-soft text-center">
+                {subiendoFoto
+                  ? "Subiendo…"
+                  : fotoUrl
+                    ? "Cambiar foto"
+                    : "Subir foto"}
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  disabled={subiendoFoto}
+                  onChange={(e) => {
+                    onSelectFoto(e.target.files?.[0] ?? null);
+                    e.target.value = "";
+                  }}
+                />
+              </label>
+              {fotoUrl && (
+                <button
+                  type="button"
+                  onClick={() => setFotoUrl("")}
+                  className="text-xs uppercase tracking-widest text-cacao-mute hover:text-terracotta"
+                >
+                  Quitar
+                </button>
+              )}
+              <span className="text-[10px] text-cacao-mute">
+                Horizontal se ve mejor. Máx 5 MB.
+              </span>
+            </div>
+          </div>
+        </div>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <label className="text-sm text-cacao">
             Sección

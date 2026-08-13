@@ -161,6 +161,35 @@ export async function getReceta(id: string): Promise<Receta> {
   return rowToReceta(data as RecetaRow, ings);
 }
 
+// Bucket PÚBLICO de fotos de cocina (el mismo que usa menaje). Las fotos de
+// recetas se guardan bajo el prefijo `recetas/`. Público porque no son
+// sensibles y así se ven directo en la app y en el PDF.
+const BUCKET_FOTOS = "menaje-fotos";
+const FOTO_MAX_BYTES = 5 * 1024 * 1024; // 5 MB
+
+/** Sube la foto de una receta al bucket público y devuelve su URL pública. */
+export async function subirFotoReceta(file: File): Promise<string> {
+  if (!file.type.startsWith("image/")) {
+    throw new Error("La foto debe ser una imagen (JPG, PNG, etc.).");
+  }
+  if (file.size > FOTO_MAX_BYTES) {
+    throw new Error("La foto no puede pesar más de 5 MB.");
+  }
+  const sb = createSupabaseBrowserClient();
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const pathName = `recetas/${Date.now()}_${safeName}`;
+  const { error: upErr } = await sb.storage
+    .from(BUCKET_FOTOS)
+    .upload(pathName, file, {
+      cacheControl: "3600",
+      upsert: false,
+      contentType: file.type || undefined,
+    });
+  if (upErr) throw upErr;
+  const { data } = sb.storage.from(BUCKET_FOTOS).getPublicUrl(pathName);
+  return data.publicUrl;
+}
+
 export async function createReceta(input: RecetaInput): Promise<Receta> {
   const sb = createSupabaseBrowserClient();
   const { data, error } = await sb
