@@ -32,6 +32,10 @@ export async function POST(req: Request) {
         it.precioUnit == null || it.precioUnit === undefined
           ? undefined
           : Number(it.precioUnit),
+      fotoUrl:
+        typeof it.fotoUrl === "string" && it.fotoUrl.trim() !== ""
+          ? it.fotoUrl
+          : undefined,
     })),
   };
 

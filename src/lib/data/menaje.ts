@@ -13,6 +13,36 @@ import type {
 } from "@/lib/types";
 
 const BUCKET = "menaje-facturas";
+const BUCKET_FOTOS = "menaje-fotos";
+const FOTO_MAX_BYTES = 5 * 1024 * 1024; // 5 MB
+
+/**
+ * Sube la foto de un ítem de menaje al bucket PÚBLICO `menaje-fotos` y devuelve
+ * su URL pública (estable). A diferencia de las facturas (bucket privado con
+ * signed URLs), las fotos de producto no son sensibles: se muestran directo en
+ * la app y en el PDF del cliente.
+ */
+export async function subirFotoMenaje(file: File): Promise<string> {
+  if (!file.type.startsWith("image/")) {
+    throw new Error("La foto debe ser una imagen (JPG, PNG, etc.).");
+  }
+  if (file.size > FOTO_MAX_BYTES) {
+    throw new Error("La foto no puede pesar más de 5 MB.");
+  }
+  const sb = createSupabaseBrowserClient();
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const pathName = `fotos/${Date.now()}_${safeName}`;
+  const { error: upErr } = await sb.storage
+    .from(BUCKET_FOTOS)
+    .upload(pathName, file, {
+      cacheControl: "3600",
+      upsert: false,
+      contentType: file.type || undefined,
+    });
+  if (upErr) throw upErr;
+  const { data } = sb.storage.from(BUCKET_FOTOS).getPublicUrl(pathName);
+  return data.publicUrl;
+}
 
 // ─── ITEMS ─────────────────────────────────────────────────────────
 

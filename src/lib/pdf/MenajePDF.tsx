@@ -11,6 +11,7 @@ import {
   Page,
   Text,
   View,
+  Image,
   StyleSheet,
   Font,
 } from "@react-pdf/renderer";
@@ -161,6 +162,21 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   rowAlt: { backgroundColor: COLOR_ROW },
+  cFoto: { width: 34 },
+  fotoImg: {
+    width: 28,
+    height: 28,
+    objectFit: "contain",
+    borderRadius: 2,
+  },
+  fotoVacia: {
+    width: 28,
+    height: 28,
+    borderRadius: 2,
+    borderWidth: 0.5,
+    borderColor: COLOR_MARFIL,
+    borderStyle: "dashed",
+  },
   cItem: { flex: 1, fontSize: 10, color: COLOR_CACAO },
   cCat: { width: 90, fontSize: 8.5, color: COLOR_SOFT },
   cNum: { width: 45, fontSize: 10, textAlign: "right" },
@@ -215,7 +231,33 @@ export type MenajePDFItem = {
   cantidad: number;
   disponible: number;
   precioUnit?: number;
+  /** Path estático (/menaje/...) o URL pública de la foto del ítem. */
+  fotoUrl?: string;
 };
+
+/**
+ * Resuelve la foto de un ítem a algo que react-pdf pueda renderizar:
+ *  • URL http(s) (foto subida a Supabase) → se pasa tal cual (react-pdf la baja).
+ *  • Path estático (/menaje/vasos/x.png) → se lee de /public y se embebe como
+ *    data URI (no depende de red).
+ * Devuelve undefined si no hay foto o no se pudo leer.
+ */
+function resolveFotoSrc(fotoUrl?: string): string | undefined {
+  if (!fotoUrl) return undefined;
+  if (/^https?:\/\//i.test(fotoUrl)) return fotoUrl;
+  if (fotoUrl.startsWith("/")) {
+    try {
+      const p = path.join(process.cwd(), "public", fotoUrl);
+      const buf = readFileSync(p);
+      const ext = (path.extname(p).slice(1) || "png").toLowerCase();
+      const mime = ext === "jpg" ? "jpeg" : ext;
+      return `data:image/${mime};base64,${buf.toString("base64")}`;
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+}
 
 export type MenajePDFData = {
   evento?: string;
@@ -277,6 +319,7 @@ export function MenajePDF({ data }: { data: MenajePDFData }) {
 
         {/* Tabla */}
         <View style={styles.thead}>
+          <Text style={[styles.th, styles.cFoto]}>Foto</Text>
           <Text style={[styles.th, styles.cItem]}>Ítem</Text>
           <Text style={[styles.th, styles.cCat]}>Categoría</Text>
           <Text style={[styles.th, styles.cNum]}>Cant.</Text>
@@ -291,11 +334,21 @@ export function MenajePDF({ data }: { data: MenajePDFData }) {
 
         {items.map((it, i) => {
           const falta = it.cantidad > it.disponible;
+          const fotoSrc = resolveFotoSrc(it.fotoUrl);
           return (
             <View
               key={i}
               style={[styles.row, ...(i % 2 === 1 ? [styles.rowAlt] : [])]}
             >
+              <View style={styles.cFoto}>
+                {fotoSrc ? (
+                  // react-pdf <Image> no es un <img> HTML; no admite alt.
+                  // eslint-disable-next-line jsx-a11y/alt-text
+                  <Image src={fotoSrc} style={styles.fotoImg} />
+                ) : (
+                  <View style={styles.fotoVacia} />
+                )}
+              </View>
               <Text style={styles.cItem}>{it.nombre}</Text>
               <Text style={styles.cCat}>{it.categoria}</Text>
               <Text style={styles.cNum}>{it.cantidad}</Text>

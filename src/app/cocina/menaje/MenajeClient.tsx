@@ -5,6 +5,7 @@ import { DocIcon, PaperclipIcon } from "@/components/icons";
 import {
   TIPOS_BAJA_MENAJE,
   CATEGORIAS_MENAJE_SUGERIDAS,
+  FOTOS_MENAJE_SUGERIDAS,
   tipoMenajeLabel,
   type MenajeItem,
   type MovimientoMenaje,
@@ -18,6 +19,7 @@ import {
   deleteMenajeItem,
   registrarBajaMenaje,
   registrarCompraMenaje,
+  subirFotoMenaje,
   getFacturaSignedUrl,
   deleteMovimientoMenaje,
 } from "@/lib/data/menaje";
@@ -33,6 +35,7 @@ type FormItem = {
   cantidadActual: string;
   precioReposicionUsd: string;
   notas: string;
+  fotoUrl: string;
 };
 
 const emptyForm: FormItem = {
@@ -42,6 +45,7 @@ const emptyForm: FormItem = {
   cantidadActual: "0",
   precioReposicionUsd: "",
   notas: "",
+  fotoUrl: "",
 };
 
 export function MenajeClient() {
@@ -67,6 +71,7 @@ export function MenajeClient() {
   );
   const [initialProveedor, setInitialProveedor] = useState("");
   const [creando, setCreando] = useState(false);
+  const [subiendoFoto, setSubiendoFoto] = useState(false);
 
   // Modal de baja
   const [bajaItem, setBajaItem] = useState<MenajeItem | null>(null);
@@ -212,9 +217,26 @@ export function MenajeClient() {
       cantidadActual: String(it.cantidadActual),
       precioReposicionUsd: it.precioReposicionUsd?.toString() ?? "",
       notas: it.notas ?? "",
+      fotoUrl: it.fotoUrl ?? "",
     });
     setAdding(true);
   }
+  // Sube la foto elegida al bucket público y la deja en el form (vista previa
+  // inmediata). Funciona igual creando o editando (no depende del id del ítem).
+  async function onSelectFoto(file: File | null) {
+    if (!file) return;
+    setError(null);
+    setSubiendoFoto(true);
+    try {
+      const url = await subirFotoMenaje(file);
+      setForm((f) => ({ ...f, fotoUrl: url }));
+    } catch (e) {
+      setError(extractError(e, "Error subiendo la foto"));
+    } finally {
+      setSubiendoFoto(false);
+    }
+  }
+
   async function handleSubmitItem(e: React.FormEvent) {
     e.preventDefault();
     if (!form.nombre.trim()) return;
@@ -241,6 +263,7 @@ export function MenajeClient() {
           ? precioUnit  // si no se cargó manual, usar el de la compra inicial
           : Number(form.precioReposicionUsd),
       notas: form.notas.trim() || undefined,
+      fotoUrl: form.fotoUrl.trim() || undefined,
       activo: true,
     };
     setCreando(true);
@@ -499,6 +522,7 @@ export function MenajeClient() {
         precioUnit: listaConPrecios
           ? Number(listaSel[it.id]?.precio) || 0
           : undefined,
+        fotoUrl: it.fotoUrl,
       }));
     if (seleccionados.length === 0) {
       setError("Selecciona al menos un ítem con cantidad.");
@@ -698,6 +722,96 @@ export function MenajeClient() {
             className="w-full rounded-lg ring-1 ring-marfil px-3 py-2"
           />
 
+          {/* Foto del ítem — se muestra en el listado y en el PDF del cliente. */}
+          <div className="rounded-lg ring-1 ring-marfil bg-marfil-soft p-3 space-y-3">
+            <div className="text-sm text-cacao font-medium">
+              Foto{" "}
+              <span className="text-cacao-mute font-normal">
+                (se muestra en la app y en el PDF del cliente)
+              </span>
+            </div>
+            <div className="flex items-start gap-3">
+              {/* Vista previa */}
+              <div className="shrink-0">
+                {form.fotoUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={form.fotoUrl}
+                    alt="Foto del ítem"
+                    className="size-20 rounded-lg object-contain bg-white ring-1 ring-marfil"
+                  />
+                ) : (
+                  <div className="size-20 rounded-lg ring-1 ring-dashed ring-marfil bg-white flex items-center justify-center text-[10px] text-cacao-mute text-center px-1">
+                    Sin foto
+                  </div>
+                )}
+              </div>
+              <div className="flex-1 min-w-0 space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <label className="cursor-pointer rounded-lg bg-white ring-1 ring-marfil px-3 py-1.5 text-sm text-cacao hover:bg-marfil-soft">
+                    {subiendoFoto
+                      ? "Subiendo…"
+                      : form.fotoUrl
+                        ? "Cambiar foto"
+                        : "Subir foto"}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      disabled={subiendoFoto}
+                      onChange={(e) => {
+                        onSelectFoto(e.target.files?.[0] ?? null);
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
+                  {form.fotoUrl && (
+                    <button
+                      type="button"
+                      onClick={() => setForm({ ...form, fotoUrl: "" })}
+                      className="text-xs uppercase tracking-widest text-cacao-mute hover:text-terracotta"
+                    >
+                      Quitar
+                    </button>
+                  )}
+                </div>
+                {/* Fotos sugeridas (catálogo del proveedor) */}
+                <div>
+                  <div className="text-[10px] uppercase tracking-widest text-cacao-mute mb-1">
+                    O elige una sugerida
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {FOTOS_MENAJE_SUGERIDAS.map((f) => {
+                      const activa = form.fotoUrl === f.url;
+                      return (
+                        <button
+                          key={f.url}
+                          type="button"
+                          title={f.label}
+                          onClick={() =>
+                            setForm((prev) => ({ ...prev, fotoUrl: f.url }))
+                          }
+                          className={`rounded-md bg-white p-0.5 ring-1 transition-colors ${
+                            activa
+                              ? "ring-cacao ring-2"
+                              : "ring-marfil hover:ring-cacao-soft"
+                          }`}
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={f.url}
+                            alt={f.label}
+                            className="size-10 object-contain"
+                          />
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
           {/* Sub-form de compra inicial — solo cuando se crea el item.
               Si dejás vacíos los campos, se crea sin compra. */}
           {!editingId && (
@@ -851,7 +965,16 @@ export function MenajeClient() {
                                 clipRule="evenodd"
                               />
                             </svg>
-                            {i.nombre}
+                            {i.fotoUrl && (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={i.fotoUrl}
+                                alt=""
+                                aria-hidden
+                                className="size-8 rounded object-contain bg-white ring-1 ring-marfil shrink-0"
+                              />
+                            )}
+                            <span className="truncate">{i.nombre}</span>
                           </div>
                           {i.descripcion && (
                             <div className="text-xs text-cacao-soft mt-0.5 ml-5">

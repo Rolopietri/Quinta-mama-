@@ -906,6 +906,19 @@ export const CATEGORIAS_MENAJE_SUGERIDAS = [
   "Otros",
 ];
 
+/** Fotos de cristalería listas para asignar a un ítem de menaje (vienen del
+ *  catálogo del proveedor). Son archivos estáticos en /public/menaje/vasos.
+ *  El usuario puede elegir una de estas o subir su propia foto. */
+export const FOTOS_MENAJE_SUGERIDAS: { url: string; label: string }[] = [
+  { url: "/menaje/vasos/copa-vino-tinto-burdeos.png", label: "Copa Vino Tinto Burdeos" },
+  { url: "/menaje/vasos/copa-ginebra.png", label: "Copa Ginebra" },
+  { url: "/menaje/vasos/vaso-lexington-bebidas.png", label: "Vaso Lexington (bebidas)" },
+  { url: "/menaje/vasos/vaso-lexington-rocks.png", label: "Vaso Lexington (rocks)" },
+  { url: "/menaje/vasos/vaso-lata-16oz.png", label: "Vaso Lata 16oz" },
+  { url: "/menaje/vasos/copa-vino-tinto.png", label: "Copa Vino Tinto" },
+  { url: "/menaje/vasos/vaso-sicilia.png", label: "Vaso Sicilia" },
+];
+
 export function tipoMenajeLabel(t: string): string {
   const baja = TIPOS_BAJA_MENAJE.find((x) => x.value === t);
   if (baja) return baja.label;
