@@ -2287,6 +2287,7 @@ function SeccionCuentasCobrar() {
   const [guardandoDeval, setGuardandoDeval] = useState(false);
   const [correosInput, setCorreosInput] = useState("");
   const [guardandoCorreos, setGuardandoCorreos] = useState(false);
+  const [probando, setProbando] = useState(false);
   const [tick, setTick] = useState(0);
   const recargar = useCallback(() => setTick((t) => t + 1), []);
 
@@ -2338,6 +2339,24 @@ function SeccionCuentasCobrar() {
       setError("No se pudieron guardar los correos.");
     } finally {
       setGuardandoCorreos(false);
+    }
+  }
+
+  async function probarCorreo() {
+    setProbando(true);
+    setError(null);
+    setMsg(null);
+    try {
+      const r = await fetch("/api/admin/probar-correo", { method: "POST" });
+      const d = await r.json();
+      if (d.sinConfig) { setError("Falta la clave de Resend (RESEND_API_KEY) en Vercel."); return; }
+      if (!r.ok) throw new Error(d.error || "No se pudo enviar.");
+      if (d.fallidos?.length) setError(`Enviados ${d.enviados}/${d.total}. Fallaron: ${d.fallidos.join(", ")}.`);
+      else setMsg(`Correo de prueba enviado a ${d.enviados} correo${d.enviados === 1 ? "" : "s"} (desde ${d.from}). Revisa la bandeja (y spam).`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo enviar.");
+    } finally {
+      setProbando(false);
     }
   }
 
@@ -2447,8 +2466,9 @@ function SeccionCuentasCobrar() {
         <div className="flex flex-wrap items-center gap-2">
           <input value={correosInput} onChange={(e) => setCorreosInput(e.target.value)} placeholder="beatriz@…, lucia@…, tu@…" className="flex-1 min-w-[16rem] border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
           <button type="button" onClick={guardarCorreos} disabled={guardandoCorreos} className="rounded-lg bg-cacao text-white px-4 py-2 text-xs uppercase tracking-widest hover:bg-terracotta disabled:bg-marfil disabled:text-cacao-mute">{guardandoCorreos ? "Guardando…" : "Guardar"}</button>
+          <button type="button" onClick={probarCorreo} disabled={probando} className="rounded-lg ring-1 ring-marfil text-cacao px-4 py-2 text-xs uppercase tracking-widest hover:bg-marfil-soft disabled:text-cacao-mute">{probando ? "Enviando…" : "Enviar correo de prueba"}</button>
         </div>
-        <p className="text-[11px] text-cacao-mute">Separados por coma. Reciben el aviso en los últimos 5 días del mes si hay cuentas por cobrar abiertas.</p>
+        <p className="text-[11px] text-cacao-mute">Separados por coma. Reciben el aviso en los últimos 5 días del mes si hay cuentas por cobrar abiertas. El envío automático corre en producción.</p>
       </div>
 
       {devalPct != null && devalPct > 0 && perdidaTotal > 0.005 && (
