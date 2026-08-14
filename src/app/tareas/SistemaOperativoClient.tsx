@@ -260,8 +260,8 @@ export function SistemaOperativoClient() {
               tareas={tareas}
               objetivos={objetivos}
               espacios={espacios}
+              personas={personas}
               objMap={objMap}
-              nombreDe={nombreDe}
               onAbrir={(id) => setDetalle({ tipo: "tarea", id })}
             />
           )}
@@ -397,17 +397,20 @@ function VistaTablero({
   tareas,
   objetivos,
   espacios,
+  personas,
   objMap,
-  nombreDe,
   onAbrir,
 }: {
   tareas: Tarea[];
   objetivos: Objetivo[];
   espacios: Espacio[];
+  personas: Persona[];
   objMap: Map<string, Objetivo>;
-  nombreDe: (ids: string[]) => string;
   onAbrir: (id: string) => void;
 }) {
+  // Filtro por responsable: null = todas; id de persona; "__sin" = sin asignar.
+  const [filtro, setFiltro] = useState<string | null>(null);
+  const nombrePersona = (id: string) => personas.find((p) => p.id === id)?.nombre ?? "—";
   const activas = tareas.filter((t) => t.estado === "pendiente" && t.objetivoId);
   const conClasif = activas
     .map((t) => ({ t, c: clasifDe(t, objMap) }))
@@ -431,6 +434,20 @@ function VistaTablero({
     const d = diasHasta(t.vence);
     return d !== null && d < 0;
   }).length;
+
+  // Conteo de tareas activas (clasificadas) por persona, para los chips.
+  const cuentaPorPersona = new Map<string, number>();
+  let sinAsignar = 0;
+  for (const { t } of conClasif) {
+    if (t.responsables.length === 0) sinAsignar++;
+    for (const pid of t.responsables) cuentaPorPersona.set(pid, (cuentaPorPersona.get(pid) ?? 0) + 1);
+  }
+  const personasConTareas = personas.filter((p) => (cuentaPorPersona.get(p.id) ?? 0) > 0);
+
+  const visibles = conClasif.filter(({ t }) =>
+    filtro === null ? true : filtro === "__sin" ? t.responsables.length === 0 : t.responsables.includes(filtro),
+  );
+  const tituloLista = filtro === null ? "Tareas activas" : filtro === "__sin" ? "Sin asignar" : `Tareas de ${nombrePersona(filtro)}`;
 
   return (
     <div className="space-y-5">
@@ -458,11 +475,29 @@ function VistaTablero({
         <Kpi chico="Espacios con novedad" num={conNovedad} nota={`de ${espacios.length}`} />
       </div>
 
-      <Card titulo="Tareas activas" extra={`${activas.length} en total`}>
+      {(personasConTareas.length > 0 || sinAsignar > 0) && (
+        <div className="flex flex-wrap gap-1.5">
+          <ChipFiltro activo={filtro === null} onClick={() => setFiltro(null)}>Todas · {conClasif.length}</ChipFiltro>
+          {personasConTareas.map((p) => (
+            <ChipFiltro key={p.id} activo={filtro === p.id} onClick={() => setFiltro(p.id)}>
+              {p.nombre} · {cuentaPorPersona.get(p.id)}
+            </ChipFiltro>
+          ))}
+          {sinAsignar > 0 && (
+            <ChipFiltro activo={filtro === "__sin"} onClick={() => setFiltro("__sin")}>Sin asignar · {sinAsignar}</ChipFiltro>
+          )}
+        </div>
+      )}
+
+      <Card titulo={tituloLista} extra={filtro === null ? `${activas.length} en total` : `${visibles.length} de ${conClasif.length}`}>
         {conClasif.length === 0 ? (
           <p className="px-4 py-8 text-center text-[13px] text-[#8C8C86] italic">
             Ninguna tarea activa todavía. Los datos reales de Beatriz entran por
             la vista Sincronizar.
+          </p>
+        ) : visibles.length === 0 ? (
+          <p className="px-4 py-8 text-center text-[13px] text-[#8C8C86] italic">
+            {filtro === "__sin" ? "No hay tareas sin asignar." : `${nombrePersona(filtro ?? "")} no tiene tareas activas.`}
           </p>
         ) : (
           <div className="overflow-x-auto">
@@ -477,7 +512,7 @@ function VistaTablero({
                 </tr>
               </thead>
               <tbody>
-                {conClasif.map(({ t, c }) => {
+                {visibles.map(({ t, c }) => {
                   const d = diasHasta(t.vence);
                   return (
                     <tr
@@ -491,7 +526,25 @@ function VistaTablero({
                           {t.id} · {t.subEjeId} — {nombreSubEje(t.subEjeId)}
                         </div>
                       </td>
-                      <td className="px-3 py-3 text-[12px]">{nombreDe(t.responsables)}</td>
+                      <td className="px-3 py-3 text-[12px]">
+                        {t.responsables.length === 0 ? (
+                          <span className="text-[#B9B9B3]">Sin asignar</span>
+                        ) : (
+                          <span className="flex flex-wrap gap-x-1.5 gap-y-0.5">
+                            {t.responsables.map((pid, i) => (
+                              <button
+                                key={pid}
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); setFiltro(pid); }}
+                                className="underline decoration-dotted underline-offset-2 hover:text-[#0F0F0F] hover:decoration-solid text-left"
+                                title={`Ver solo las tareas de ${nombrePersona(pid)}`}
+                              >
+                                {nombrePersona(pid)}{i < t.responsables.length - 1 ? "," : ""}
+                              </button>
+                            ))}
+                          </span>
+                        )}
+                      </td>
                       <td className="px-3 py-3 font-mono text-[11px]" style={d !== null && d < 0 ? { color: "#9F3E2E" } : undefined}>
                         {fmtFecha(t.vence)}
                         {d !== null && (
@@ -513,6 +566,18 @@ function VistaTablero({
         )}
       </Card>
     </div>
+  );
+}
+
+function ChipFiltro({ activo, onClick, children }: { activo: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`text-[11px] tracking-[0.04em] px-2.5 py-1 border ${activo ? "bg-[#0F0F0F] text-white border-[#0F0F0F]" : "border-[#DEDEDA] text-[#4A4A46] hover:border-[#0F0F0F]"}`}
+    >
+      {children}
+    </button>
   );
 }
 
