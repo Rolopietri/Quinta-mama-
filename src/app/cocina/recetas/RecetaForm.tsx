@@ -1102,6 +1102,17 @@ export function RecetaForm({
                         Sub-receta
                       </span>
                     )}
+                    {!l.insumoId &&
+                      !l.subrecetaId &&
+                      l.nombre.trim() !== "" && (
+                        <span
+                          title="Ingrediente libre: no está vinculado a un insumo del catálogo, así que NO descuenta stock al vender. Bórralo y agrégalo desde el catálogo para que descuente."
+                          className="text-[10px] uppercase tracking-widest px-2 py-1 rounded-full bg-amber-50 text-amber-800 ring-1 ring-amber-200 shrink-0 flex items-center gap-1"
+                        >
+                          <WarningIcon className="size-3" />
+                          No descuenta stock
+                        </span>
+                      )}
                     <button
                       type="button"
                       onClick={() => removeLine(l.key)}
@@ -1225,6 +1236,26 @@ export function RecetaForm({
             })}
           </div>
         )}
+
+        {(() => {
+          const sinVincular = lineas.filter(
+            (l) => !l.insumoId && !l.subrecetaId && l.nombre.trim() !== "",
+          );
+          if (sinVincular.length === 0) return null;
+          return (
+            <div className="mt-4 rounded-lg ring-1 ring-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+              <WarningIcon className="inline size-3.5 align-[-0.15em] mr-1" />
+              <strong>
+                {sinVincular.length} ingrediente
+                {sinVincular.length === 1 ? "" : "s"} no descuenta
+                {sinVincular.length === 1 ? "" : "n"} stock:
+              </strong>{" "}
+              {sinVincular.map((l) => l.nombre.trim()).join(", ")}. Están como
+              &ldquo;ingrediente libre&rdquo;. Si deberían restar del inventario
+              al vender, bórralos y agrégalos desde el catálogo de insumos.
+            </div>
+          );
+        })()}
 
         <div className="mt-4 border-t border-marfil pt-3 text-right space-y-1">
           <div className="text-sm text-cacao-soft">
