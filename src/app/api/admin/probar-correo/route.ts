@@ -9,13 +9,15 @@ function autorizado(req: NextRequest): boolean {
   return tokenValido(req.cookies.get(ADMIN_COOKIE)?.value);
 }
 
-async function enviarResend(key: string, from: string, to: string, subject: string, text: string): Promise<boolean> {
+async function enviarResend(key: string, from: string, to: string, subject: string, text: string): Promise<{ ok: boolean; error?: string }> {
   const r = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
     body: JSON.stringify({ from, to: [to], subject, text }),
   });
-  return r.ok;
+  if (r.ok) return { ok: true };
+  const body = await r.text().catch(() => "");
+  return { ok: false, error: `${r.status} · ${body.slice(0, 300)}` };
 }
 
 // POST → manda un correo de prueba a los correos de alerta configurados.
@@ -37,16 +39,17 @@ export async function POST(req: NextRequest) {
 
   let enviados = 0;
   const fallidos: string[] = [];
+  let detalle: string | null = null;
   for (const to of correos) {
-    const ok = await enviarResend(
+    const res = await enviarResend(
       key,
       from,
       to,
       "Prueba · Panel de Quinta Mamá",
       "Este es un correo de prueba del Panel de Administración de Quinta Mamá.\n\nSi lo recibes, Resend está funcionando y los recordatorios de cuentas por cobrar llegarán bien.\n\n— Administración · Quinta Mamá",
     );
-    if (ok) enviados++;
-    else fallidos.push(to);
+    if (res.ok) enviados++;
+    else { fallidos.push(to); if (!detalle) detalle = res.error ?? null; }
   }
-  return NextResponse.json({ enviados, total: correos.length, fallidos, from });
+  return NextResponse.json({ enviados, total: correos.length, fallidos, from, detalle });
 }

@@ -2351,7 +2351,7 @@ function SeccionCuentasCobrar() {
       const d = await r.json();
       if (d.sinConfig) { setError("Falta la clave de Resend (RESEND_API_KEY) en Vercel."); return; }
       if (!r.ok) throw new Error(d.error || "No se pudo enviar.");
-      if (d.fallidos?.length) setError(`Enviados ${d.enviados}/${d.total}. Fallaron: ${d.fallidos.join(", ")}.`);
+      if (d.fallidos?.length) setError(`Enviados ${d.enviados}/${d.total} (remitente: ${d.from}). Error de Resend: ${d.detalle ?? d.fallidos.join(", ")}`);
       else setMsg(`Correo de prueba enviado a ${d.enviados} correo${d.enviados === 1 ? "" : "s"} (desde ${d.from}). Revisa la bandeja (y spam).`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "No se pudo enviar.");
