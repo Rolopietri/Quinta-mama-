@@ -991,14 +991,14 @@ export function InsumosClient() {
                         >
                           {displayCantidad(libre, i.unidadBase)}
                         </div>
-                        <div className="text-[10px] text-cacao-mute">
+                        <div className="text-xs text-cacao-mute">
                           {displayCantidad(i.stockTotal, i.unidadBase)} total
                           {i.stockComprometido > 0 && (
                             <> · {displayCantidad(i.stockComprometido, i.unidadBase)} comp.</>
                           )}
                         </div>
                         {i.stockMinimo !== null && i.stockMinimo > 0 && (
-                          <div className="text-[10px] text-cacao-mute">
+                          <div className="text-xs text-cacao-mute">
                             min: {i.stockMinimo}
                           </div>
                         )}
