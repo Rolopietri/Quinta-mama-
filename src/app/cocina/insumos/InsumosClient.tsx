@@ -33,6 +33,7 @@ import { stockLibre } from "@/lib/types";
 import { normalizarBusqueda } from "@/lib/text";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { WarningIcon } from "@/components/icons";
+import { PerdidaInsumoDialog } from "../_PerdidaInsumoDialog";
 
 /**
  * Cuántas unidadBase hay en 1 unidadCompra cuando son convertibles.
@@ -120,6 +121,8 @@ export function InsumosClient() {
   const [nuevoProveedor, setNuevoProveedor] = useState("");
   const [guardandoProveedor, setGuardandoProveedor] = useState(false);
   const [pendienteBorrar, setPendienteBorrar] = useState<string | null>(null);
+  // Insumo al que se le va a registrar una pérdida (abre el modal).
+  const [perdidaInsumo, setPerdidaInsumo] = useState<Insumo | null>(null);
   // Fecha de hoy (YYYY-MM-DD) para medir la frescura de cada precio.
   const hoy = useMemo(() => new Date().toISOString().slice(0, 10), []);
 
@@ -952,6 +955,13 @@ export function InsumosClient() {
                       </div>
                       <div className="col-span-4 sm:col-span-2 flex sm:justify-end gap-3 text-xs uppercase tracking-widest">
                         <button
+                          onClick={() => setPerdidaInsumo(i)}
+                          className="text-cacao-soft hover:text-terracotta"
+                          title="Registrar pérdida, merma o mal estado"
+                        >
+                          Pérdida
+                        </button>
+                        <button
                           onClick={() => startEdit(i)}
                           className="text-cacao-soft hover:text-cacao"
                         >
@@ -983,6 +993,21 @@ export function InsumosClient() {
         }}
         onCancel={() => setPendienteBorrar(null)}
       />
+
+      {perdidaInsumo && (
+        <PerdidaInsumoDialog
+          key={perdidaInsumo.id}
+          insumo={perdidaInsumo}
+          onClose={() => setPerdidaInsumo(null)}
+          onRegistered={(insumoId, nuevoStockTotal) => {
+            setItems((prev) =>
+              prev.map((x) =>
+                x.id === insumoId ? { ...x, stockTotal: nuevoStockTotal } : x,
+              ),
+            );
+          }}
+        />
+      )}
     </div>
   );
 }
