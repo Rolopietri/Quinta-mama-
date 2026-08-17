@@ -890,7 +890,7 @@ function VistaNueva({
     setGuardando(true);
     setError(null);
     try {
-      await crearTarea({
+      const nuevaId = await crearTarea({
         titulo: titulo.trim(),
         subEjeId: subEjeId || objetivoSel!.subEjeId,
         objetivoId,
@@ -904,6 +904,14 @@ function VistaNueva({
         responsables,
         valores,
       });
+      // Correo instantáneo a los responsables (no bloquea si falla).
+      if (responsables.length > 0) {
+        fetch("/api/tareas/notificar-asignacion", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ taskId: nuevaId }),
+        }).catch(() => {});
+      }
       await onCreated();
     } catch (e) {
       setError(e instanceof Error ? e.message : "No se pudo crear la tarea");

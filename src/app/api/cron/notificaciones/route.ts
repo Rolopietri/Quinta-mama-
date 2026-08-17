@@ -16,6 +16,9 @@ import { createClient } from "@supabase/supabase-js";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// Recordatorios de vencimiento: días ANTES de la fecha límite (0 = el día que vence).
+const DIAS_AVISO = [5, 3, 1, 0];
+
 type TareaRow = {
   id: string; titulo: string; sub_eje_id: string; vence: string | null;
   creada: string; estado: string;
@@ -125,16 +128,32 @@ export async function GET(request: Request) {
       const persona = personas.get(pid);
       if (!persona?.correo) continue;
 
-      const items: { tipo: "creada" | "vence"; clave: string }[] = [];
+      const items: { tipo: "creada" | "vence" | "vencida"; clave: string; dias?: number }[] = [];
       const dCreada = diffDias(t.creada, hoy);
       if (dCreada <= 0 && dCreada >= -7) items.push({ tipo: "creada", clave: `${t.id}|creada|${pid}` });
-      if (t.vence && diffDias(t.vence, hoy) <= 1) items.push({ tipo: "vence", clave: `${t.id}|vence|${pid}` });
+      if (t.vence) {
+        const d = diffDias(t.vence, hoy); // días que faltan (negativo = vencida)
+        for (const off of DIAS_AVISO) {
+          if (d === off) items.push({ tipo: "vence", dias: off, clave: `${t.id}|v${off}|${pid}` });
+        }
+        if (d < 0) items.push({ tipo: "vencida", clave: `${t.id}|vencida|${pid}` });
+      }
 
       for (const it of items) {
         if (yaEnviadas.has(it.clave)) continue;
-        const subject = `${it.tipo === "vence" ? "Vence" : "Nueva tarea"} · ${t.id} · ${t.titulo}`;
+        const cabecera =
+          it.tipo === "creada" ? "Se te asignó una tarea."
+          : it.tipo === "vencida" ? "Tienes una tarea VENCIDA."
+          : it.dias === 0 ? "Tienes una tarea que vence HOY."
+          : `Tienes una tarea que vence en ${it.dias} día${it.dias === 1 ? "" : "s"}.`;
+        const etiqueta =
+          it.tipo === "creada" ? "Nueva tarea"
+          : it.tipo === "vencida" ? "Vencida"
+          : it.dias === 0 ? "Vence hoy"
+          : `Faltan ${it.dias} d`;
+        const subject = `${etiqueta} · ${t.id} · ${t.titulo}`;
         const text = [
-          it.tipo === "vence" ? "Tienes una tarea que vence pronto." : "Se te asignó una tarea.",
+          cabecera,
           "",
           `Tarea: ${t.titulo}`,
           `Identificador: ${t.id}`,
