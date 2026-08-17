@@ -364,6 +364,10 @@ export function ComprasClient() {
     try {
       await deleteCompra(id);
       setCompras((prev) => prev.filter((c) => c.id !== id));
+      // El trigger de la base revierte el stock (y, si era la última compra,
+      // el precio) al borrar. Recargamos insumos para reflejarlo en la UI.
+      const fresh = await listInsumos();
+      setInsumos(fresh);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error eliminando");
     }
