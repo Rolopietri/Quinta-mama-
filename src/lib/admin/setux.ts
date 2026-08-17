@@ -107,16 +107,22 @@ export function parseReporteSetux(buf: Buffer): ReporteSetux {
   const iu = tokens.findIndex((t) => t.text.includes("USUARIO"));
   const usuario = iu >= 0 && tokens[iu + 1] ? tokens[iu + 1].text.trim().replace(/\s+/g, " ") : null;
 
-  // Encabezado de la tabla (coincidencia exacta, no el título).
-  const header = filas.find((f) => f.items.some((i) => i.text.trim().toUpperCase() === "FORMAS DE PAGO"));
+  // Encabezado de la tabla. Sirve para los dos reportes de Setux:
+  //  - "Consolidado ... FORMAS DE PAGO" (col CANTIDAD / TOTAL VENTAS)
+  //  - "Detallado por FORMA DE PAGO"    (col TRANSACCIONES / TOTAL VENTA)
+  const esEncabezado = (t: string) => {
+    const u = t.trim().toUpperCase();
+    return u === "FORMAS DE PAGO" || u === "FORMA DE PAGO";
+  };
+  const header = filas.find((f) => f.items.some((i) => esEncabezado(i.text)));
   if (!header) return { fecha: desde, desde, hasta, usuario, lineas: [], total: null };
 
   const colX = (label: string) => {
     const it = header.items.find((i) => i.text.trim().toUpperCase().startsWith(label));
     return it ? it.x : null;
   };
-  const xCantidad = colX("CANTIDAD");
-  const xTotal = colX("TOTAL VENTAS");
+  const xCantidad = colX("CANTIDAD") ?? colX("TRANSACC");
+  const xTotal = colX("TOTAL VENTA") ?? colX("TOTAL PAGADO"); // "TOTAL VENTA" cubre "TOTAL VENTAS"
   const cercano = (items: Tok[], xRef: number | null) => {
     if (xRef == null) return undefined;
     let best: Tok | undefined, bd = Infinity;
@@ -131,10 +137,11 @@ export function parseReporteSetux(buf: Buffer): ReporteSetux {
     const label = f.items[0];
     if (!label) continue;
     const nombre = label.text.trim();
-    if (!nombre || label.x > 120) continue; // la etiqueta va pegada a la izquierda
+    if (!nombre || label.x > 140) continue; // la etiqueta va pegada a la izquierda
     const totVal = num(cercano(f.items, xTotal)?.text);
-    if (/^TOTAL$/i.test(nombre)) { total = totVal; break; } // fin de la tabla
-    if (totVal == null) continue;
+    // Fila final: "TOTAL" o "TOTAL GENERAL:" → cierra la tabla.
+    if (/^TOTAL($|\s|:|\sGENERAL)/i.test(nombre)) { total = totVal; break; }
+    if (totVal == null || totVal === 0) continue; // ignora métodos sin ventas
     lineas.push({ metodo: nombre, cantidad: num(cercano(f.items, xCantidad)?.text), total: totVal });
   }
   return { fecha: desde, desde, hasta, usuario, lineas, total };
@@ -148,6 +155,8 @@ const NOMBRES: Record<string, string> = {
   "PUNTO DE VENTA": "Punto de Venta",
   "ZELLE": "Zelle",
   "EFECTIVO": "Efectivo",
+  "DOLAR": "Dólar",
+  "DÓLAR": "Dólar",
   "DIVISAS": "Divisas",
   "CXC": "CXC (por cobrar)",
   "RPP": "RPP",

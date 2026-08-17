@@ -18,6 +18,7 @@ type Destino = "ingreso" | "cobrar" | "excluir";
 function destinoDe(metodo: string): Destino {
   const k = metodo.trim().toUpperCase();
   if (k === "RPP") return "excluir";
+  if (k.includes("NOTA DE CREDITO") || k.includes("NOTA DE CRÉDITO")) return "excluir";
   if (k.startsWith("CXC")) return "cobrar";
   return "ingreso";
 }
