@@ -9,6 +9,7 @@ import {
   type Insumo,
   type PlanProduccion,
   type Receta,
+  type Venta,
 } from "@/lib/types";
 import { listInsumos } from "@/lib/data/cocina";
 import { listRecetas } from "@/lib/data/recetas";
@@ -20,8 +21,12 @@ import {
   deletePlanProduccion,
   ajustarPlanCompletado,
   previewConsumo,
+  recalcularStockComprometido,
 } from "@/lib/data/planes-produccion";
+import { listMermas, deleteVenta } from "@/lib/data/ventas";
 import { extractError } from "@/lib/data/error";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { MermaRecetaDialog } from "../../_MermaRecetaDialog";
 import { displayCantidad } from "@/lib/units";
 
 export function PlanesClient() {
@@ -89,6 +94,13 @@ export function PlanesClient() {
   const [vista, setVista] = useState<"receta" | "cronologico">("cronologico");
   const [mostrarCerrados, setMostrarCerrados] = useState(false);
 
+  // Mermas de producción (una ración pre-producida que se perdió).
+  const [mermas, setMermas] = useState<Venta[]>([]);
+  const [mermaOpen, setMermaOpen] = useState(false);
+  const [pendienteBorrarMerma, setPendienteBorrarMerma] = useState<
+    string | null
+  >(null);
+
   async function reload() {
     const [r, i, p] = await Promise.all([
       listRecetas(),
@@ -98,6 +110,35 @@ export function PlanesClient() {
     setRecetas(r);
     setInsumos(i);
     setPlanes(p);
+  }
+
+  // Tras registrar/borrar una merma: recalcular compromiso y recargar todo.
+  async function refrescarTrasMerma() {
+    try {
+      await recalcularStockComprometido();
+    } catch {
+      // no crítico
+    }
+    await reload();
+    try {
+      setMermas(await listMermas());
+    } catch {
+      // tabla pendiente
+    }
+  }
+
+  async function borrarMerma() {
+    if (!pendienteBorrarMerma) return;
+    setError(null);
+    try {
+      await deleteVenta(pendienteBorrarMerma);
+      await refrescarTrasMerma();
+      setInfo("Merma eliminada. Stock y compromiso restaurados.");
+    } catch (e) {
+      setError(extractError(e, "Error eliminando la merma"));
+    } finally {
+      setPendienteBorrarMerma(null);
+    }
   }
 
   useEffect(() => {
@@ -113,6 +154,12 @@ export function PlanesClient() {
           if (!cancelled) setPlanes(p);
         } catch {
           // tabla pendiente — seguimos sin historial
+        }
+        try {
+          const me = await listMermas();
+          if (!cancelled) setMermas(me);
+        } catch {
+          // tabla pendiente
         }
       } catch (e) {
         if (!cancelled) setError(extractError(e, "Error cargando"));
@@ -476,6 +523,58 @@ export function PlanesClient() {
           {info}
         </div>
       )}
+
+      {/* Merma de producción (ración pre-producida que se perdió) */}
+      <div className="rounded-2xl bg-white ring-1 ring-marfil p-4 space-y-3">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <h2 className="font-display text-sm tracking-[0.2em] uppercase text-cacao">
+              Merma de producción
+            </h2>
+            <p className="text-xs text-cacao-soft font-serif italic mt-0.5">
+              Una ración pre-producida que se perdió por un fallo interno.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setMermaOpen(true)}
+            className="shrink-0 rounded-lg ring-1 ring-marfil px-3 py-2 text-sm text-cacao hover:bg-marfil-soft"
+          >
+            + Registrar merma
+          </button>
+        </div>
+        {mermas.length > 0 && (
+          <details className="rounded-lg ring-1 ring-marfil bg-marfil-soft">
+            <summary className="cursor-pointer px-3 py-2 text-sm text-cacao font-medium select-none">
+              Mermas recientes ({mermas.length})
+            </summary>
+            <ul className="divide-y divide-marfil border-t border-marfil">
+              {mermas.slice(0, 15).map((m) => (
+                <li
+                  key={m.id}
+                  className="px-3 py-2 flex items-center justify-between gap-3 text-sm"
+                >
+                  <div className="min-w-0">
+                    <div className="text-cacao truncate">{m.recetaNombre}</div>
+                    <div className="text-xs text-cacao-soft">
+                      {Number(m.cantidad.toFixed(2))} ración
+                      {m.cantidad === 1 ? "" : "es"} · {m.fecha}
+                      {m.mermaMotivo ? ` · ${m.mermaMotivo}` : ""}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setPendienteBorrarMerma(m.id)}
+                    className="shrink-0 text-xs uppercase tracking-widest text-cacao-soft hover:text-terracotta"
+                  >
+                    Deshacer
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
+      </div>
 
       {/* Botón / form nuevo plan */}
       {!creating ? (
@@ -904,6 +1003,30 @@ export function PlanesClient() {
           </div>
         </div>
       )}
+
+      {mermaOpen && (
+        <MermaRecetaDialog
+          recetas={recetas}
+          insumos={insumos}
+          planes={planes}
+          onClose={() => setMermaOpen(false)}
+          onRegistered={(detalle) => {
+            setInfo(detalle);
+            refrescarTrasMerma();
+          }}
+        />
+      )}
+
+      <ConfirmDialog
+        open={pendienteBorrarMerma !== null}
+        title="¿Deshacer esta merma?"
+        message={
+          <>Se elimina el registro y se devuelven al stock los insumos que había
+          descontado (y el compromiso del plan).</>
+        }
+        onConfirm={borrarMerma}
+        onCancel={() => setPendienteBorrarMerma(null)}
+      />
     </div>
   );
 }

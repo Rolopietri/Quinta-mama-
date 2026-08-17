@@ -5,18 +5,13 @@ import { SubHubGrid, type SubModulo } from "../_SubHub";
 const SUBMODULOS: SubModulo[] = [
   {
     href: "/cocina/insumos",
-    label: "Insumos",
-    desc: "Ficha de cada materia prima — precio actual, último pedido, mínimo de compra.",
+    label: "Insumos y stock",
+    desc: "Ficha de cada materia prima — precio, stock (libre y comprometido) y registro de pérdidas/mermas.",
   },
   {
     href: "/cocina/proveedores",
     label: "Proveedores",
     desc: "Contactos y modalidades de pago (Bs BCV, paralela, USD efectivo o divisa).",
-  },
-  {
-    href: "/cocina/stock",
-    label: "Stock y pérdidas",
-    desc: "Stock por insumo + registro de pérdidas, mermas, mal estado y vencimientos.",
   },
   {
     href: "/cocina/auditoria",

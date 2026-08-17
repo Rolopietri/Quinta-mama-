@@ -6,10 +6,12 @@ import {
   categoriaInsumoLabel,
   frescuraPrecio,
   SECCIONES,
+  TIPOS_PERDIDA,
   type Insumo,
   type NivelFrescuraPrecio,
   type Seccion,
   type Proveedor,
+  type StockMovimiento,
 } from "@/lib/types";
 import {
   listInsumos,
@@ -34,6 +36,7 @@ import { normalizarBusqueda } from "@/lib/text";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { WarningIcon } from "@/components/icons";
 import { PerdidaInsumoDialog } from "../_PerdidaInsumoDialog";
+import { listMovimientos, deleteMovimiento } from "@/lib/data/stock-movimientos";
 
 /**
  * Cuántas unidadBase hay en 1 unidadCompra cuando son convertibles.
@@ -123,6 +126,12 @@ export function InsumosClient() {
   const [pendienteBorrar, setPendienteBorrar] = useState<string | null>(null);
   // Insumo al que se le va a registrar una pérdida (abre el modal).
   const [perdidaInsumo, setPerdidaInsumo] = useState<Insumo | null>(null);
+  // Movimientos de stock recientes (para la lista de pérdidas con "deshacer").
+  const [movs, setMovs] = useState<StockMovimiento[]>([]);
+  const [pendienteBorrarMov, setPendienteBorrarMov] = useState<string | null>(
+    null,
+  );
+  const [devolverStock, setDevolverStock] = useState(true);
   // Fecha de hoy (YYYY-MM-DD) para medir la frescura de cada precio.
   const hoy = useMemo(() => new Date().toISOString().slice(0, 10), []);
 
@@ -137,6 +146,12 @@ export function InsumosClient() {
         if (!cancelled) {
           setItems(ins);
           setProveedores(prov);
+        }
+        try {
+          const mv = await listMovimientos({ limit: 60 });
+          if (!cancelled) setMovs(mv);
+        } catch {
+          // tabla pendiente
         }
       } catch (e) {
         if (!cancelled)
@@ -371,6 +386,41 @@ export function InsumosClient() {
       categoriaInsumoLabel(a).localeCompare(categoriaInsumoLabel(b)),
     );
   }, [categoriasReales]);
+
+  const itemsById = useMemo(
+    () => new Map(items.map((i) => [i.id, i] as const)),
+    [items],
+  );
+
+  // Pérdidas/mermas manuales recientes (excluye los movimientos de planes).
+  const perdidasRecientes = useMemo(() => {
+    const PLAN_TIPOS = [
+      "comprometido_in",
+      "comprometido_out",
+      "plan_completado",
+    ];
+    return movs.filter((m) => !PLAN_TIPOS.includes(m.tipo)).slice(0, 15);
+  }, [movs]);
+
+  const tipoPerdidaLabel = (t: string) =>
+    TIPOS_PERDIDA.find((x) => x.value === t)?.label ?? t;
+
+  async function borrarMovimiento(id: string, devolver: boolean) {
+    const mov = movs.find((m) => m.id === id);
+    try {
+      const res = await deleteMovimiento(id, { devolverStock: devolver });
+      setMovs((prev) => prev.filter((m) => m.id !== id));
+      if (devolver && res.stockTotal !== undefined && mov) {
+        setItems((prev) =>
+          prev.map((i) =>
+            i.id === mov.insumoId ? { ...i, stockTotal: res.stockTotal! } : i,
+          ),
+        );
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error eliminando");
+    }
+  }
 
   return (
     <div>
@@ -983,6 +1033,50 @@ export function InsumosClient() {
         </div>
       )}
 
+      {perdidasRecientes.length > 0 && (
+        <details className="mt-6 rounded-2xl bg-white ring-1 ring-marfil">
+          <summary className="cursor-pointer px-5 py-3 text-sm font-medium text-cacao select-none">
+            Pérdidas recientes ({perdidasRecientes.length})
+            <span className="ml-2 text-xs text-cacao-mute font-normal">
+              deshaz una si la registraste por error
+            </span>
+          </summary>
+          <ul className="divide-y divide-marfil border-t border-marfil">
+            {perdidasRecientes.map((m) => {
+              const ins = itemsById.get(m.insumoId);
+              return (
+                <li
+                  key={m.id}
+                  className="px-5 py-2.5 flex items-center justify-between gap-3 text-sm"
+                >
+                  <div className="min-w-0">
+                    <div className="text-cacao truncate">
+                      {ins?.nombre ?? "Insumo"}
+                    </div>
+                    <div className="text-xs text-cacao-soft">
+                      {tipoPerdidaLabel(m.tipo)} ·{" "}
+                      {displayCantidad(Math.abs(m.cantidad), ins?.unidadBase ?? "")}{" "}
+                      · {m.fecha}
+                      {m.motivo ? ` · ${m.motivo}` : ""}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDevolverStock(true);
+                      setPendienteBorrarMov(m.id);
+                    }}
+                    className="shrink-0 text-xs uppercase tracking-widest text-cacao-soft hover:text-terracotta"
+                  >
+                    Deshacer
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </details>
+      )}
+
       <ConfirmDialog
         open={pendienteBorrar !== null}
         title="¿Eliminar insumo?"
@@ -992,6 +1086,34 @@ export function InsumosClient() {
           setPendienteBorrar(null);
         }}
         onCancel={() => setPendienteBorrar(null)}
+      />
+
+      <ConfirmDialog
+        open={pendienteBorrarMov !== null}
+        title="¿Deshacer este movimiento?"
+        message={
+          <label className="flex items-start gap-2 rounded-lg bg-marfil-soft ring-1 ring-marfil p-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={devolverStock}
+              onChange={(e) => setDevolverStock(e.target.checked)}
+              className="mt-0.5 h-4 w-4 accent-cacao"
+            />
+            <span className="text-sm text-cacao">
+              Devolver la cantidad al stock
+              <span className="block text-xs text-cacao-soft">
+                Márcalo si registraste la pérdida por error. Déjalo sin marcar
+                para solo borrar el registro sin tocar el stock.
+              </span>
+            </span>
+          </label>
+        }
+        onConfirm={() => {
+          if (pendienteBorrarMov)
+            borrarMovimiento(pendienteBorrarMov, devolverStock);
+          setPendienteBorrarMov(null);
+        }}
+        onCancel={() => setPendienteBorrarMov(null)}
       />
 
       {perdidaInsumo && (
@@ -1005,6 +1127,10 @@ export function InsumosClient() {
                 x.id === insumoId ? { ...x, stockTotal: nuevoStockTotal } : x,
               ),
             );
+            // Refrescar la lista de pérdidas recientes con la nueva.
+            listMovimientos({ limit: 60 })
+              .then(setMovs)
+              .catch(() => {});
           }}
         />
       )}
