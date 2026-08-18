@@ -83,44 +83,26 @@ export async function registrarPerdida(
   }
   const sb = createSupabaseBrowserClient();
 
-  // Paso 1: registrar movimiento (cantidad guardada como NEGATIVA)
-  const { data: movRow, error: movErr } = await sb
-    .from("stock_movimientos")
-    .insert({
-      insumo_id: input.insumoId,
-      tipo: input.tipo,
-      capa: "total",
-      cantidad: -Math.abs(input.cantidad),
-      motivo: input.motivo?.trim() || null,
-      fecha: input.fecha ?? hoyISO(),
-      nota: input.nota?.trim() || null,
-    })
-    .select("*")
-    .single();
-  if (movErr) throw movErr;
-
-  // Paso 2: leer stock actual y descontar
-  const { data: insRow, error: insErr } = await sb
-    .from("insumos")
-    .select("stock_actual")
-    .eq("id", input.insumoId)
-    .single();
-  if (insErr) throw insErr;
-
-  const stockAnterior = Number(
-    (insRow as { stock_actual: number | string }).stock_actual ?? 0,
-  );
-  const stockNuevo = Math.max(0, stockAnterior - Math.abs(input.cantidad));
-
-  const { error: updErr } = await sb
-    .from("insumos")
-    .update({ stock_actual: stockNuevo })
-    .eq("id", input.insumoId);
-  if (updErr) throw updErr;
-
+  // Descuento + registro del movimiento en UNA transacción atómica (RPC). El
+  // stock se resta en la DB con `stock_actual = stock_actual - x` bajo lock de
+  // fila, así no hay lost-update si entra otro cambio (venta, compra, otra
+  // pérdida) entre medias.
+  const { data, error } = await sb.rpc("registrar_perdida_stock", {
+    p_insumo_id: input.insumoId,
+    p_tipo: input.tipo,
+    p_cantidad: Math.abs(input.cantidad),
+    p_motivo: input.motivo?.trim() || null,
+    p_fecha: input.fecha ?? hoyISO(),
+    p_nota: input.nota?.trim() || null,
+  });
+  if (error) throw error;
+  const row = (Array.isArray(data) ? data[0] : data) as
+    | (Row & { stock_nuevo: number | string })
+    | undefined;
+  if (!row) throw new Error("No se pudo registrar la pérdida.");
   return {
-    movimiento: rowToMov(movRow as Row),
-    stockTotal: stockNuevo,
+    movimiento: rowToMov(row),
+    stockTotal: Number(row.stock_nuevo),
   };
 }
 
@@ -137,50 +119,14 @@ export async function deleteMovimiento(
   opts: { devolverStock?: boolean } = {},
 ): Promise<{ stockTotal?: number }> {
   const sb = createSupabaseBrowserClient();
-
-  if (opts.devolverStock) {
-    const { data: movRow, error: movErr } = await sb
-      .from("stock_movimientos")
-      .select("insumo_id, capa, cantidad")
-      .eq("id", id)
-      .single();
-    if (movErr) throw movErr;
-    const m = movRow as {
-      insumo_id: string;
-      capa: string;
-      cantidad: number | string;
-    };
-    const cantidad = Number(m.cantidad);
-    // Solo reponemos la capa física ('total'). Reponer = deshacer el delta:
-    // como las pérdidas se guardan en negativo, restar la cantidad la suma
-    // de vuelta al stock.
-    if (m.capa === "total" && cantidad !== 0) {
-      const { data: insRow, error: insErr } = await sb
-        .from("insumos")
-        .select("stock_actual")
-        .eq("id", m.insumo_id)
-        .single();
-      if (insErr) throw insErr;
-      const actual = Number(
-        (insRow as { stock_actual: number | string }).stock_actual ?? 0,
-      );
-      const nuevo = Math.max(0, actual - cantidad);
-      const { error: updErr } = await sb
-        .from("insumos")
-        .update({ stock_actual: nuevo })
-        .eq("id", m.insumo_id);
-      if (updErr) throw updErr;
-
-      const { error: delErr } = await sb
-        .from("stock_movimientos")
-        .delete()
-        .eq("id", id);
-      if (delErr) throw delErr;
-      return { stockTotal: nuevo };
-    }
-  }
-
-  const { error } = await sb.from("stock_movimientos").delete().eq("id", id);
+  // Reposición (opcional) + borrado en UNA transacción atómica (RPC). Con
+  // devolverStock, el stock se repone con `stock_actual = stock_actual - x`
+  // (x es negativo → suma) bajo lock de fila, sin lost-update.
+  const { data, error } = await sb.rpc("borrar_movimiento_stock", {
+    p_id: id,
+    p_devolver: !!opts.devolverStock,
+  });
   if (error) throw error;
-  return {};
+  const nuevo = data as number | null;
+  return nuevo == null ? {} : { stockTotal: Number(nuevo) };
 }
