@@ -124,6 +124,10 @@ export function InsumosClient() {
   const [nuevoProveedor, setNuevoProveedor] = useState("");
   const [guardandoProveedor, setGuardandoProveedor] = useState(false);
   const [pendienteBorrar, setPendienteBorrar] = useState<string | null>(null);
+  const [pendienteDesactivar, setPendienteDesactivar] = useState<string | null>(
+    null,
+  );
+  const [showInactivos, setShowInactivos] = useState(false);
   // Insumo al que se le va a registrar una pérdida (abre el modal).
   const [perdidaInsumo, setPerdidaInsumo] = useState<Insumo | null>(null);
   // Movimientos de stock recientes (para la lista de pérdidas con "deshacer").
@@ -348,17 +352,36 @@ export function InsumosClient() {
     }
   }
 
+  async function setActivo(id: string, activo: boolean) {
+    try {
+      const upd = await updateInsumo(id, { activo });
+      setItems((prev) => prev.map((x) => (x.id === id ? upd : x)));
+    } catch (e) {
+      setError(
+        e instanceof Error
+          ? e.message
+          : `Error al ${activo ? "reactivar" : "desactivar"}`,
+      );
+    }
+  }
+
   const filtered = useMemo(() => {
     const q = normalizarBusqueda(search.trim());
     return items.filter(
       (i) =>
+        (showInactivos || i.activo) &&
         (filterCat === "todas" || i.categoria === filterCat) &&
         (filterSec === "todas" ||
           i.seccion === filterSec ||
           i.seccion === "ambos") &&
         (q === "" || normalizarBusqueda(i.nombre).includes(q)),
     );
-  }, [items, filterCat, filterSec, search]);
+  }, [items, filterCat, filterSec, search, showInactivos]);
+
+  const inactivosCount = useMemo(
+    () => items.filter((i) => !i.activo).length,
+    [items],
+  );
 
   const grouped = useMemo(() => {
     const map = new Map<string, Insumo[]>();
@@ -495,6 +518,23 @@ export function InsumosClient() {
           </button>
         ))}
       </div>
+
+      {inactivosCount > 0 && (
+        <div className="mb-5 -mt-2">
+          <button
+            onClick={() => setShowInactivos((v) => !v)}
+            className={`px-3 py-1 rounded-full text-[11px] uppercase tracking-widest ring-1 ${
+              showInactivos
+                ? "bg-cacao text-white ring-cacao"
+                : "bg-white text-cacao-soft ring-marfil hover:bg-marfil-soft"
+            }`}
+            title="Mostrar u ocultar los insumos desactivados"
+          >
+            {showInactivos ? "Ocultar inactivos" : "Ver inactivos"} (
+            {inactivosCount})
+          </button>
+        </div>
+      )}
 
       {!adding && (
         <button
@@ -943,7 +983,12 @@ export function InsumosClient() {
                       <div className="col-span-12 sm:col-span-5">
                         <div className="text-cacao font-medium">
                           {i.nombre}
-                          {lowStock && (
+                          {!i.activo && (
+                            <span className="ml-2 text-[10px] uppercase tracking-widest px-2 py-0.5 rounded-full bg-marfil-light text-cacao-soft ring-1 ring-marfil">
+                              Inactivo
+                            </span>
+                          )}
+                          {lowStock && i.activo && (
                             <span className="ml-2 text-[10px] uppercase tracking-widest text-terracotta">
                               · stock bajo
                             </span>
@@ -1004,25 +1049,53 @@ export function InsumosClient() {
                         )}
                       </div>
                       <div className="col-span-4 sm:col-span-2 flex sm:justify-end gap-3 text-xs uppercase tracking-widest">
-                        <button
-                          onClick={() => setPerdidaInsumo(i)}
-                          className="text-cacao-soft hover:text-terracotta"
-                          title="Registrar pérdida, merma o mal estado"
-                        >
-                          Pérdida
-                        </button>
-                        <button
-                          onClick={() => startEdit(i)}
-                          className="text-cacao-soft hover:text-cacao"
-                        >
-                          Editar
-                        </button>
-                        <button
-                          onClick={() => setPendienteBorrar(i.id)}
-                          className="text-cacao-soft hover:text-terracotta"
-                        >
-                          Borrar
-                        </button>
+                        {i.activo ? (
+                          <>
+                            <button
+                              onClick={() => setPerdidaInsumo(i)}
+                              className="text-cacao-soft hover:text-terracotta"
+                              title="Registrar pérdida, merma o mal estado"
+                            >
+                              Pérdida
+                            </button>
+                            <button
+                              onClick={() => startEdit(i)}
+                              className="text-cacao-soft hover:text-cacao"
+                            >
+                              Editar
+                            </button>
+                            <button
+                              onClick={() => setPendienteDesactivar(i.id)}
+                              className="text-cacao-soft hover:text-terracotta"
+                              title="Ocultar del catálogo sin borrar (conserva el histórico). Se puede reactivar."
+                            >
+                              Desactivar
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              onClick={() => startEdit(i)}
+                              className="text-cacao-soft hover:text-cacao"
+                            >
+                              Editar
+                            </button>
+                            <button
+                              onClick={() => setActivo(i.id, true)}
+                              className="text-cacao-soft hover:text-cacao font-medium"
+                              title="Volver a activar este insumo"
+                            >
+                              Reactivar
+                            </button>
+                            <button
+                              onClick={() => setPendienteBorrar(i.id)}
+                              className="text-cacao-soft hover:text-terracotta"
+                              title="Borrar definitivamente del catálogo (no se puede deshacer)"
+                            >
+                              Borrar
+                            </button>
+                          </>
+                        )}
                       </div>
                     </li>
                   );
@@ -1078,9 +1151,32 @@ export function InsumosClient() {
       )}
 
       <ConfirmDialog
+        open={pendienteDesactivar !== null}
+        title="¿Desactivar insumo?"
+        message={
+          <>
+            Se ocultará del catálogo pero <strong>conserva su histórico</strong>{" "}
+            (precios, movimientos). Podrás reactivarlo cuando quieras con el
+            botón &ldquo;Ver inactivos&rdquo;.
+          </>
+        }
+        confirmLabel="Desactivar"
+        onConfirm={() => {
+          if (pendienteDesactivar) setActivo(pendienteDesactivar, false);
+          setPendienteDesactivar(null);
+        }}
+        onCancel={() => setPendienteDesactivar(null)}
+      />
+
+      <ConfirmDialog
         open={pendienteBorrar !== null}
         title="¿Eliminar insumo?"
-        message={<>¿Eliminar este insumo del catálogo?</>}
+        message={
+          <>
+            Esto <strong>borra el insumo definitivamente</strong> (no se puede
+            deshacer). Si solo quieres dejar de usarlo, mejor desactívalo.
+          </>
+        }
         onConfirm={() => {
           if (pendienteBorrar) handleDelete(pendienteBorrar);
           setPendienteBorrar(null);
