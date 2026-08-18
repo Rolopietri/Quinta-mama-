@@ -616,6 +616,10 @@ export type RecetaIngrediente = {
   observaciones?: string;
   /** Precio manual por unidad — usado solo si insumoId y subrecetaId son null (ad-hoc). */
   costoManualUsd?: number;
+  /** Marca que este ingrediente va sin insumo del catálogo A PROPÓSITO (ej: agua
+   *  de filtro): no descuenta stock ni suma costo, y no dispara el aviso. Solo
+   *  aplica a líneas sin insumoId ni subrecetaId. */
+  sinInsumoOk?: boolean;
   orden: number;
   // Calculado al vuelo (no en DB):
   costoSubtotal?: number;

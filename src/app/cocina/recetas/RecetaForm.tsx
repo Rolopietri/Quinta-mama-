@@ -45,6 +45,7 @@ type LineForm = {
   unidad: string;
   observaciones: string;
   costoManual: string; // precio manual por unidad para ad-hoc
+  sinInsumoOk: boolean; // ingrediente libre a propósito (agua, etc.)
 };
 
 function uid() {
@@ -62,6 +63,7 @@ function lineFromIng(i: RecetaIngrediente): LineForm {
     observaciones: i.observaciones ?? "",
     costoManual:
       i.costoManualUsd !== undefined ? String(i.costoManualUsd) : "",
+    sinInsumoOk: i.sinInsumoOk ?? false,
   };
 }
 
@@ -250,6 +252,7 @@ export function RecetaForm({
         unidad: sub.rendimientoUnidad ?? "",
         observaciones: "",
         costoManual: "",
+        sinInsumoOk: false,
       },
     ]);
     setLastAddedKey(key);
@@ -273,6 +276,7 @@ export function RecetaForm({
         unidad: insumo.unidadBase,
         observaciones: "",
         costoManual: "",
+        sinInsumoOk: false,
       },
     ]);
     setLastAddedKey(key);
@@ -289,6 +293,7 @@ export function RecetaForm({
         unidad: "g",
         observaciones: "",
         costoManual: "",
+        sinInsumoOk: false,
       },
     ]);
     setLastAddedKey(key);
@@ -443,6 +448,22 @@ export function RecetaForm({
       );
       return;
     }
+    // Prevención: un ingrediente sin insumo del catálogo NO descuenta stock al
+    // vender. Se frena el guardado hasta que se decida a conciencia: vincularlo
+    // a un insumo, o marcar la casilla "va así a propósito" (agua de filtro, etc.).
+    const sinDecidir = lineas.find(
+      (l) =>
+        !l.insumoId &&
+        !l.subrecetaId &&
+        l.nombre.trim() !== "" &&
+        !l.sinInsumoOk,
+    );
+    if (sinDecidir) {
+      setError(
+        `"${sinDecidir.nombre.trim()}" no está vinculado a un insumo del catálogo, así que no descontaría stock al vender. Vincúlalo desde el buscador de insumos, o —si va así a propósito (ej: agua de filtro)— marca la casilla "Va así a propósito" en esa línea.`,
+      );
+      return;
+    }
     setError(null);
     setSaving(true);
     try {
@@ -489,6 +510,9 @@ export function RecetaForm({
                 !l.insumoId && !l.subrecetaId && l.costoManual.trim() !== ""
                   ? Number(l.costoManual)
                   : undefined,
+              // Solo tiene sentido en líneas libres (sin insumo ni subreceta).
+              sinInsumoOk:
+                !l.insumoId && !l.subrecetaId ? l.sinInsumoOk : false,
             })),
         ).map((ing, i) => ({ ...ing, orden: i })),
       };
@@ -1104,15 +1128,23 @@ export function RecetaForm({
                     )}
                     {!l.insumoId &&
                       !l.subrecetaId &&
-                      l.nombre.trim() !== "" && (
+                      l.nombre.trim() !== "" &&
+                      (l.sinInsumoOk ? (
                         <span
-                          title="Ingrediente libre: no está vinculado a un insumo del catálogo, así que NO descuenta stock al vender. Bórralo y agrégalo desde el catálogo para que descuente."
+                          title="Ingrediente libre a propósito (ej: agua de filtro): no está en el catálogo, no descuenta stock ni suma costo. Marcado como intencional."
+                          className="text-[10px] uppercase tracking-widest px-2 py-1 rounded-full bg-marfil-light text-cacao-soft ring-1 ring-marfil shrink-0"
+                        >
+                          Sin stock · a propósito
+                        </span>
+                      ) : (
+                        <span
+                          title="Este ingrediente no está vinculado a un insumo del catálogo, así que NO descuenta stock al vender. Vincúlalo desde el buscador de insumos, o marca la casilla de abajo si va así a propósito."
                           className="text-[10px] uppercase tracking-widest px-2 py-1 rounded-full bg-amber-50 text-amber-800 ring-1 ring-amber-200 shrink-0 flex items-center gap-1"
                         >
                           <WarningIcon className="size-3" />
                           No descuenta stock
                         </span>
-                      )}
+                      ))}
                     <button
                       type="button"
                       onClick={() => removeLine(l.key)}
@@ -1231,6 +1263,28 @@ export function RecetaForm({
                         " — debería ser 1; ajusta el gramaje o las porciones de la subreceta"}
                     </div>
                   )}
+                  {/* Casilla: marcar un ingrediente libre como intencional (agua,
+                      etc.) para quitar el aviso y poder guardar. */}
+                  {!l.insumoId &&
+                    !l.subrecetaId &&
+                    l.nombre.trim() !== "" && (
+                      <label className="flex items-start gap-2 text-[11px] text-cacao-soft pl-1 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={l.sinInsumoOk}
+                          onChange={(e) =>
+                            updateLine(l.key, {
+                              sinInsumoOk: e.target.checked,
+                            })
+                          }
+                          className="mt-0.5 accent-cacao"
+                        />
+                        <span>
+                          Va así a propósito — no está en el catálogo de insumos
+                          (ej: agua de filtro). No descuenta stock ni suma costo.
+                        </span>
+                      </label>
+                    )}
                 </div>
               );
             })}
@@ -1238,21 +1292,28 @@ export function RecetaForm({
         )}
 
         {(() => {
-          const sinVincular = lineas.filter(
-            (l) => !l.insumoId && !l.subrecetaId && l.nombre.trim() !== "",
+          // Solo los que faltan por DECIDIR (sin insumo y sin marcar como
+          // intencional). Los marcados "a propósito" no cuentan como problema.
+          const sinDecidir = lineas.filter(
+            (l) =>
+              !l.insumoId &&
+              !l.subrecetaId &&
+              l.nombre.trim() !== "" &&
+              !l.sinInsumoOk,
           );
-          if (sinVincular.length === 0) return null;
+          if (sinDecidir.length === 0) return null;
           return (
             <div className="mt-4 rounded-lg ring-1 ring-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
               <WarningIcon className="inline size-3.5 align-[-0.15em] mr-1" />
               <strong>
-                {sinVincular.length} ingrediente
-                {sinVincular.length === 1 ? "" : "s"} no descuenta
-                {sinVincular.length === 1 ? "" : "n"} stock:
+                {sinDecidir.length} ingrediente
+                {sinDecidir.length === 1 ? "" : "s"} no descuenta
+                {sinDecidir.length === 1 ? "" : "n"} stock:
               </strong>{" "}
-              {sinVincular.map((l) => l.nombre.trim()).join(", ")}. Están como
-              &ldquo;ingrediente libre&rdquo;. Si deberían restar del inventario
-              al vender, bórralos y agrégalos desde el catálogo de insumos.
+              {sinDecidir.map((l) => l.nombre.trim()).join(", ")}. Para guardar,
+              vincúlalos a un insumo del catálogo (para que resten del inventario
+              al vender), o marca &ldquo;va así a propósito&rdquo; en cada uno si
+              son ingredientes libres (ej: agua de filtro).
             </div>
           );
         })()}

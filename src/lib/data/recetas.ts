@@ -44,6 +44,7 @@ type IngRow = {
   unidad: string;
   observaciones: string | null;
   costo_manual_usd: number | string | null;
+  sin_insumo_ok: boolean | null;
   orden: number;
 };
 
@@ -58,6 +59,7 @@ function rowToIng(r: IngRow): RecetaIngrediente {
     observaciones: r.observaciones ?? undefined,
     costoManualUsd:
       r.costo_manual_usd === null ? undefined : Number(r.costo_manual_usd),
+    sinInsumoOk: r.sin_insumo_ok ?? false,
     orden: r.orden,
   };
 }
@@ -229,6 +231,7 @@ export async function createReceta(input: RecetaInput): Promise<Receta> {
       unidad: i.unidad,
       observaciones: i.observaciones ?? null,
       costo_manual_usd: i.costoManualUsd ?? null,
+      sin_insumo_ok: i.sinInsumoOk ?? false,
       orden: i.orden ?? idx,
     }));
     const { error: insErr } = await sb
@@ -289,6 +292,7 @@ export async function updateReceta(
       unidad: i.unidad,
       observaciones: i.observaciones ?? null,
       costo_manual_usd: i.costoManualUsd ?? null,
+      sin_insumo_ok: i.sinInsumoOk ?? false,
       orden: i.orden ?? idx,
     }));
     const { error: insErr } = await sb
