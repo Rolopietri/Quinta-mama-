@@ -39,6 +39,7 @@ export function RecetasList() {
    *  esSubreceta=true), un slug de CATEGORIAS_RECETA, o una categoría nueva
    *  (texto libre). Por eso el tipo es string. */
   const [filterCat, setFilterCat] = useState<string>("todas");
+  const [showInactivas, setShowInactivas] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -96,6 +97,7 @@ export function RecetasList() {
   const filtered = useMemo(() => {
     const qq = normalizarBusqueda(q.trim());
     return items.filter((r) => {
+      if (!showInactivas && !r.activo) return false;
       if (
         filterSec !== "todas" &&
         r.seccion !== filterSec &&
@@ -117,7 +119,12 @@ export function RecetasList() {
       }
       return true;
     });
-  }, [items, q, filterSec, filterCat]);
+  }, [items, q, filterSec, filterCat, showInactivas]);
+
+  const inactivasCount = useMemo(
+    () => items.filter((r) => !r.activo).length,
+    [items],
+  );
 
   // Categorías para los pills de filtro: las sugeridas (por slug) + cualquier
   // categoría nueva que ya exista en recetas (no sub-recetas).
@@ -221,6 +228,23 @@ export function RecetasList() {
         </div>
       </div>
 
+      {inactivasCount > 0 && (
+        <div className="mb-4">
+          <button
+            onClick={() => setShowInactivas((v) => !v)}
+            className={`px-3 py-1 rounded-full text-[11px] uppercase tracking-widest ring-1 ${
+              showInactivas
+                ? "bg-cacao text-white ring-cacao"
+                : "bg-white text-cacao-soft ring-marfil hover:bg-marfil-soft"
+            }`}
+            title="Mostrar u ocultar las recetas desactivadas"
+          >
+            {showInactivas ? "Ocultar inactivas" : "Ver inactivas"} (
+            {inactivasCount})
+          </button>
+        </div>
+      )}
+
       {filtered.length === 0 ? (
         <div className="rounded-2xl bg-white ring-1 ring-marfil p-12 text-center">
           <p className="font-serif italic text-cacao-soft mb-4">
@@ -271,6 +295,11 @@ export function RecetasList() {
                 </div>
                 <h2 className="mt-2 font-cinzel text-lg text-cacao">
                   {r.nombre}
+                  {!r.activo && (
+                    <span className="align-middle ml-2 text-[9px] uppercase tracking-widest px-2 py-0.5 rounded-full bg-marfil-light text-cacao-soft ring-1 ring-marfil">
+                      Inactiva
+                    </span>
+                  )}
                 </h2>
                 {r.perfil && (
                   <p className="mt-1 font-serif italic text-sm text-cacao-soft">

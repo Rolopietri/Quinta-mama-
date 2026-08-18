@@ -8,6 +8,7 @@ import { calcRentabilidad, categoriaRecetaLabel } from "@/lib/types";
 import {
   getReceta,
   deleteReceta,
+  setRecetaActivo,
   calcularCostoReceta,
   listRecetas,
 } from "@/lib/data/recetas";
@@ -27,6 +28,7 @@ export function RecetaDetail({ id }: { id: string }) {
   const [editing, setEditing] = useState(false);
   const [confirmDel, setConfirmDel] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [togglingActivo, setTogglingActivo] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -83,6 +85,24 @@ export function RecetaDetail({ id }: { id: string }) {
       setError(msg || "Error eliminando");
       setDeleting(false);
       setConfirmDel(false);
+    }
+  }
+
+  async function toggleActivo(activo: boolean) {
+    if (!receta) return;
+    setError(null);
+    setTogglingActivo(true);
+    try {
+      await setRecetaActivo(receta.id, activo);
+      setReceta({ ...receta, activo });
+    } catch (e) {
+      setError(
+        e instanceof Error
+          ? e.message
+          : `Error al ${activo ? "reactivar" : "desactivar"}`,
+      );
+    } finally {
+      setTogglingActivo(false);
     }
   }
 
@@ -162,6 +182,11 @@ export function RecetaDetail({ id }: { id: string }) {
             </p>
             <h1 className="mt-2 font-cinzel text-3xl sm:text-4xl text-cacao tracking-[0.06em]">
               {receta.nombre}
+              {!receta.activo && (
+                <span className="align-middle ml-3 text-[11px] uppercase tracking-widest px-2 py-1 rounded-full bg-marfil-light text-cacao-soft ring-1 ring-marfil">
+                  Inactiva
+                </span>
+              )}
             </h1>
             {receta.perfil && (
               <p className="mt-2 font-serif italic text-cacao-soft">
@@ -513,16 +538,39 @@ export function RecetaDetail({ id }: { id: string }) {
           >
             Editar
           </button>
-          <button
-            type="button"
-            onClick={() => {
-              setError(null);
-              setConfirmDel(true);
-            }}
-            className="rounded-lg ring-1 ring-terracotta px-4 py-2 text-terracotta hover:bg-[#F9EBE7] text-sm font-medium"
-          >
-            Eliminar receta
-          </button>
+          {receta.activo ? (
+            <button
+              type="button"
+              onClick={() => toggleActivo(false)}
+              disabled={togglingActivo}
+              className="rounded-lg ring-1 ring-cacao-soft px-4 py-2 text-cacao-soft hover:bg-marfil-soft text-sm disabled:opacity-50"
+              title="Ocultar del recetario sin borrar (conserva el histórico). Se puede reactivar."
+            >
+              {togglingActivo ? "..." : "Desactivar"}
+            </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={() => toggleActivo(true)}
+                disabled={togglingActivo}
+                className="rounded-lg ring-1 ring-cacao px-4 py-2 text-cacao hover:bg-marfil-soft text-sm font-medium disabled:opacity-50"
+                title="Volver a activar esta receta"
+              >
+                {togglingActivo ? "..." : "Reactivar"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setError(null);
+                  setConfirmDel(true);
+                }}
+                className="rounded-lg ring-1 ring-terracotta px-4 py-2 text-terracotta hover:bg-[#F9EBE7] text-sm font-medium"
+              >
+                Eliminar receta
+              </button>
+            </>
+          )}
         </div>
       </section>
 

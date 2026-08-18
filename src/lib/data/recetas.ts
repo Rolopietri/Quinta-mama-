@@ -325,6 +325,17 @@ export async function deleteReceta(id: string): Promise<void> {
   if (error) throw error;
 }
 
+/** Activa o desactiva una receta (soft). No toca ingredientes; solo el flag
+ *  `activo`. Desactivar la oculta del catálogo sin perder su histórico. */
+export async function setRecetaActivo(
+  id: string,
+  activo: boolean,
+): Promise<void> {
+  const sb = createSupabaseBrowserClient();
+  const { error } = await sb.from("recetas").update({ activo }).eq("id", id);
+  if (error) throw error;
+}
+
 // ─── Cálculo de costo (cliente) ──────────────────────────────────
 
 /**
