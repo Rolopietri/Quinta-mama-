@@ -142,14 +142,6 @@ export function RecetaDetail({ id }: { id: string }) {
             window.scrollTo({ top: 0, behavior: "smooth" });
           }}
         />
-        <div className="mt-4 text-right">
-          <button
-            onClick={() => setEditing(false)}
-            className="text-xs uppercase tracking-widest text-cacao-soft hover:text-cacao"
-          >
-            Cancelar edición
-          </button>
-        </div>
       </div>
     );
   }
