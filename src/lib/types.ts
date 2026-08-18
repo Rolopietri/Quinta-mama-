@@ -411,14 +411,6 @@ export function stockLibre(i: Pick<Insumo, "stockTotal" | "stockComprometido">):
   return Math.max(0, i.stockTotal - i.stockComprometido);
 }
 
-/** Rendimiento de una subreceta interpretado como el TOTAL del batch. Si no
- *  está definido (null/0), se asume 1 (1 unidad = 1 batch). Regla compartida
- *  por el costeo (recetas.ts) y el cálculo de consumo/pedido (ventas.ts) para
- *  que no diverjan si cambia la interpretación del rendimiento. */
-export function rendimientoEfectivo(sub: Pick<Receta, "rendimiento">): number {
-  return sub.rendimiento && sub.rendimiento > 0 ? sub.rendimiento : 1;
-}
-
 // ── Frescura del precio (economía volátil) ──────────────────────────
 // En Venezuela los precios cambian rápido: un precio de hace semanas ya no
 // sirve para costear. Estos umbrales definen cuándo avisar que un precio está

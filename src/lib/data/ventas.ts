@@ -13,7 +13,7 @@ import type {
   Proveedor,
 } from "@/lib/types";
 import { convertirParaCosto } from "@/lib/units";
-import { stockLibre, rendimientoEfectivo } from "@/lib/types";
+import { stockLibre } from "@/lib/types";
 
 type Row = {
   id: string;
@@ -316,8 +316,11 @@ function acumularInsumos(
     } else if (ing.subrecetaId) {
       const sub = recMap.get(ing.subrecetaId);
       if (!sub) continue;
-      // Rendimiento se interpreta como el TOTAL del batch (regla compartida).
-      const rendEfectivo = rendimientoEfectivo(sub);
+      // Sin rendimiento (null/0) no se puede resolver cuánto crudo hace falta;
+      // el motor SQL OMITE la subreceta en el descuento, así que aquí también la
+      // saltamos, para no comprometer/pedir más de lo que la venta descontará.
+      if (!sub.rendimiento || sub.rendimiento <= 0) continue;
+      const rendEfectivo = sub.rendimiento;
       const subPorciones = sub.porciones || 1;
       // Convertir la cantidad pedida a la unidad de rendimiento de la
       // subreceta antes de calcular cuántos batches hacen falta.

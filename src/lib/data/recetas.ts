@@ -7,7 +7,6 @@ import type {
   Seccion,
   Insumo,
 } from "@/lib/types";
-import { rendimientoEfectivo } from "@/lib/types";
 import { convertirParaCosto } from "@/lib/units";
 
 type RecetaRow = {
@@ -202,7 +201,9 @@ export async function createReceta(input: RecetaInput): Promise<Receta> {
       seccion: input.seccion,
       categoria: input.categoria ?? null,
       perfil: input.perfil ?? null,
-      porciones: input.porciones,
+      // Clamp defensivo: porciones = 0/negativo descuadra el motor (el plan
+      // compromete crudo pero la venta no descuenta nada → inventario inflado).
+      porciones: Math.max(1, Math.round(input.porciones) || 1),
       tiempo_prep_min: input.tiempoPrepMin ?? null,
       tiempo_coccion_min: input.tiempoCoccionMin ?? null,
       temperatura: input.temperatura ?? null,
@@ -255,7 +256,9 @@ export async function updateReceta(
       seccion: input.seccion,
       categoria: input.categoria ?? null,
       perfil: input.perfil ?? null,
-      porciones: input.porciones,
+      // Clamp defensivo: porciones = 0/negativo descuadra el motor (el plan
+      // compromete crudo pero la venta no descuenta nada → inventario inflado).
+      porciones: Math.max(1, Math.round(input.porciones) || 1),
       tiempo_prep_min: input.tiempoPrepMin ?? null,
       tiempo_coccion_min: input.tiempoCoccionMin ?? null,
       temperatura: input.temperatura ?? null,
@@ -358,8 +361,11 @@ export function costoPorUnidadSubreceta(
   if (visitados.has(subId)) return 0;
   const sub = recetas.find((r) => r.id === subId);
   if (!sub) return 0;
-  // Rendimiento se interpreta como el TOTAL del batch (regla compartida).
-  const rendEfectivo = rendimientoEfectivo(sub);
+  // Una subreceta SIN rendimiento (null/0) no se puede costear: el motor SQL la
+  // OMITE en el descuento de stock, así que aquí devolvemos 0 para no divergir
+  // (el costo 0 avisa que falta definir el rendimiento de esa subreceta).
+  if (!sub.rendimiento || sub.rendimiento <= 0) return 0;
+  const rendEfectivo = sub.rendimiento;
   const nextVisited = new Set(visitados);
   nextVisited.add(subId);
   const { total } = calcularCostoRecetaInterno(
