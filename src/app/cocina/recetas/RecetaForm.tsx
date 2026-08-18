@@ -460,7 +460,7 @@ export function RecetaForm({
     );
     if (sinDecidir) {
       setError(
-        `"${sinDecidir.nombre.trim()}" no está vinculado a un insumo del catálogo, así que no descontaría stock al vender. Vincúlalo desde el buscador de insumos, o —si va así a propósito (ej: agua de filtro)— marca la casilla "Va así a propósito" en esa línea.`,
+        `"${sinDecidir.nombre.trim()}" no está vinculado a un insumo del catálogo, así que no descontaría stock al vender. Vincúlalo desde el buscador de insumos, o —si es intencional (ej: agua de filtro)— marca la casilla "Ingrediente sin insumo (intencional)" en esa línea.`,
       );
       return;
     }
@@ -1131,14 +1131,14 @@ export function RecetaForm({
                       l.nombre.trim() !== "" &&
                       (l.sinInsumoOk ? (
                         <span
-                          title="Ingrediente libre a propósito (ej: agua de filtro): no está en el catálogo, no descuenta stock ni suma costo. Marcado como intencional."
+                          title="Ingrediente sin insumo del catálogo, marcado como intencional (ej: agua de filtro): no descuenta stock ni suma costo."
                           className="text-[10px] uppercase tracking-widest px-2 py-1 rounded-full bg-marfil-light text-cacao-soft ring-1 ring-marfil shrink-0"
                         >
-                          Sin stock · a propósito
+                          Sin insumo · intencional
                         </span>
                       ) : (
                         <span
-                          title="Este ingrediente no está vinculado a un insumo del catálogo, así que NO descuenta stock al vender. Vincúlalo desde el buscador de insumos, o marca la casilla de abajo si va así a propósito."
+                          title="Este ingrediente no está vinculado a un insumo del catálogo, así que NO descuenta stock al vender. Vincúlalo desde el buscador de insumos, o marca la casilla de abajo si es intencional."
                           className="text-[10px] uppercase tracking-widest px-2 py-1 rounded-full bg-amber-50 text-amber-800 ring-1 ring-amber-200 shrink-0 flex items-center gap-1"
                         >
                           <WarningIcon className="size-3" />
@@ -1280,8 +1280,8 @@ export function RecetaForm({
                           className="mt-0.5 accent-cacao"
                         />
                         <span>
-                          Va así a propósito — no está en el catálogo de insumos
-                          (ej: agua de filtro). No descuenta stock ni suma costo.
+                          Ingrediente sin insumo (intencional) — no descuenta
+                          stock ni costo.
                         </span>
                       </label>
                     )}
@@ -1312,8 +1312,8 @@ export function RecetaForm({
               </strong>{" "}
               {sinDecidir.map((l) => l.nombre.trim()).join(", ")}. Para guardar,
               vincúlalos a un insumo del catálogo (para que resten del inventario
-              al vender), o marca &ldquo;va así a propósito&rdquo; en cada uno si
-              son ingredientes libres (ej: agua de filtro).
+              al vender), o marca &ldquo;sin insumo (intencional)&rdquo; en cada
+              uno si son ingredientes libres (ej: agua de filtro).
             </div>
           );
         })()}
