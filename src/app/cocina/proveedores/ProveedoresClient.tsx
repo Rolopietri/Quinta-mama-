@@ -9,6 +9,7 @@ import {
   deleteProveedor,
 } from "@/lib/data/cocina";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { ErrorBanner } from "@/components/ErrorBanner";
 
 type FormState = {
   nombre: string;
@@ -138,11 +139,7 @@ export function ProveedoresClient() {
 
   return (
     <div>
-      {error && (
-        <div className="mb-4 rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419]">
-          {error}
-        </div>
-      )}
+      {error && <ErrorBanner className="mb-4">{error}</ErrorBanner>}
 
       {!adding && (
         <button

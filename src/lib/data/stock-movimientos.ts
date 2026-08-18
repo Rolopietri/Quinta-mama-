@@ -6,6 +6,7 @@
 // tabla soporta movimientos de la capa "comprometido" sin migración.
 
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import { hoyISO } from "@/lib/ui";
 import type {
   StockMovimiento,
   TipoMovimientoStock,
@@ -91,7 +92,7 @@ export async function registrarPerdida(
       capa: "total",
       cantidad: -Math.abs(input.cantidad),
       motivo: input.motivo?.trim() || null,
-      fecha: input.fecha ?? new Date().toISOString().slice(0, 10),
+      fecha: input.fecha ?? hoyISO(),
       nota: input.nota?.trim() || null,
     })
     .select("*")

@@ -27,6 +27,8 @@ import {
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { normalizarBusqueda } from "@/lib/text";
 import { CalendarIcon, ChevronIcon, WarningIcon } from "@/components/icons";
+import { hoyISO } from "@/lib/ui";
+import { ErrorBanner } from "@/components/ErrorBanner";
 
 /** Fecha larga en español para los encabezados de grupo (ej. "21 jul 2026"). */
 function fmtFecha(fecha: string): string {
@@ -44,7 +46,7 @@ function nuevoBatchId() {
 }
 
 function todayISO() {
-  return new Date().toISOString().slice(0, 10);
+  return hoyISO();
 }
 
 type Tab = "registrar" | "importar" | "clasificacion" | "historial";
@@ -191,7 +193,9 @@ export function VentasClient() {
       // de tomar el total como unitario y multiplicarlo por la cantidad
       // (montos inflados).
       setMontoEsTotal(true);
-      setClasif(clasificarFilas(filas, recetasVendibles, clasifs, insumos));
+      setClasif(
+        clasificarFilas(filas, recetasVendibles, clasifs, insumos, recetas),
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error parseando CSV");
       setClasif(null);
@@ -232,7 +236,9 @@ export function VentasClient() {
       setClasifs(nuevos);
       if (clasif) {
         const filas = clasif.map((c) => c.fila);
-        setClasif(clasificarFilas(filas, recetasVendibles, nuevos, insumos));
+        setClasif(
+          clasificarFilas(filas, recetasVendibles, nuevos, insumos, recetas),
+        );
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error clasificando");
@@ -403,6 +409,24 @@ export function VentasClient() {
       );
       return;
     }
+    // Seguridad: un ítem clasificado como "insumo" cuya receta (o extra) no se
+    // puede resolver —quedó sin vincular, o la receta se borró— entraría con
+    // receta_id nulo y NO descontaría stock en silencio. Se frena para
+    // reclasificar. (Las recetas inactivas SÍ resuelven, así que no caen aquí.)
+    const recetaRota = clasif.filter(
+      (c) =>
+        c.tipo === "insumo" &&
+        (!c.receta || (c.clasif?.extraRecetaId && !c.extraReceta)),
+    );
+    if (recetaRota.length > 0) {
+      setError(
+        `${recetaRota.length} ítem(s) están como receta pero su receta (o su extra) no se pudo resolver: ${recetaRota
+          .map((c) => c.fila.nombre)
+          .slice(0, 3)
+          .join(", ")}${recetaRota.length > 3 ? "…" : ""}. Reclasifícalos antes de confirmar, o entrarían sin descontar stock.`,
+      );
+      return;
+    }
     setError(null);
     setImporting(true);
     try {
@@ -497,11 +521,7 @@ export function VentasClient() {
 
   return (
     <div className="space-y-6">
-      {error && (
-        <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419]">
-          {error}
-        </div>
-      )}
+      {error && <ErrorBanner>{error}</ErrorBanner>}
 
       {/* Tabs */}
       <div className="flex flex-wrap gap-2">
@@ -556,13 +576,11 @@ export function VentasClient() {
                 className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2 bg-white"
               >
                 <option value="">— Selecciona —</option>
-                {recetas
-                  .filter((r) => !r.esSubreceta)
-                  .map((r) => (
-                    <option key={r.id} value={r.id}>
-                      {r.nombre}
-                    </option>
-                  ))}
+                {recetasVendibles.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.nombre}
+                  </option>
+                ))}
               </select>
             </label>
             <label className="text-sm text-cacao">

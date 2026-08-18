@@ -37,6 +37,8 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { WarningIcon } from "@/components/icons";
 import { PerdidaInsumoDialog } from "../_PerdidaInsumoDialog";
 import { listMovimientos, deleteMovimiento } from "@/lib/data/stock-movimientos";
+import { hoyISO } from "@/lib/ui";
+import { ErrorBanner } from "@/components/ErrorBanner";
 
 /**
  * Cuántas unidadBase hay en 1 unidadCompra cuando son convertibles.
@@ -137,7 +139,7 @@ export function InsumosClient() {
   );
   const [devolverStock, setDevolverStock] = useState(true);
   // Fecha de hoy (YYYY-MM-DD) para medir la frescura de cada precio.
-  const hoy = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const hoy = useMemo(() => hoyISO(), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -447,11 +449,7 @@ export function InsumosClient() {
 
   return (
     <div>
-      {error && (
-        <div className="mb-4 rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419]">
-          {error}
-        </div>
-      )}
+      {error && <ErrorBanner className="mb-4">{error}</ErrorBanner>}
 
       <UnitCalculator className="mb-5" />
 

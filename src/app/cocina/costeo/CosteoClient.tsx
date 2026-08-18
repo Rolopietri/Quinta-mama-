@@ -15,7 +15,8 @@ import {
   type CocinaConfig,
   type Seccion,
 } from "@/lib/types";
-import { pillClass } from "@/lib/ui";
+import { hoyISO, pillClass } from "@/lib/ui";
+import { ErrorBanner } from "@/components/ErrorBanner";
 import {
   listRecetas,
   calcularCostoReceta,
@@ -129,7 +130,7 @@ export function CosteoClient() {
   // Insumos cuyo precio ya está viejo (economía volátil): el costeo que ves
   // puede estar basado en precios desactualizados. La frescura se mide contra
   // `precioActualizado`; si no existe, contra la fecha de la última compra.
-  const hoy = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const hoy = useMemo(() => hoyISO(), []);
   const insumosViejos = useMemo(
     () =>
       insumos.filter(
@@ -183,11 +184,7 @@ export function CosteoClient() {
 
   return (
     <div className="space-y-6">
-      {error && (
-        <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419]">
-          {error}
-        </div>
-      )}
+      {error && <ErrorBanner>{error}</ErrorBanner>}
       {info && (
         <div className="rounded-lg bg-[#F1F4ED] ring-1 ring-[#C9D6BC] p-3 text-sm text-[#2F4A1F]">
           {info}
@@ -195,7 +192,7 @@ export function CosteoClient() {
       )}
 
       {insumosViejos.length > 0 && (
-        <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419]">
+        <ErrorBanner>
           <WarningIcon className="inline size-3.5 align-[-0.15em] mr-1" />
           {insumosViejos.length} insumo
           {insumosViejos.length === 1 ? "" : "s"} con precio de más de{" "}
@@ -204,7 +201,7 @@ export function CosteoClient() {
             revisá y actualizá precios en el Catálogo
           </Link>
           .
-        </div>
+        </ErrorBanner>
       )}
 
       {/* CONFIG: food cost objetivo + IVA */}

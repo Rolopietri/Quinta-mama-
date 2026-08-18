@@ -7,6 +7,7 @@ import type {
   Seccion,
   Insumo,
 } from "@/lib/types";
+import { rendimientoEfectivo } from "@/lib/types";
 import { convertirParaCosto } from "@/lib/units";
 
 type RecetaRow = {
@@ -357,10 +358,8 @@ export function costoPorUnidadSubreceta(
   if (visitados.has(subId)) return 0;
   const sub = recetas.find((r) => r.id === subId);
   if (!sub) return 0;
-  // Rendimiento se interpreta como el TOTAL del batch. Si no está definido,
-  // asumimos 1 (1 unidad = 1 batch).
-  const rendEfectivo =
-    sub.rendimiento && sub.rendimiento > 0 ? sub.rendimiento : 1;
+  // Rendimiento se interpreta como el TOTAL del batch (regla compartida).
+  const rendEfectivo = rendimientoEfectivo(sub);
   const nextVisited = new Set(visitados);
   nextVisited.add(subId);
   const { total } = calcularCostoRecetaInterno(

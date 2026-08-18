@@ -16,6 +16,7 @@ import { listInsumos } from "@/lib/data/cocina";
 import { getCocinaConfig } from "@/lib/data/cocinaConfig";
 import { ordenarPorCantidadDesc } from "@/lib/units";
 import { RecetaForm } from "../RecetaForm";
+import { ErrorBanner } from "@/components/ErrorBanner";
 
 export function RecetaDetail({ id }: { id: string }) {
   const router = useRouter();
@@ -115,12 +116,12 @@ export function RecetaDetail({ id }: { id: string }) {
   }
   if (error || !receta) {
     return (
-      <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419]">
+      <ErrorBanner>
         {error || "No encontrada"}{" "}
         <Link href="/cocina/recetas" className="underline ml-2">
           Volver
         </Link>
-      </div>
+      </ErrorBanner>
     );
   }
 
@@ -508,11 +509,7 @@ export function RecetaDetail({ id }: { id: string }) {
       )}
 
       {/* Error visible si algo falla en cualquier acción */}
-      {error && (
-        <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419]">
-          {error}
-        </div>
-      )}
+      {error && <ErrorBanner>{error}</ErrorBanner>}
 
       {/* Acciones */}
       <section className="flex flex-wrap gap-3 justify-between items-center">

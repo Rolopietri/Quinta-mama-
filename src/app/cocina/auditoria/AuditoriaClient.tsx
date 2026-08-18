@@ -11,6 +11,7 @@ import { extractError } from "@/lib/data/error";
 import { displayCantidad } from "@/lib/units";
 import type { Insumo } from "@/lib/types";
 import { normalizarBusqueda } from "@/lib/text";
+import { ErrorBanner } from "@/components/ErrorBanner";
 
 type FiltroOrigen = "todos" | OrigenAuditoria;
 
@@ -178,11 +179,7 @@ export function AuditoriaClient() {
 
   return (
     <div className="space-y-5">
-      {error && (
-        <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419]">
-          {error}
-        </div>
-      )}
+      {error && <ErrorBanner>{error}</ErrorBanner>}
 
       <div className="rounded-xl bg-marfil-soft ring-1 ring-marfil p-4 text-sm text-cacao-soft font-serif">
         Cada cambio de stock queda registrado automáticamente: el antes, el

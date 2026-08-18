@@ -1,6 +1,7 @@
 "use client";
 
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import { hoyISO } from "@/lib/ui";
 import type {
   Proveedor,
   Insumo,
@@ -315,7 +316,7 @@ export async function actualizarPrecioInsumo(
   cantidadPorCompra: number,
 ): Promise<Insumo> {
   const sb = createSupabaseBrowserClient();
-  const hoy = new Date().toISOString().slice(0, 10);
+  const hoy = hoyISO();
   const precioBase =
     cantidadPorCompra > 0
       ? precioCompraUsd / cantidadPorCompra

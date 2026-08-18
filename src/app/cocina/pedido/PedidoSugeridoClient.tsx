@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { CalendarIcon, ChevronIcon, SaveIcon } from "@/components/icons";
+import { ErrorBanner } from "@/components/ErrorBanner";
 import type {
   Receta,
   Insumo,
@@ -298,11 +299,7 @@ export function PedidoSugeridoClient() {
 
   return (
     <div className="space-y-6">
-      {error && (
-        <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419]">
-          {error}
-        </div>
-      )}
+      {error && <ErrorBanner>{error}</ErrorBanner>}
       {info && (
         <div className="rounded-lg bg-[#F1F4ED] ring-1 ring-[#C9D6BC] p-3 text-sm text-[#2F4A1F]">
           {info}

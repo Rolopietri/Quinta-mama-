@@ -20,6 +20,8 @@ import {
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { CalendarIcon, ChevronIcon } from "@/components/icons";
 import { displayCantidad } from "@/lib/units";
+import { hoyISO } from "@/lib/ui";
+import { ErrorBanner } from "@/components/ErrorBanner";
 
 type FormState = {
   insumoId: string;
@@ -42,7 +44,7 @@ type FormState = {
 };
 
 function todayISO() {
-  return new Date().toISOString().slice(0, 10);
+  return hoyISO();
 }
 
 /** Formatea una cantidad evitando artefactos de coma flotante (ej. 349.9999). */
@@ -392,11 +394,7 @@ export function ComprasClient() {
 
   return (
     <div>
-      {error && (
-        <div className="mb-4 rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419]">
-          {error}
-        </div>
-      )}
+      {error && <ErrorBanner className="mb-4">{error}</ErrorBanner>}
 
       {!adding && (
         <button

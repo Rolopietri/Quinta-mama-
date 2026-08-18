@@ -10,7 +10,8 @@ import {
   type MenajeItem,
   type MovimientoMenaje,
 } from "@/lib/types";
-import { pillClass } from "@/lib/ui";
+import { hoyISO, pillClass } from "@/lib/ui";
+import { ErrorBanner } from "@/components/ErrorBanner";
 import {
   listMenaje,
   listMovimientosMenaje,
@@ -67,7 +68,7 @@ export function MenajeClient() {
   const [initialFactura, setInitialFactura] = useState<File | null>(null);
   const [initialPrecioUnit, setInitialPrecioUnit] = useState("");
   const [initialFecha, setInitialFecha] = useState(
-    () => new Date().toISOString().slice(0, 10),
+    () => hoyISO(),
   );
   const [initialProveedor, setInitialProveedor] = useState("");
   const [creando, setCreando] = useState(false);
@@ -78,7 +79,7 @@ export function MenajeClient() {
   const [bajaCant, setBajaCant] = useState("");
   const [bajaTipo, setBajaTipo] = useState<TipoBaja>("rotura");
   const [bajaFecha, setBajaFecha] = useState(
-    () => new Date().toISOString().slice(0, 10),
+    () => hoyISO(),
   );
   const [bajaMotivo, setBajaMotivo] = useState("");
   const [bajaNota, setBajaNota] = useState("");
@@ -89,7 +90,7 @@ export function MenajeClient() {
   const [compraPrecioUnit, setCompraPrecioUnit] = useState("");
   const [compraPrecioTotal, setCompraPrecioTotal] = useState("");
   const [compraFecha, setCompraFecha] = useState(
-    () => new Date().toISOString().slice(0, 10),
+    () => hoyISO(),
   );
   const [compraFactura, setCompraFactura] = useState<File | null>(null);
   const [compraMotivo, setCompraMotivo] = useState("");
@@ -205,7 +206,7 @@ export function MenajeClient() {
     setAdding(false);
     setInitialFactura(null);
     setInitialPrecioUnit("");
-    setInitialFecha(new Date().toISOString().slice(0, 10));
+    setInitialFecha(hoyISO());
     setInitialProveedor("");
   }
   function startEdit(it: MenajeItem) {
@@ -345,7 +346,7 @@ export function MenajeClient() {
     setBajaItem(it);
     setBajaCant("1");
     setBajaTipo("rotura");
-    setBajaFecha(new Date().toISOString().slice(0, 10));
+    setBajaFecha(hoyISO());
     setBajaMotivo("");
     setBajaNota("");
   }
@@ -397,7 +398,7 @@ export function MenajeClient() {
     setCompraCant("");
     setCompraPrecioUnit("");
     setCompraPrecioTotal("");
-    setCompraFecha(new Date().toISOString().slice(0, 10));
+    setCompraFecha(hoyISO());
     setCompraFactura(null);
     setCompraMotivo("");
     setCompraNota("");
@@ -475,7 +476,7 @@ export function MenajeClient() {
   function abrirLista() {
     setListaEvento("");
     setListaCliente("");
-    setListaFecha(new Date().toISOString().slice(0, 10));
+    setListaFecha(hoyISO());
     setListaNotas("");
     setListaConPrecios(false);
     setListaPct("10");
@@ -584,11 +585,7 @@ export function MenajeClient() {
 
   return (
     <div className="space-y-6">
-      {error && (
-        <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419]">
-          {error}
-        </div>
-      )}
+      {error && <ErrorBanner>{error}</ErrorBanner>}
       {info && (
         <div className="rounded-lg bg-[#F1F4ED] ring-1 ring-[#C9D6BC] p-3 text-sm text-[#2F4A1F]">
           {info}

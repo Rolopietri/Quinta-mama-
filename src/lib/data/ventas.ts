@@ -13,7 +13,7 @@ import type {
   Proveedor,
 } from "@/lib/types";
 import { convertirParaCosto } from "@/lib/units";
-import { stockLibre } from "@/lib/types";
+import { stockLibre, rendimientoEfectivo } from "@/lib/types";
 
 type Row = {
   id: string;
@@ -316,10 +316,8 @@ function acumularInsumos(
     } else if (ing.subrecetaId) {
       const sub = recMap.get(ing.subrecetaId);
       if (!sub) continue;
-      // Rendimiento se interpreta como el TOTAL del batch. Si no está
-      // definido, asumimos 1.
-      const rendEfectivo =
-        sub.rendimiento && sub.rendimiento > 0 ? sub.rendimiento : 1;
+      // Rendimiento se interpreta como el TOTAL del batch (regla compartida).
+      const rendEfectivo = rendimientoEfectivo(sub);
       const subPorciones = sub.porciones || 1;
       // Convertir la cantidad pedida a la unidad de rendimiento de la
       // subreceta antes de calcular cuántos batches hacen falta.
@@ -728,13 +726,18 @@ export function clasificarFilas(
   recetas: Receta[],
   clasifs: PosClasificacion[],
   insumos: Insumo[] = [],
+  // Para resolver una clasificación por id usamos TODAS las recetas (incluidas
+  // las inactivas): una venta ya clasificada a una receta que luego se desactivó
+  // debe seguir descontando su stock. El auto-match por NOMBRE (recIndex) sí usa
+  // solo `recetas` (activas), para no auto-clasificar contra una inactiva.
+  recetasTodas: Receta[] = recetas,
 ): ClasificItem[] {
   const recIndex = new Map<string, Receta>();
   for (const r of recetas) {
     recIndex.set(normPos(r.nombre), r);
     if (r.xetux_nombre) recIndex.set(normPos(r.xetux_nombre), r);
   }
-  const recById = new Map(recetas.map((r) => [r.id, r]));
+  const recById = new Map(recetasTodas.map((r) => [r.id, r]));
   const insById = new Map(insumos.map((i) => [i.id, i]));
   const clasIndex = new Map(clasifs.map((c) => [c.nombreNorm, c]));
 

@@ -5,6 +5,8 @@ import { TIPOS_PERDIDA, type Insumo } from "@/lib/types";
 import { registrarPerdida } from "@/lib/data/stock-movimientos";
 import { displayCantidad } from "@/lib/units";
 import { extractError } from "@/lib/data/error";
+import { hoyISO } from "@/lib/ui";
+import { ErrorBanner } from "@/components/ErrorBanner";
 
 type TipoPerdida = (typeof TIPOS_PERDIDA)[number]["value"];
 
@@ -25,7 +27,7 @@ export function PerdidaInsumoDialog({
 }) {
   const [cant, setCant] = useState("");
   const [tipo, setTipo] = useState<TipoPerdida>("perdida");
-  const [fecha, setFecha] = useState(new Date().toISOString().slice(0, 10));
+  const [fecha, setFecha] = useState(hoyISO());
   const [motivo, setMotivo] = useState("");
   const [nota, setNota] = useState("");
   const [cocido, setCocido] = useState(false);
@@ -99,11 +101,7 @@ export function PerdidaInsumoDialog({
         <h2 className="font-cinzel text-xl tracking-[0.08em] text-cacao">
           Registrar pérdida
         </h2>
-        {error && (
-          <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-2.5 text-sm text-[#7A2419]">
-            {error}
-          </div>
-        )}
+        {error && <ErrorBanner>{error}</ErrorBanner>}
         <div className="rounded-lg bg-marfil-soft p-3 text-sm">
           <div className="font-medium text-cacao">{insumo.nombre}</div>
           <div className="text-xs text-cacao-soft mt-0.5">

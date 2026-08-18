@@ -27,8 +27,11 @@ con `pg_get_functiondef`). Se consolidó así:
 ### Otras funciones (una sola definición cada una)
 - Unidades (`unidad_norm/dim/factor`, `convertir_para_costo`) →
   `cocina-fix-conversion-descuento-stock.sql`
-- `recalcular_stock_comprometido` → `cocina-recalcular-comprometido.sql`
-  (escribe-solo-si-cambia)
+- `recalcular_stock_comprometido` → canónica en
+  `cocina-recalcular-comprometido.sql` (escribe-solo-si-cambia). Nota: también se
+  (re)define en `cocina-fix-compromisos-unidad.sql` (paso "blindaje"); como ese
+  archivo va antes por orden alfabético, la canónica lo sobreescribe y gana. Si
+  la cambias, hazlo en la canónica.
 - Planes: `create_plan_produccion` → `cocina-planes-produccion.sql`;
   `completar_plan_produccion` → `cocina-planes-fix-completar.sql`;
   `cancelar_plan_produccion` / `delete_plan_produccion` →

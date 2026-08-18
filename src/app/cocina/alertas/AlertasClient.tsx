@@ -6,6 +6,7 @@ import type { Insumo, Proveedor } from "@/lib/types";
 import { stockLibre } from "@/lib/types";
 import { displayCantidad } from "@/lib/units";
 import { listInsumos, listProveedores } from "@/lib/data/cocina";
+import { ErrorBanner } from "@/components/ErrorBanner";
 
 export function AlertasClient() {
   const [insumos, setInsumos] = useState<Insumo[]>([]);
@@ -68,9 +69,7 @@ export function AlertasClient() {
   }
   if (error) {
     return (
-      <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419]">
-        {error}
-      </div>
+      <ErrorBanner>{error}</ErrorBanner>
     );
   }
 

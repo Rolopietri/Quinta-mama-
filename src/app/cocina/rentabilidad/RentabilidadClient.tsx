@@ -12,6 +12,7 @@ import {
   type RentabilidadReceta,
 } from "@/lib/types";
 import { pillClass } from "@/lib/ui";
+import { ErrorBanner } from "@/components/ErrorBanner";
 import { listRecetas, calcularCostoReceta } from "@/lib/data/recetas";
 import { listInsumos } from "@/lib/data/cocina";
 import { getCocinaConfig, updateCocinaConfig } from "@/lib/data/cocinaConfig";
@@ -178,9 +179,7 @@ export function RentabilidadClient() {
 
   if (error) {
     return (
-      <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419]">
-        {error}
-      </div>
+      <ErrorBanner>{error}</ErrorBanner>
     );
   }
 

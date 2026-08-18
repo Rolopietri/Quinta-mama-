@@ -11,3 +11,8 @@ export function pillClass(active: boolean): string {
       : "bg-white text-cacao-soft ring-marfil hover:bg-marfil-soft"
   }`;
 }
+
+/** Fecha de hoy en ISO corto (YYYY-MM-DD), para inputs date y defaults. */
+export function hoyISO(): string {
+  return new Date().toISOString().slice(0, 10);
+}

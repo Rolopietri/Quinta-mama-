@@ -28,6 +28,7 @@ import { extractError } from "@/lib/data/error";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { MermaRecetaDialog } from "../../_MermaRecetaDialog";
 import { displayCantidad } from "@/lib/units";
+import { ErrorBanner } from "@/components/ErrorBanner";
 
 export function PlanesClient() {
   const [recetas, setRecetas] = useState<Receta[]>([]);
@@ -513,11 +514,7 @@ export function PlanesClient() {
 
   return (
     <div className="space-y-6">
-      {error && (
-        <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419]">
-          {error}
-        </div>
-      )}
+      {error && <ErrorBanner>{error}</ErrorBanner>}
       {info && (
         <div className="rounded-lg bg-[#F1F4ED] ring-1 ring-[#C9D6BC] p-3 text-sm text-[#2F4A1F]">
           {info}

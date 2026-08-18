@@ -197,28 +197,6 @@ export function convertirParaCosto(
   return { resultado: cantidad, usoFallback: true };
 }
 
-/** Devuelve las unidades equivalentes conocidas para una unidad dada.
- *  Útil para sugerir conversiones en la UI. */
-export function equivalencias(unidad: string): { canonica: string; ejemplo: string }[] {
-  const info = getUnit(unidad);
-  if (!info || info.dimension === "conteo" || info.dimension === "desconocida") {
-    return [];
-  }
-  // Devolvemos las otras unidades de la misma dimensión (canónicas únicas)
-  const seen = new Set<string>();
-  const out: { canonica: string; ejemplo: string }[] = [];
-  Object.values(UNITS).forEach((u) => {
-    if (u.dimension === info.dimension && u.canonica !== info.canonica) {
-      if (seen.has(u.canonica)) return;
-      seen.add(u.canonica);
-      // Ejemplo: cuánto vale 1 unidad input en esa otra unidad
-      const ej = (info.toBase / u.toBase).toString();
-      out.push({ canonica: u.canonica, ejemplo: `1 ${info.canonica} = ${ej} ${u.canonica}` });
-    }
-  });
-  return out;
-}
-
 /** Unidades comunes para datalists / autocomplete. */
 export const UNIDADES_COMUNES = [
   "g",

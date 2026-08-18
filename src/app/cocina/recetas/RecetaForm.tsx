@@ -28,6 +28,7 @@ import { extractError } from "@/lib/data/error";
 import { normalizarBusqueda } from "@/lib/text";
 import { UnitCalculator } from "@/components/UnitCalculator";
 import { UnidadSelect } from "@/components/UnidadSelect";
+import { ErrorBanner } from "@/components/ErrorBanner";
 import {
   convertirParaCosto,
   areCompatible,
@@ -548,9 +549,7 @@ export function RecetaForm({
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
       {error && (
-        <div className="sticky top-4 z-30 rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419] shadow-sm">
-          {error}
-        </div>
+        <ErrorBanner className="sticky top-4 z-30 shadow-sm">{error}</ErrorBanner>
       )}
       {info && (
         <div className="sticky top-4 z-30 rounded-lg bg-[#F1F4ED] ring-1 ring-[#C9D6BC] p-3 text-sm text-[#2F4A1F] shadow-sm">

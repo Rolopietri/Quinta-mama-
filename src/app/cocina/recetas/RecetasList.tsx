@@ -16,6 +16,7 @@ import { listRecetas, calcularCostoReceta } from "@/lib/data/recetas";
 import { listInsumos } from "@/lib/data/cocina";
 import { getCocinaConfig } from "@/lib/data/cocinaConfig";
 import { normalizarBusqueda } from "@/lib/text";
+import { ErrorBanner } from "@/components/ErrorBanner";
 
 export function RecetasList() {
   const searchParams = useSearchParams();
@@ -150,9 +151,7 @@ export function RecetasList() {
   }
   if (error) {
     return (
-      <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419]">
-        {error}
-      </div>
+      <ErrorBanner>{error}</ErrorBanner>
     );
   }
 

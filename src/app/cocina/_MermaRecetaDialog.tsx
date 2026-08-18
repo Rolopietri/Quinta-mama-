@@ -10,6 +10,8 @@ import {
 import { registrarMerma } from "@/lib/data/ventas";
 import { calcularCostoReceta } from "@/lib/data/recetas";
 import { extractError } from "@/lib/data/error";
+import { hoyISO } from "@/lib/ui";
+import { ErrorBanner } from "@/components/ErrorBanner";
 
 /**
  * Modal para registrar una merma de producción (una ración pre-producida que
@@ -34,7 +36,7 @@ export function MermaRecetaDialog({
   const [unidad, setUnidad] = useState<"raciones" | "gramos">("raciones");
   const [gramos, setGramos] = useState("");
   const [motivo, setMotivo] = useState<string>(MOTIVOS_MERMA_PRODUCCION[0]);
-  const [fecha, setFecha] = useState(new Date().toISOString().slice(0, 10));
+  const [fecha, setFecha] = useState(hoyISO());
   const [nota, setNota] = useState("");
   const [procesando, setProcesando] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -146,11 +148,7 @@ export function MermaRecetaDialog({
         <h2 className="font-cinzel text-xl tracking-[0.08em] text-cacao">
           Merma de producción
         </h2>
-        {error && (
-          <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-2.5 text-sm text-[#7A2419]">
-            {error}
-          </div>
-        )}
+        {error && <ErrorBanner>{error}</ErrorBanner>}
         <p className="text-sm text-cacao-soft font-serif leading-relaxed">
           Registrá una ración (o varias) de algo pre-producido que se perdió por
           un fallo interno (no es una venta). Descuenta los insumos del stock y
