@@ -251,6 +251,8 @@ export function VentasClient() {
       cantidadPorUnidad?: number;
       proveedorId?: string;
       porcentajeAcuerdo?: number;
+      swapFromInsumoId?: string;
+      swapToInsumoId?: string;
     },
   ) {
     setError(null);
@@ -977,6 +979,9 @@ export function VentasClient() {
                               recetaId: e.target.value || undefined,
                               extraRecetaId: c.extraRecetaId,
                               extraCantidad: c.extraCantidad,
+                              // Preservar la sustitución al editar la receta inline.
+                              swapFromInsumoId: c.swapFromInsumoId,
+                              swapToInsumoId: c.swapToInsumoId,
                             })
                           }
                           className="w-full rounded-lg ring-1 ring-marfil px-2 py-1.5 text-sm bg-white"
@@ -996,6 +1001,9 @@ export function VentasClient() {
                               recetaId: c.recetaId,
                               extraRecetaId: e.target.value || undefined,
                               extraCantidad: e.target.value ? 1 : undefined,
+                              // Preservar la sustitución al editar el extra inline.
+                              swapFromInsumoId: c.swapFromInsumoId,
+                              swapToInsumoId: c.swapToInsumoId,
                             })
                           }
                           className="w-full rounded-lg ring-1 ring-marfil px-2 py-1.5 text-xs bg-white text-cacao-soft"
@@ -1007,6 +1015,24 @@ export function VentasClient() {
                             </option>
                           ))}
                         </select>
+                        {c.swapFromInsumoId &&
+                          (() => {
+                            const sf = insumos.find(
+                              (i) => i.id === c.swapFromInsumoId,
+                            );
+                            if (!sf) return null;
+                            const st = c.swapToInsumoId
+                              ? insumos.find((i) => i.id === c.swapToInsumoId)
+                              : null;
+                            return (
+                              <div
+                                className="text-[11px] text-cacao-soft pl-0.5"
+                                title="Sustitución que se aplica al descontar stock"
+                              >
+                                ↺ {st ? `${sf.nombre} → ${st.nombre}` : `sin ${sf.nombre}`}
+                              </div>
+                            );
+                          })()}
                       </div>
                     ) : c.tipo === "insumo_directo" ? (
                       <div className="flex gap-2">
@@ -1017,6 +1043,7 @@ export function VentasClient() {
                               tipo: "insumo_directo",
                               insumoId: e.target.value || undefined,
                               cantidadPorUnidad: c.cantidadPorUnidad ?? 1,
+                              swapFromInsumoId: c.swapFromInsumoId,
                             })
                           }
                           className="flex-1 rounded-lg ring-1 ring-marfil px-2 py-1.5 text-sm bg-white"
@@ -1045,6 +1072,7 @@ export function VentasClient() {
                                   e.target.value === ""
                                     ? 1
                                     : Number(e.target.value),
+                                swapFromInsumoId: c.swapFromInsumoId,
                               })
                             }
                             className="w-full py-1.5 text-sm outline-none bg-transparent"
