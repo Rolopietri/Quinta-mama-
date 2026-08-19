@@ -22,6 +22,7 @@ import {
   listClasificacion,
   upsertClasificacion,
   deleteClasificacion,
+  totalesVentasPorMes,
   type ClasificItem,
 } from "@/lib/data/ventas";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -37,6 +38,13 @@ function fmtFecha(fecha: string): string {
     month: "short",
     year: "numeric",
   });
+}
+
+/** Nombre del mes desde "YYYY-MM" (ej. "Agosto 2026"), sin depender de zona. */
+function nombreMesVentas(iso: string): string {
+  const [y, m] = iso.split("-").map((x) => parseInt(x, 10));
+  const meses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+  return `${meses[m - 1] ?? ""} ${y}`;
 }
 
 // ID de lote (batch) para agrupar las ventas de un mismo import. Debe ser un
@@ -75,6 +83,7 @@ export function VentasClient() {
   const [rmSwapTo, setRmSwapTo] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [totalesMes, setTotalesMes] = useState<Record<string, number>>({});
 
   // Registro manual
   const [mFecha, setMFecha] = useState(todayISO());
@@ -105,12 +114,13 @@ export function VentasClient() {
     let cancelled = false;
     (async () => {
       try {
-        const [r, v, c, p, ins] = await Promise.all([
+        const [r, v, c, p, ins, tm] = await Promise.all([
           listRecetas(),
           listVentasDiasCompletos(30),
           listClasificacion(),
           listProveedores(),
           listInsumos(),
+          totalesVentasPorMes(),
         ]);
         if (!cancelled) {
           setRecetas(r);
@@ -118,6 +128,7 @@ export function VentasClient() {
           setClasifs(c);
           setProveedores(p);
           setInsumos(ins);
+          setTotalesMes(tm);
         }
       } catch (e) {
         if (!cancelled)
@@ -1164,7 +1175,24 @@ export function VentasClient() {
 
       {/* TAB: Historial */}
       {tab === "historial" && (
-        <div>
+        <div className="space-y-4">
+          {Object.keys(totalesMes).length > 0 && (
+            <div className="rounded-2xl bg-white ring-1 ring-marfil p-4">
+              <div className="font-display text-[9px] tracking-[0.25em] uppercase text-cacao-mute mb-2">
+                Total por mes
+              </div>
+              <ul className="divide-y divide-marfil">
+                {Object.entries(totalesMes)
+                  .sort((a, b) => b[0].localeCompare(a[0]))
+                  .map(([mes, total]) => (
+                    <li key={mes} className="flex justify-between py-1.5 text-sm">
+                      <span className="text-cacao-soft">{nombreMesVentas(mes)}</span>
+                      <span className="text-cacao font-medium tabular-nums">${total.toFixed(2)}</span>
+                    </li>
+                  ))}
+              </ul>
+            </div>
+          )}
           {loading ? (
             <div className="rounded-2xl bg-white ring-1 ring-marfil p-8 text-center text-cacao-soft">
               Cargando...

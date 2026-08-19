@@ -6,6 +6,7 @@
 // token). Menú desplegable con las secciones; se van construyendo por fases.
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { totalesVentasPorMes } from "@/lib/data/ventas";
 
 type Seccion = "proveedores" | "solicitudes" | "ingresos" | "cobrar" | "egresos" | "estado" | "historico";
 const SECCIONES: { id: Seccion; label: string; grupo?: string }[] = [
@@ -1521,6 +1522,7 @@ function IngresosMes() {
   const [msg, setMsg] = useState<string | null>(null);
   const [modo, setModo] = useState<"lista" | "form">("lista");
   const [editando, setEditando] = useState<Ingreso | null>(null);
+  const [ventasMes, setVentasMes] = useState<Record<string, number>>({});
   const [tick, setTick] = useState(0);
   const recargar = useCallback(() => setTick((t) => t + 1), []);
 
@@ -1545,6 +1547,21 @@ function IngresosMes() {
     })();
     return () => { a = false; };
   }, [mes, tick]);
+
+  // Total de ventas registradas en Cocina (para comparar/conciliar). Es la
+  // misma cifra del POS que se importa como ingresos; se carga una vez.
+  useEffect(() => {
+    let a = true;
+    (async () => {
+      try {
+        const t = await totalesVentasPorMes();
+        if (a) setVentasMes(t);
+      } catch {
+        /* la comparación es opcional */
+      }
+    })();
+    return () => { a = false; };
+  }, [tick]);
 
   // Los ingresos vienen en distintas monedas reales: Setux en euros, los
   // alquileres de inquilinos en dólares, etc. No se fuerzan a una sola: se
@@ -1619,6 +1636,11 @@ function IngresosMes() {
             </div>
           )}
           {monedasPresentes.length > 1 && <div className="text-[10px] text-[#9A938B] mt-1.5">Cada moneda por separado (Setux en €, alquileres en $).</div>}
+          <div className="mt-2 pt-2 border-t border-[#333]">
+            <div className="text-[9px] tracking-[0.2em] uppercase text-[#9A938B]">Ventas en Cocina (POS)</div>
+            <div className="text-sm font-medium leading-tight mt-0.5">${(ventasMes[mes] ?? 0).toFixed(2)}</div>
+            <div className="text-[10px] text-[#9A938B] mt-0.5">Para comparar. Debe cuadrar con las ventas (€). La diferencia suele ser CXC y cortesías.</div>
+          </div>
         </div>
         <div className="sm:col-span-2 rounded-2xl bg-white ring-1 ring-marfil p-4">
           <div className="font-display text-[9px] tracking-[0.25em] uppercase text-cacao-mute mb-2">Por método de pago</div>

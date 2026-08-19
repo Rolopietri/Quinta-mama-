@@ -129,6 +129,27 @@ export async function listVentasDiasCompletos(dias = 30): Promise<Venta[]> {
   return (data as Row[]).map(rowToVenta);
 }
 
+/**
+ * Total de ventas (USD) agrupado por mes "YYYY-MM", sobre todo el histórico.
+ * Excluye mermas. Sirve para el "total del mes" del historial y para comparar
+ * con los ingresos de Administración.
+ */
+export async function totalesVentasPorMes(): Promise<Record<string, number>> {
+  const sb = createSupabaseBrowserClient();
+  const { data, error } = await sb
+    .from("ventas")
+    .select("fecha, total_usd")
+    .eq("es_merma", false);
+  if (error) throw error;
+  const out: Record<string, number> = {};
+  for (const r of (data as { fecha: string | null; total_usd: number | string | null }[]) ?? []) {
+    if (!r.fecha) continue;
+    const mes = String(r.fecha).slice(0, 7);
+    out[mes] = (out[mes] ?? 0) + (r.total_usd === null ? 0 : Number(r.total_usd));
+  }
+  return out;
+}
+
 /** Solo mermas de producción (pérdidas internas de algo pre-producido). */
 export async function listMermas(limit = 200): Promise<Venta[]> {
   const sb = createSupabaseBrowserClient();
