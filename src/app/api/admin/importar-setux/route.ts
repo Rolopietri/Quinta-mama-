@@ -93,14 +93,15 @@ export async function PUT(req: NextRequest) {
   // Separar según destino (RPP se ignora; CXC va a cuentas por cobrar).
   const ingresos: Record<string, unknown>[] = [];
   const cobrar: Record<string, unknown>[] = [];
-  let propinaTotal = 0; // suma de propinas válidas (se descarta la que sea > venta = error)
+  // La propina total la decide el cliente (editable, para quitar errores).
+  const propinaTotal = typeof b.propina === "number" && isFinite(b.propina) && b.propina > 0
+    ? Math.round(b.propina * 100) / 100
+    : 0;
   for (const l of lineas) {
     const total = typeof l.total === "number" ? l.total : Number(l.total);
     if (!isFinite(total)) continue;
     const metodo = typeof l.metodo === "string" ? l.metodo : "";
     if (destinoDe(metodo) === "excluir") continue;
-    const propina = typeof l.propina === "number" ? l.propina : Number(l.propina);
-    if (isFinite(propina) && propina > 0 && propina <= total) propinaTotal += propina;
     const cantidad = typeof l.cantidad === "number" ? l.cantidad : null;
     if (destinoDe(metodo) === "cobrar") {
       cobrar.push({

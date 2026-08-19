@@ -2137,6 +2137,7 @@ function ImportarSetux() {
   const [fecha, setFecha] = useState("");
   const [categorias, setCategorias] = useState<CategoriaIngreso[]>([]);
   const [categoriaId, setCategoriaId] = useState("");
+  const [propinaEdit, setPropinaEdit] = useState("");
   const [guardando, setGuardando] = useState(false);
   const [conflicto, setConflicto] = useState<number | null>(null);
 
@@ -2189,7 +2190,11 @@ function ImportarSetux() {
       setReporte({ fecha: rep.fecha, desde: rep.desde, hasta: rep.hasta, usuario: rep.usuario, total: rep.total });
       setFecha(rep.fecha ?? "");
       // RPP (cortesías) no se cuenta: llega desmarcado.
-      setLineas((rep.lineas as Omit<LineaSetuxUI, "incluir">[]).map((l) => ({ ...l, incluir: l.destino !== "excluir" })));
+      const ls = (rep.lineas as Omit<LineaSetuxUI, "incluir">[]).map((l) => ({ ...l, incluir: l.destino !== "excluir" }));
+      setLineas(ls);
+      // Propina por defecto = suma de TODAS las propinas (editable para quitar errores).
+      const propAuto = ls.filter((l) => l.destino !== "excluir").reduce((s, l) => s + (l.propina ?? 0), 0);
+      setPropinaEdit(propAuto > 0 ? propAuto.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error");
       limpiar();
@@ -2201,10 +2206,10 @@ function ImportarSetux() {
   const incluidas = lineas.filter((l) => l.incluir && l.destino !== "excluir");
   const ingresoEUR = incluidas.filter((l) => l.destino === "ingreso").reduce((s, l) => s + l.total, 0);
   const cobrarEUR = incluidas.filter((l) => l.destino === "cobrar").reduce((s, l) => s + l.total, 0);
-  // Propina: aparte (no es ingreso). Se descarta la que sea mayor que la venta (error).
-  const propinaValida = (l: LineaSetuxUI) => l.propina != null && l.propina > 0 && l.propina <= l.total;
-  const propinaTotal = incluidas.reduce((s, l) => s + (propinaValida(l) ? l.propina! : 0), 0);
-  const propinasConError = incluidas.filter((l) => l.propina != null && l.propina > l.total).length;
+  // Propina: aparte (no es ingreso). El total lo controlas tú (editable).
+  const propinaTotal = parseTasa(propinaEdit) ?? 0;
+  // Métodos con propina para mostrar el desglose de referencia.
+  const propinasPorMetodo = incluidas.filter((l) => l.propina != null && l.propina > 0);
 
   async function registrar(reemplazar: boolean) {
     if (!fecha) { setError("Falta la fecha del reporte."); return; }
@@ -2220,8 +2225,9 @@ function ImportarSetux() {
           fecha,
           categoria_id: categoriaId || null,
           categoria_nombre: cat?.nombre ?? null,
+          propina: propinaTotal,
           reemplazar,
-          lineas: incluidas.map((l) => ({ metodo: l.metodoBonito, total: l.total, cantidad: l.cantidad, propina: l.propina })),
+          lineas: incluidas.map((l) => ({ metodo: l.metodoBonito, total: l.total, cantidad: l.cantidad })),
         }),
       });
       const d = await r.json();
@@ -2304,10 +2310,18 @@ function ImportarSetux() {
                   <span className="text-right tabular-nums">{fmtMonto(cobrarEUR, "EUR")}</span>
                 </div>
               )}
-              {propinaTotal > 0 && (
-                <div className="grid grid-cols-[1fr_auto] gap-3 text-cacao-mute">
-                  <span>Propinas (aparte, no es ingreso){propinasConError > 0 ? ` · ${propinasConError} descartada${propinasConError === 1 ? "" : "s"} por error` : ""}</span>
-                  <span className="text-right tabular-nums">{fmtMonto(propinaTotal, "EUR")}</span>
+              {propinasPorMetodo.length > 0 && (
+                <div className="pt-1 mt-1 border-t border-marfil">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-cacao-mute">Propina del día (aparte, no es ingreso)</span>
+                    <div className="flex items-center gap-1">
+                      <input inputMode="decimal" value={propinaEdit} onChange={(e) => setPropinaEdit(e.target.value)} className="w-28 border border-marfil rounded-lg px-2 py-1 text-sm text-cacao text-right" />
+                      <span className="text-cacao-mute">€</span>
+                    </div>
+                  </div>
+                  <div className="text-[11px] text-cacao-mute mt-1">
+                    Por método: {propinasPorMetodo.map((l) => `${l.metodoBonito} ${fmtMonto(l.propina!, "EUR")}`).join(" · ")}. Edita el total si hay un error (ej. una propina disparada).
+                  </div>
                 </div>
               )}
             </div>
