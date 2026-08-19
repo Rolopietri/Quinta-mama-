@@ -1543,7 +1543,7 @@ function IngresosMes() {
   const [modo, setModo] = useState<"lista" | "form">("lista");
   const [editando, setEditando] = useState<Ingreso | null>(null);
   const [ventasMes, setVentasMes] = useState<Record<string, number>>({});
-  const [propinasMes, setPropinasMes] = useState(0);
+  const [propinas, setPropinas] = useState<{ id: string; fecha: string; monto: number | null; moneda: string | null }[]>([]);
   const [tasaInput, setTasaInput] = useState("1,17");
   const [guardandoTasa, setGuardandoTasa] = useState(false);
   const [recalculando, setRecalculando] = useState(false);
@@ -1563,7 +1563,7 @@ function IngresosMes() {
         if (a) {
           setIngresos(di.ingresos ?? []);
           setCategorias(dc.categorias ?? []);
-          setPropinasMes((dp.propinas ?? []).reduce((s: number, p: { monto: number | null }) => s + (Number(p.monto) || 0), 0));
+          setPropinas(dp.propinas ?? []);
         }
       } catch {
         if (a) setError("No se pudieron cargar los ingresos.");
@@ -1673,6 +1673,17 @@ function IngresosMes() {
     }
   }
 
+  const propinasMes = propinas.reduce((s, p) => s + (Number(p.monto) || 0), 0);
+  async function borrarPropina(id: string) {
+    try {
+      await fetch(`/api/admin/propinas?id=${id}`, { method: "DELETE" });
+      setMsg("Propina eliminada.");
+      recargar();
+    } catch {
+      setError("No se pudo eliminar la propina.");
+    }
+  }
+
   if (modo === "form") {
     return (
       <FormIngreso
@@ -1756,6 +1767,27 @@ function IngresosMes() {
           )}
         </div>
       </div>
+
+      {propinas.length > 0 && (
+        <div className="rounded-2xl bg-white ring-1 ring-marfil p-4">
+          <div className="flex items-center justify-between mb-2">
+            <span className="font-display text-[9px] tracking-[0.25em] uppercase text-cacao-mute">Propinas del mes (no es ingreso)</span>
+            <span className="text-sm font-medium text-cacao">{fmtMonto(propinasMes, "EUR")}</span>
+          </div>
+          <ul className="divide-y divide-marfil">
+            {propinas.map((p) => (
+              <li key={p.id} className="flex items-center justify-between gap-3 py-1.5 text-sm">
+                <span className="text-cacao-soft">{fmtFecha(p.fecha)}</span>
+                <span className="flex items-center gap-3">
+                  <span className="text-cacao tabular-nums">{fmtMonto(Number(p.monto) || 0, p.moneda || "EUR")}</span>
+                  <button type="button" onClick={() => borrarPropina(p.id)} className="text-cacao-soft hover:text-terracotta" aria-label="Eliminar propina">✕</button>
+                </span>
+              </li>
+            ))}
+          </ul>
+          <p className="text-[11px] text-cacao-mute mt-2">Si borras las ventas de un día, borra también su propina aquí (son registros separados).</p>
+        </div>
+      )}
 
       <section className="rounded-2xl bg-white ring-1 ring-marfil overflow-hidden">
         {cargando ? (
