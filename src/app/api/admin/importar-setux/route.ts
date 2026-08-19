@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { tokenValido, ADMIN_COOKIE } from "@/lib/admin-auth";
 import { createServiceClient } from "@/lib/supabase/admin-service";
 import { parseReporteSetux, nombreMetodo } from "@/lib/admin/setux";
+import { getTasaEurUsd } from "@/lib/admin/tasa";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -63,13 +64,14 @@ export async function PUT(req: NextRequest) {
   const b = (await req.json().catch(() => ({}))) as Record<string, unknown>;
   const fecha = typeof b.fecha === "string" ? b.fecha : null;
   if (!fecha) return NextResponse.json({ error: "falta la fecha" }, { status: 400 });
-  const tasa = typeof b.tasa === "number" && isFinite(b.tasa) && b.tasa > 0 ? b.tasa : null;
+  // Todo Setux entra en euros; se convierte a USD con la tasa fija del panel.
+  const tasa = await getTasaEurUsd(sb);
   const categoriaId = typeof b.categoria_id === "string" && b.categoria_id ? b.categoria_id : null;
   const categoriaNombre = typeof b.categoria_nombre === "string" ? b.categoria_nombre : null;
   const lineas = Array.isArray(b.lineas) ? (b.lineas as Record<string, unknown>[]) : [];
   if (lineas.length === 0) return NextResponse.json({ error: "No hay métodos que registrar." }, { status: 400 });
 
-  const usdDe = (total: number) => (tasa ? Math.round(total * tasa * 100) / 100 : null);
+  const usdDe = (total: number) => Math.round(total * tasa * 100) / 100;
 
   // Dedupe: ¿ya hay algo de Setux para ese día (ingresos o cuentas por cobrar)?
   const [{ data: prevIng, error: e1 }, { data: prevCxc, error: e2 }] = await Promise.all([

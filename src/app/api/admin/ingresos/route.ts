@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { tokenValido, ADMIN_COOKIE } from "@/lib/admin-auth";
 import { createServiceClient } from "@/lib/supabase/admin-service";
+import { getTasaEurUsd } from "@/lib/admin/tasa";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,10 +28,12 @@ function equivUSD(monto: number | null, moneda: string | null, tasa: number | nu
   return null;
 }
 
-function fila(e: Record<string, unknown>): Record<string, unknown> {
+function fila(e: Record<string, unknown>, tasaEurDefecto: number): Record<string, unknown> {
   const monto = numero(e.monto);
   const moneda = texto(e.moneda);
-  const tasa = numero(e.tasa);
+  let tasa = numero(e.tasa);
+  // Los ingresos en euros usan la tasa fija del panel (1 € = 1,17 $ por defecto).
+  if (moneda === "EUR" && (tasa == null || tasa <= 0)) tasa = tasaEurDefecto;
   const usd = equivUSD(monto, moneda, tasa);
   return {
     fecha: texto(e.fecha) ?? undefined,
@@ -79,7 +82,8 @@ export async function POST(req: NextRequest) {
       ? [b.ingreso as Record<string, unknown>]
       : [];
   if (lista.length === 0) return NextResponse.json({ error: "No hay ingresos que registrar." }, { status: 400 });
-  const { data, error } = await sb.from("admin_ingreso").insert(lista.map(fila)).select("*");
+  const tasaEur = await getTasaEurUsd(sb);
+  const { data, error } = await sb.from("admin_ingreso").insert(lista.map((e) => fila(e, tasaEur))).select("*");
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ ingresos: data ?? [] });
 }
@@ -91,7 +95,8 @@ export async function PATCH(req: NextRequest) {
   const b = (await req.json().catch(() => ({}))) as Record<string, unknown>;
   const id = texto(b.id);
   if (!id) return NextResponse.json({ error: "falta id" }, { status: 400 });
-  const { data, error } = await sb.from("admin_ingreso").update(fila(b)).eq("id", id).select("*").single();
+  const tasaEur = await getTasaEurUsd(sb);
+  const { data, error } = await sb.from("admin_ingreso").update(fila(b, tasaEur)).eq("id", id).select("*").single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ ingreso: data });
 }

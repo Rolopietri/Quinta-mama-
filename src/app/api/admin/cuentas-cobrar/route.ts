@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { tokenValido, ADMIN_COOKIE } from "@/lib/admin-auth";
 import { createServiceClient } from "@/lib/supabase/admin-service";
+import { getTasaEurUsd } from "@/lib/admin/tasa";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -47,7 +48,8 @@ export async function POST(req: NextRequest) {
   const b = (await req.json().catch(() => ({}))) as Record<string, unknown>;
   const monto = numero(b.monto);
   const moneda = texto(b.moneda) ?? "EUR";
-  const tasa = numero(b.tasa);
+  let tasa = numero(b.tasa);
+  if (moneda === "EUR" && (tasa == null || tasa <= 0)) tasa = await getTasaEurUsd(sb);
   if (monto == null) return NextResponse.json({ error: "Pon un monto." }, { status: 400 });
   const fila = {
     fecha: texto(b.fecha) ?? undefined,
@@ -78,7 +80,8 @@ export async function PATCH(req: NextRequest) {
   if (b.accion === "cobrar") {
     if (cuenta.cobrada) return NextResponse.json({ error: "Ya está cobrada." }, { status: 400 });
     const fechaCobro = texto(b.fecha_cobro) ?? cuenta.fecha;
-    const tasa = numero(b.tasa) ?? cuenta.tasa;
+    let tasa = numero(b.tasa) ?? cuenta.tasa;
+    if (cuenta.moneda === "EUR" && (tasa == null || tasa <= 0)) tasa = await getTasaEurUsd(sb);
     const usd = equivUSD(cuenta.monto, cuenta.moneda, tasa);
     // 1) crear el ingreso
     const { data: ingreso, error: eIng } = await sb

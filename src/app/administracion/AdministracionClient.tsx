@@ -1543,6 +1543,9 @@ function IngresosMes() {
   const [modo, setModo] = useState<"lista" | "form">("lista");
   const [editando, setEditando] = useState<Ingreso | null>(null);
   const [ventasMes, setVentasMes] = useState<Record<string, number>>({});
+  const [tasaInput, setTasaInput] = useState("1,17");
+  const [guardandoTasa, setGuardandoTasa] = useState(false);
+  const [recalculando, setRecalculando] = useState(false);
   const [tick, setTick] = useState(0);
   const recargar = useCallback(() => setTick((t) => t + 1), []);
 
@@ -1582,6 +1585,56 @@ function IngresosMes() {
     })();
     return () => { a = false; };
   }, [tick]);
+
+  useEffect(() => {
+    let a = true;
+    (async () => {
+      try {
+        const r = await fetch("/api/admin/config", { cache: "no-store" });
+        const d = await r.json();
+        const v = d.config?.tasa_eur_usd;
+        if (a && v != null && v !== "") setTasaInput(String(v).replace(".", ","));
+      } catch {
+        /* usa el valor por defecto */
+      }
+    })();
+    return () => { a = false; };
+  }, []);
+
+  async function guardarTasa() {
+    setGuardandoTasa(true);
+    setError(null);
+    try {
+      const val = parseTasa(tasaInput);
+      if (!val || val <= 0) { setError("Pon una tasa válida (ej. 1,17)."); return; }
+      await fetch("/api/admin/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clave: "tasa_eur_usd", valor: String(val) }),
+      });
+      setMsg(`Tasa guardada: 1 € = ${val} $. Usa "Recalcular" para aplicarla a lo ya cargado.`);
+    } catch {
+      setError("No se pudo guardar la tasa.");
+    } finally {
+      setGuardandoTasa(false);
+    }
+  }
+
+  async function recalcularUSD() {
+    setRecalculando(true);
+    setError(null);
+    try {
+      const r = await fetch("/api/admin/recalcular-usd", { method: "POST" });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "No se pudo recalcular.");
+      setMsg(`Recalculado con 1 € = ${d.tasa} $: ${d.ingresos} ingresos y ${d.cuentas} cuentas por cobrar.`);
+      recargar();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo recalcular.");
+    } finally {
+      setRecalculando(false);
+    }
+  }
 
   // Los ingresos vienen en distintas monedas reales: Setux en euros, los
   // alquileres de inquilinos en dólares, etc. No se fuerzan a una sola: se
@@ -1642,6 +1695,20 @@ function IngresosMes() {
 
       {error && <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419]">{error}</div>}
       {msg && <div className="rounded-lg bg-[#F1F4ED] ring-1 ring-[#C9D6BC] p-3 text-sm text-[#2F4A1F]">{msg}</div>}
+
+      <div className="rounded-2xl bg-white ring-1 ring-marfil p-4 flex flex-wrap items-end gap-3">
+        <div>
+          <label className="block font-display text-[10px] tracking-[0.2em] uppercase text-cacao-mute mb-1">Tasa €→USD</label>
+          <div className="flex items-center gap-1 text-sm text-cacao">
+            1 € =
+            <input inputMode="decimal" value={tasaInput} onChange={(e) => setTasaInput(e.target.value)} className="w-20 border border-marfil rounded-lg px-2 py-2 text-sm text-cacao text-center" />
+            $
+          </div>
+        </div>
+        <button type="button" onClick={guardarTasa} disabled={guardandoTasa} className="rounded-lg bg-cacao text-white px-4 py-2 text-xs uppercase tracking-widest hover:bg-terracotta disabled:bg-marfil disabled:text-cacao-mute">{guardandoTasa ? "Guardando…" : "Guardar tasa"}</button>
+        <button type="button" onClick={recalcularUSD} disabled={recalculando} className="rounded-lg ring-1 ring-marfil text-cacao px-4 py-2 text-xs uppercase tracking-widest hover:bg-marfil-soft disabled:text-cacao-mute">{recalculando ? "Recalculando…" : "Recalcular cargados"}</button>
+        <p className="text-[11px] text-cacao-mute flex-1 min-w-[12rem]">Tasa fija para pasar euros a dólares. Cámbiala cuando haga falta y dale “Recalcular” para aplicarla a todo lo ya cargado.</p>
+      </div>
 
       <div className="grid gap-3 sm:grid-cols-3">
         <div className="rounded-2xl bg-[#0F0F0F] text-[#EDE7E0] ring-1 ring-[#0F0F0F] p-4">
@@ -1796,15 +1863,12 @@ function FormIngreso({
       </div>
       <Campo label="Pagador / Inquilino (opcional)"><input value={f.pagador} onChange={(e) => set("pagador", e.target.value)} placeholder="Quién pagó" className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" /></Campo>
       <Campo label="Concepto"><input value={f.concepto} onChange={(e) => set("concepto", e.target.value)} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" /></Campo>
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-2 gap-2">
         <Campo label="Monto"><input inputMode="decimal" value={f.monto} onChange={(e) => set("monto", e.target.value)} placeholder="0,00" className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" /></Campo>
         <Campo label="Moneda">
           <select value={f.moneda} onChange={(e) => set("moneda", e.target.value)} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
             {MONEDAS.map((m) => <option key={m} value={m}>{m}</option>)}
           </select>
-        </Campo>
-        <Campo label="Tasa a USD">
-          <input inputMode="decimal" value={f.tasa} onChange={(e) => set("tasa", e.target.value)} disabled={f.moneda === "USD"} placeholder={f.moneda === "USD" ? "—" : ""} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao disabled:bg-marfil-soft" />
         </Campo>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
@@ -2050,7 +2114,8 @@ function DesglosePorMoneda({ titulo, filas, orden }: { titulo: string; filas: [s
 
 // ── Importar ventas de Setux ────────────────────────────────────────
 // Beatriz sube el PDF diario de Setux; el servidor lo lee y muestra la vista
-// previa; ella pone la tasa €→USD y confirma → crea un ingreso por método.
+// previa; confirma → crea un ingreso por método (en euros; el USD sale con la
+// tasa fija del panel).
 type LineaSetuxUI = { metodo: string; metodoBonito: string; cantidad: number | null; total: number; incluir: boolean; destino: "ingreso" | "cobrar" | "excluir" };
 type ReporteSetuxUI = { fecha: string | null; desde: string | null; hasta: string | null; usuario: string | null; total: number | null };
 
@@ -2061,7 +2126,6 @@ function ImportarSetux() {
   const [reporte, setReporte] = useState<ReporteSetuxUI | null>(null);
   const [lineas, setLineas] = useState<LineaSetuxUI[]>([]);
   const [fecha, setFecha] = useState("");
-  const [tasa, setTasa] = useState("");
   const [categorias, setCategorias] = useState<CategoriaIngreso[]>([]);
   const [categoriaId, setCategoriaId] = useState("");
   const [guardando, setGuardando] = useState(false);
@@ -2125,11 +2189,9 @@ function ImportarSetux() {
     }
   }
 
-  const tasaNum = parseTasa(tasa);
   const incluidas = lineas.filter((l) => l.incluir && l.destino !== "excluir");
   const ingresoEUR = incluidas.filter((l) => l.destino === "ingreso").reduce((s, l) => s + l.total, 0);
   const cobrarEUR = incluidas.filter((l) => l.destino === "cobrar").reduce((s, l) => s + l.total, 0);
-  const totalUSD = tasaNum ? ingresoEUR * tasaNum : null;
 
   async function registrar(reemplazar: boolean) {
     if (!fecha) { setError("Falta la fecha del reporte."); return; }
@@ -2143,7 +2205,6 @@ function ImportarSetux() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           fecha,
-          tasa: tasaNum,
           categoria_id: categoriaId || null,
           categoria_nombre: cat?.nombre ?? null,
           reemplazar,
@@ -2185,11 +2246,8 @@ function ImportarSetux() {
               <span className="font-display text-[10px] tracking-[0.25em] uppercase text-cacao-mute">Vista previa</span>
               <button type="button" onClick={limpiar} className="text-xs uppercase tracking-widest text-cacao-soft hover:text-cacao">Cambiar PDF</button>
             </div>
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-2">
               <Campo label="Fecha del reporte"><input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" /></Campo>
-              <Campo label="Tasa €→USD">
-                <input inputMode="decimal" value={tasa} onChange={(e) => setTasa(e.target.value)} placeholder="ej. 1,08" className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
-              </Campo>
               <Campo label="Categoría">
                 <select value={categoriaId} onChange={(e) => setCategoriaId(e.target.value)} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
                   <option value="">Sin categoría</option>
@@ -2222,7 +2280,7 @@ function ImportarSetux() {
               <div className="grid grid-cols-[1fr_auto] gap-3">
                 <span className="font-medium text-cacao">Ingresos a registrar</span>
                 <span className="text-right font-medium text-cacao tabular-nums">
-                  {fmtMonto(ingresoEUR, "EUR")}{totalUSD != null && <span className="block text-[11px] text-cacao-mute">≈ {fmtMonto(totalUSD, "USD")}</span>}
+                  {fmtMonto(ingresoEUR, "EUR")}
                 </span>
               </div>
               {cobrarEUR > 0 && (
