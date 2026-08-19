@@ -488,6 +488,26 @@ function parseMonto(s: string): number | null {
   return isFinite(n) ? n : null;
 }
 
+// Lee una TASA o PORCENTAJE (no un monto): aquí el punto y la coma son
+// SIEMPRE decimales (1.08 = 1,08 = 1.08). Si trae los dos, el separador de
+// más a la derecha es el decimal (1.234,56 = 1234.56). Evita el bug de
+// interpretar "1.08" como 108 (que sí aplica a montos con miles).
+function parseTasa(s: string): number | null {
+  const t = (s ?? "").toString().trim();
+  if (!t) return null;
+  const iComa = t.lastIndexOf(",");
+  const iPunto = t.lastIndexOf(".");
+  let limpio: string;
+  if (iComa >= 0 && iPunto >= 0) {
+    const dec = Math.max(iComa, iPunto);
+    limpio = t.slice(0, dec).replace(/[.,]/g, "") + "." + t.slice(dec + 1).replace(/[.,]/g, "");
+  } else {
+    limpio = t.replace(",", ".");
+  }
+  const n = Number(limpio);
+  return isFinite(n) ? n : null;
+}
+
 function fmtMonto(monto: number, moneda: string): string {
   if (moneda === "USD") return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(monto);
   const n = new Intl.NumberFormat("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(monto);
@@ -1315,7 +1335,7 @@ function FormEgreso({
         proveedor_nombre: prov?.nombre ?? null,
         monto: parseMonto(f.monto),
         moneda: f.moneda,
-        tasa: parseMonto(f.tasa),
+        tasa: parseTasa(f.tasa),
         metodo: f.metodo,
         factura: f.factura,
         nota: f.nota,
@@ -1741,7 +1761,7 @@ function FormIngreso({
         pagador: f.pagador,
         monto: parseMonto(f.monto),
         moneda: f.moneda,
-        tasa: parseMonto(f.tasa),
+        tasa: parseTasa(f.tasa),
         metodo: f.metodo,
         factura: f.factura,
         nota: f.nota,
@@ -2105,7 +2125,7 @@ function ImportarSetux() {
     }
   }
 
-  const tasaNum = parseMonto(tasa);
+  const tasaNum = parseTasa(tasa);
   const incluidas = lineas.filter((l) => l.incluir && l.destino !== "excluir");
   const ingresoEUR = incluidas.filter((l) => l.destino === "ingreso").reduce((s, l) => s + l.total, 0);
   const cobrarEUR = incluidas.filter((l) => l.destino === "cobrar").reduce((s, l) => s + l.total, 0);
@@ -2390,7 +2410,7 @@ function SeccionCuentasCobrar() {
     setGuardandoDeval(true);
     setError(null);
     try {
-      const val = parseMonto(devalInput);
+      const val = parseTasa(devalInput);
       await fetch("/api/admin/config", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -2427,7 +2447,7 @@ function SeccionCuentasCobrar() {
       const r = await fetch("/api/admin/cuentas-cobrar", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id, accion: "cobrar", fecha_cobro: fechaCobro, tasa: parseMonto(tasaCobro) }),
+        body: JSON.stringify({ id, accion: "cobrar", fecha_cobro: fechaCobro, tasa: parseTasa(tasaCobro) }),
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error);
