@@ -1734,8 +1734,8 @@ function IngresosMes() {
           )}
           <div className="mt-2 pt-2 border-t border-[#333]">
             <div className="text-[9px] tracking-[0.2em] uppercase text-[#9A938B]">Ventas en Cocina (POS)</div>
-            <div className="text-sm font-medium leading-tight mt-0.5">${(ventasMes[mes] ?? 0).toFixed(2)}</div>
-            <div className="text-[10px] text-[#9A938B] mt-0.5">Para comparar. Debe cuadrar con las ventas (€). La diferencia suele ser CXC y cortesías.</div>
+            <div className="text-sm font-medium leading-tight mt-0.5">{fmtMonto(ventasMes[mes] ?? 0, "EUR")}</div>
+            <div className="text-[10px] text-[#9A938B] mt-0.5">Para comparar (misma moneda). La diferencia con los ingresos suele ser CXC y cortesías.</div>
           </div>
         </div>
         <div className="sm:col-span-2 rounded-2xl bg-white ring-1 ring-marfil p-4">

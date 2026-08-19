@@ -84,6 +84,7 @@ export function VentasClient() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [totalesMes, setTotalesMes] = useState<Record<string, number>>({});
+  const [tasaEurUsd, setTasaEurUsd] = useState(1.17);
 
   // Registro manual
   const [mFecha, setMFecha] = useState(todayISO());
@@ -129,6 +130,14 @@ export function VentasClient() {
           setProveedores(p);
           setInsumos(ins);
           setTotalesMes(tm);
+        }
+        // Tasa €→USD del panel de Administración (misma conversión).
+        try {
+          const rt = await fetch("/api/admin/tasa", { cache: "no-store" });
+          const dt = await rt.json();
+          if (!cancelled && dt?.tasa) setTasaEurUsd(Number(dt.tasa));
+        } catch {
+          /* usa 1,17 por defecto */
         }
       } catch (e) {
         if (!cancelled)
@@ -1179,7 +1188,7 @@ export function VentasClient() {
           {Object.keys(totalesMes).length > 0 && (
             <div className="rounded-2xl bg-white ring-1 ring-marfil p-4">
               <div className="font-display text-[9px] tracking-[0.25em] uppercase text-cacao-mute mb-2">
-                Total por mes
+                Total por mes <span className="normal-case tracking-normal text-cacao-mute">(euros · ≈ $ a {tasaEurUsd.toString().replace(".", ",")})</span>
               </div>
               <ul className="divide-y divide-marfil">
                 {Object.entries(totalesMes)
@@ -1187,7 +1196,10 @@ export function VentasClient() {
                   .map(([mes, total]) => (
                     <li key={mes} className="flex justify-between py-1.5 text-sm">
                       <span className="text-cacao-soft">{nombreMesVentas(mes)}</span>
-                      <span className="text-cacao font-medium tabular-nums">${total.toFixed(2)}</span>
+                      <span className="text-cacao font-medium tabular-nums text-right">
+                        {total.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                        <span className="block text-[11px] text-cacao-mute font-normal">≈ ${(total * tasaEurUsd).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                      </span>
                     </li>
                   ))}
               </ul>
