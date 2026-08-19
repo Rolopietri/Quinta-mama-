@@ -1543,6 +1543,7 @@ function IngresosMes() {
   const [modo, setModo] = useState<"lista" | "form">("lista");
   const [editando, setEditando] = useState<Ingreso | null>(null);
   const [ventasMes, setVentasMes] = useState<Record<string, number>>({});
+  const [propinasMes, setPropinasMes] = useState(0);
   const [tasaInput, setTasaInput] = useState("1,17");
   const [guardandoTasa, setGuardandoTasa] = useState(false);
   const [recalculando, setRecalculando] = useState(false);
@@ -1553,14 +1554,16 @@ function IngresosMes() {
     let a = true;
     (async () => {
       try {
-        const [ri, rc] = await Promise.all([
+        const [ri, rc, rp] = await Promise.all([
           fetch(`/api/admin/ingresos?mes=${mes}`, { cache: "no-store" }),
           fetch("/api/admin/categorias-ingreso", { cache: "no-store" }),
+          fetch(`/api/admin/propinas?mes=${mes}`, { cache: "no-store" }),
         ]);
-        const [di, dc] = await Promise.all([ri.json(), rc.json()]);
+        const [di, dc, dp] = await Promise.all([ri.json(), rc.json(), rp.json()]);
         if (a) {
           setIngresos(di.ingresos ?? []);
           setCategorias(dc.categorias ?? []);
+          setPropinasMes((dp.propinas ?? []).reduce((s: number, p: { monto: number | null }) => s + (Number(p.monto) || 0), 0));
         }
       } catch {
         if (a) setError("No se pudieron cargar los ingresos.");
@@ -1723,6 +1726,12 @@ function IngresosMes() {
             </div>
           )}
           {monedasPresentes.length > 1 && <div className="text-[10px] text-[#9A938B] mt-1.5">Cada moneda por separado (Setux en €, alquileres en $).</div>}
+          {propinasMes > 0 && (
+            <div className="mt-2 pt-2 border-t border-[#333]">
+              <div className="text-[9px] tracking-[0.2em] uppercase text-[#9A938B]">Propinas (no es ingreso)</div>
+              <div className="text-sm font-medium leading-tight mt-0.5">{fmtMonto(propinasMes, "EUR")}</div>
+            </div>
+          )}
           <div className="mt-2 pt-2 border-t border-[#333]">
             <div className="text-[9px] tracking-[0.2em] uppercase text-[#9A938B]">Ventas en Cocina (POS)</div>
             <div className="text-sm font-medium leading-tight mt-0.5">${(ventasMes[mes] ?? 0).toFixed(2)}</div>
@@ -2116,7 +2125,7 @@ function DesglosePorMoneda({ titulo, filas, orden }: { titulo: string; filas: [s
 // Beatriz sube el PDF diario de Setux; el servidor lo lee y muestra la vista
 // previa; confirma → crea un ingreso por método (en euros; el USD sale con la
 // tasa fija del panel).
-type LineaSetuxUI = { metodo: string; metodoBonito: string; cantidad: number | null; total: number; incluir: boolean; destino: "ingreso" | "cobrar" | "excluir" };
+type LineaSetuxUI = { metodo: string; metodoBonito: string; cantidad: number | null; total: number; propina: number | null; incluir: boolean; destino: "ingreso" | "cobrar" | "excluir" };
 type ReporteSetuxUI = { fecha: string | null; desde: string | null; hasta: string | null; usuario: string | null; total: number | null };
 
 function ImportarSetux() {
@@ -2192,6 +2201,10 @@ function ImportarSetux() {
   const incluidas = lineas.filter((l) => l.incluir && l.destino !== "excluir");
   const ingresoEUR = incluidas.filter((l) => l.destino === "ingreso").reduce((s, l) => s + l.total, 0);
   const cobrarEUR = incluidas.filter((l) => l.destino === "cobrar").reduce((s, l) => s + l.total, 0);
+  // Propina: aparte (no es ingreso). Se descarta la que sea mayor que la venta (error).
+  const propinaValida = (l: LineaSetuxUI) => l.propina != null && l.propina > 0 && l.propina <= l.total;
+  const propinaTotal = incluidas.reduce((s, l) => s + (propinaValida(l) ? l.propina! : 0), 0);
+  const propinasConError = incluidas.filter((l) => l.propina != null && l.propina > l.total).length;
 
   async function registrar(reemplazar: boolean) {
     if (!fecha) { setError("Falta la fecha del reporte."); return; }
@@ -2208,7 +2221,7 @@ function ImportarSetux() {
           categoria_id: categoriaId || null,
           categoria_nombre: cat?.nombre ?? null,
           reemplazar,
-          lineas: incluidas.map((l) => ({ metodo: l.metodoBonito, total: l.total, cantidad: l.cantidad })),
+          lineas: incluidas.map((l) => ({ metodo: l.metodoBonito, total: l.total, cantidad: l.cantidad, propina: l.propina })),
         }),
       });
       const d = await r.json();
@@ -2216,7 +2229,9 @@ function ImportarSetux() {
       if (!r.ok) throw new Error(d.error || "No se pudo registrar.");
       const partes = [`${d.creados} ingreso${d.creados === 1 ? "" : "s"}`];
       if (d.porCobrar > 0) partes.push(`${d.porCobrar} cuenta${d.porCobrar === 1 ? "" : "s"} por cobrar`);
-      setMsg(`Listo (${fmtFecha(fecha)}): ${partes.join(" y ")}.`);
+      let extra = "";
+      if (d.propina > 0) extra = ` Propina registrada aparte: ${fmtMonto(d.propina, "EUR")}.`;
+      setMsg(`Listo (${fmtFecha(fecha)}): ${partes.join(" y ")}.${extra}`);
       limpiar();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error");
@@ -2287,6 +2302,12 @@ function ImportarSetux() {
                 <div className="grid grid-cols-[1fr_auto] gap-3 text-[#7A5A18]">
                   <span>A cuentas por cobrar (CXC)</span>
                   <span className="text-right tabular-nums">{fmtMonto(cobrarEUR, "EUR")}</span>
+                </div>
+              )}
+              {propinaTotal > 0 && (
+                <div className="grid grid-cols-[1fr_auto] gap-3 text-cacao-mute">
+                  <span>Propinas (aparte, no es ingreso){propinasConError > 0 ? ` · ${propinasConError} descartada${propinasConError === 1 ? "" : "s"} por error` : ""}</span>
+                  <span className="text-right tabular-nums">{fmtMonto(propinaTotal, "EUR")}</span>
                 </div>
               )}
             </div>

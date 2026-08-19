@@ -4,7 +4,7 @@
 // dependencias externas. Solo servidor (usa node:zlib).
 import zlib from "node:zlib";
 
-export type LineaSetux = { metodo: string; cantidad: number | null; total: number };
+export type LineaSetux = { metodo: string; cantidad: number | null; total: number; propina: number | null };
 export type ReporteSetux = {
   fecha: string | null;
   desde: string | null;
@@ -123,6 +123,7 @@ export function parseReporteSetux(buf: Buffer): ReporteSetux {
   };
   const xCantidad = colX("CANTIDAD") ?? colX("TRANSACC");
   const xTotal = colX("TOTAL VENTA") ?? colX("TOTAL PAGADO"); // "TOTAL VENTA" cubre "TOTAL VENTAS"
+  const xPropina = colX("PROPINA");
   const cercano = (items: Tok[], xRef: number | null) => {
     if (xRef == null) return undefined;
     let best: Tok | undefined, bd = Infinity;
@@ -142,7 +143,12 @@ export function parseReporteSetux(buf: Buffer): ReporteSetux {
     // Fila final: "TOTAL" o "TOTAL GENERAL:" → cierra la tabla.
     if (/^TOTAL($|\s|:|\sGENERAL)/i.test(nombre)) { total = totVal; break; }
     if (totVal == null || totVal === 0) continue; // ignora métodos sin ventas
-    lineas.push({ metodo: nombre, cantidad: num(cercano(f.items, xCantidad)?.text), total: totVal });
+    lineas.push({
+      metodo: nombre,
+      cantidad: num(cercano(f.items, xCantidad)?.text),
+      total: totVal,
+      propina: xPropina != null ? num(cercano(f.items, xPropina)?.text) : null,
+    });
   }
   return { fecha: desde, desde, hasta, usuario, lineas, total };
 }

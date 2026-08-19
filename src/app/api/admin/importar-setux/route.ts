@@ -87,16 +87,20 @@ export async function PUT(req: NextRequest) {
     await sb.from("admin_ingreso").delete().eq("fuente", "setux").eq("fecha", fecha);
     // no borra cuentas por cobrar ya cobradas (tienen ingreso enlazado)
     await sb.from("admin_cuenta_cobrar").delete().eq("fuente", "setux").eq("fecha", fecha).eq("cobrada", false);
+    await sb.from("admin_propina").delete().eq("fuente", "setux").eq("fecha", fecha);
   }
 
   // Separar según destino (RPP se ignora; CXC va a cuentas por cobrar).
   const ingresos: Record<string, unknown>[] = [];
   const cobrar: Record<string, unknown>[] = [];
+  let propinaTotal = 0; // suma de propinas válidas (se descarta la que sea > venta = error)
   for (const l of lineas) {
     const total = typeof l.total === "number" ? l.total : Number(l.total);
     if (!isFinite(total)) continue;
     const metodo = typeof l.metodo === "string" ? l.metodo : "";
     if (destinoDe(metodo) === "excluir") continue;
+    const propina = typeof l.propina === "number" ? l.propina : Number(l.propina);
+    if (isFinite(propina) && propina > 0 && propina <= total) propinaTotal += propina;
     const cantidad = typeof l.cantidad === "number" ? l.cantidad : null;
     if (destinoDe(metodo) === "cobrar") {
       cobrar.push({
@@ -138,5 +142,14 @@ export async function PUT(req: NextRequest) {
     const { error } = await sb.from("admin_cuenta_cobrar").insert(cobrar);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   }
-  return NextResponse.json({ ok: true, creados: ingresos.length, porCobrar: cobrar.length });
+  if (propinaTotal > 0) {
+    await sb.from("admin_propina").insert({
+      fecha,
+      monto: Math.round(propinaTotal * 100) / 100,
+      moneda: "EUR",
+      fuente: "setux",
+      nota: "Propina del reporte (no es ingreso)",
+    });
+  }
+  return NextResponse.json({ ok: true, creados: ingresos.length, porCobrar: cobrar.length, propina: Math.round(propinaTotal * 100) / 100 });
 }
