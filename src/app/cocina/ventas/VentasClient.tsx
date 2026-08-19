@@ -616,7 +616,7 @@ export function VentasClient() {
               />
             </label>
             <label className="text-sm text-cacao">
-              Precio unitario USD (opcional)
+              Precio unitario € (opcional)
               <input
                 type="number"
                 step="0.01"
@@ -841,10 +841,10 @@ export function VentasClient() {
                     <div className="col-span-2 text-cacao-soft text-xs">
                       {mv.total != null ? (
                         <>
-                          ${mv.total.toFixed(2)}
+                          {mv.total.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
                           {mv.precioUnitario != null && (
                             <span className="block text-[10px] text-cacao-mute">
-                              ${mv.precioUnitario.toFixed(2)} c/u
+                              {mv.precioUnitario.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} € c/u
                             </span>
                           )}
                         </>
@@ -1240,8 +1240,9 @@ export function VentasClient() {
                         {grupo.items.length}{" "}
                         {grupo.items.length === 1 ? "venta" : "ventas"}
                       </span>
-                      <span className="ml-auto text-sm text-cacao font-medium">
-                        ${grupo.totalUsd.toFixed(2)}
+                      <span className="ml-auto text-sm text-cacao font-medium text-right">
+                        {grupo.totalUsd.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                        <span className="block text-[10px] text-cacao-mute font-normal">≈ ${(grupo.totalUsd * tasaEurUsd).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                       </span>
                     </button>
                     {abierto && (
@@ -1281,7 +1282,7 @@ export function VentasClient() {
                             <div className="text-right shrink-0">
                               <div className="text-cacao font-medium">
                                 {v.cantidad}× ·{" "}
-                                {v.totalUsd ? `$${v.totalUsd.toFixed(2)}` : ""}
+                                {v.totalUsd ? `${v.totalUsd.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €` : ""}
                               </div>
                               <button
                                 onClick={() => setPendienteBorrar(v.id)}
