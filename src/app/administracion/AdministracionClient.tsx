@@ -1557,14 +1557,18 @@ function IngresosMes() {
   }
   const monedasPresentes = ORDEN_MONEDA.filter((k) => (totalesPorMoneda[k] ?? 0) > 0.005)
     .concat(Object.keys(totalesPorMoneda).filter((k) => !ORDEN_MONEDA.includes(k) && (totalesPorMoneda[k] ?? 0) > 0.005));
-  // Desglose por categoría, guardando el monto por moneda dentro de cada una.
-  const porCat: Record<string, Record<string, number>> = {};
+  // Desglose por MÉTODO DE PAGO, guardando el monto por moneda dentro de cada uno.
+  // Así se ve por qué canal entró (Zelle/Dólar = dólares, Pago Móvil/Pto de Venta = Bs tasa euro).
+  const porMetodo: Record<string, Record<string, number>> = {};
   for (const e of ingresos) {
-    const cat = e.categoria_nombre || "Sin categoría";
+    const metodo = e.metodo || "Sin método";
     const k = e.moneda || "EUR";
-    (porCat[cat] ??= {})[k] = (porCat[cat][k] ?? 0) + (e.monto ?? 0);
+    (porMetodo[metodo] ??= {})[k] = (porMetodo[metodo][k] ?? 0) + (e.monto ?? 0);
   }
-  const desglose = Object.entries(porCat);
+  // Ordena de mayor a menor por el total del método (sumando sus monedas).
+  const desglose = Object.entries(porMetodo).sort(
+    (a, b) => Object.values(b[1]).reduce((s, v) => s + v, 0) - Object.values(a[1]).reduce((s, v) => s + v, 0),
+  );
 
   async function borrar(id: string) {
     try {
@@ -1617,7 +1621,7 @@ function IngresosMes() {
           {monedasPresentes.length > 1 && <div className="text-[10px] text-[#9A938B] mt-1.5">Cada moneda por separado (Setux en €, alquileres en $).</div>}
         </div>
         <div className="sm:col-span-2 rounded-2xl bg-white ring-1 ring-marfil p-4">
-          <div className="font-display text-[9px] tracking-[0.25em] uppercase text-cacao-mute mb-2">Por categoría</div>
+          <div className="font-display text-[9px] tracking-[0.25em] uppercase text-cacao-mute mb-2">Por método de pago</div>
           {desglose.length === 0 ? (
             <p className="text-sm text-cacao-soft italic font-serif">Sin ingresos este mes.</p>
           ) : (
