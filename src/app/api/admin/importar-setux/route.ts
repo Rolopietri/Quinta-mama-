@@ -3,6 +3,7 @@ import { tokenValido, ADMIN_COOKIE } from "@/lib/admin-auth";
 import { createServiceClient } from "@/lib/supabase/admin-service";
 import { parseReporteSetux, nombreMetodo } from "@/lib/admin/setux";
 import { getTasaEurUsd } from "@/lib/admin/tasa";
+import { getIvaConfig, separaIva } from "@/lib/admin/iva";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -66,6 +67,7 @@ export async function PUT(req: NextRequest) {
   if (!fecha) return NextResponse.json({ error: "falta la fecha" }, { status: 400 });
   // Todo Setux entra en euros; se convierte a USD con la tasa fija del panel.
   const tasa = await getTasaEurUsd(sb);
+  const ivaCfg = await getIvaConfig(sb); // separa el IVA de las ventas facturadas
   const categoriaId = typeof b.categoria_id === "string" && b.categoria_id ? b.categoria_id : null;
   const categoriaNombre = typeof b.categoria_nombre === "string" ? b.categoria_nombre : null;
   const lineas = Array.isArray(b.lineas) ? (b.lineas as Record<string, unknown>[]) : [];
@@ -114,16 +116,19 @@ export async function PUT(req: NextRequest) {
         fuente: "setux",
       });
     } else {
+      // Separa el IVA: el ingreso es el NETO; el IVA va aparte.
+      const { net, iva } = separaIva(total, metodo, ivaCfg);
       ingresos.push({
         fecha,
         concepto: `Ventas ${metodo}`.trim(),
         categoria_id: categoriaId,
         categoria_nombre: categoriaNombre,
         pagador: null,
-        monto: total,
+        monto: net,
+        iva,
         moneda: "EUR",
         tasa,
-        monto_usd: usdDe(total),
+        monto_usd: usdDe(net),
         metodo,
         factura: null,
         nota: cantidad != null ? `${cantidad} transacciones (Setux)` : "Setux",

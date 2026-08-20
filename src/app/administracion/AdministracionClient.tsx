@@ -1512,6 +1512,7 @@ type Ingreso = {
   moneda: string | null;
   tasa: number | null;
   monto_usd: number | null;
+  iva: number | null;
   metodo: string | null;
   factura: string | null;
   nota: string | null;
@@ -1547,6 +1548,10 @@ function IngresosMes() {
   const [tasaInput, setTasaInput] = useState("1,17");
   const [guardandoTasa, setGuardandoTasa] = useState(false);
   const [recalculando, setRecalculando] = useState(false);
+  const [ivaInput, setIvaInput] = useState("16");
+  const [sinIvaInput, setSinIvaInput] = useState("Zelle, Dólar");
+  const [guardandoIva, setGuardandoIva] = useState(false);
+  const [recalculandoIva, setRecalculandoIva] = useState(false);
   const [tick, setTick] = useState(0);
   const recargar = useCallback(() => setTick((t) => t + 1), []);
 
@@ -1597,6 +1602,8 @@ function IngresosMes() {
         const d = await r.json();
         const v = d.config?.tasa_eur_usd;
         if (a && v != null && v !== "") setTasaInput(String(v).replace(".", ","));
+        if (a && d.config?.iva_pct != null && d.config.iva_pct !== "") setIvaInput(String(d.config.iva_pct).replace(".", ","));
+        if (a && d.config?.metodos_sin_iva) setSinIvaInput(String(d.config.metodos_sin_iva));
       } catch {
         /* usa el valor por defecto */
       }
@@ -1639,6 +1646,40 @@ function IngresosMes() {
     }
   }
 
+  async function guardarIva() {
+    setGuardandoIva(true);
+    setError(null);
+    try {
+      const val = parseTasa(ivaInput);
+      if (val == null || val < 0) { setError("Pon un % de IVA válido (ej. 16)."); return; }
+      await Promise.all([
+        fetch("/api/admin/config", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clave: "iva_pct", valor: String(val) }) }),
+        fetch("/api/admin/config", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clave: "metodos_sin_iva", valor: sinIvaInput }) }),
+      ]);
+      setMsg(`IVA guardado: ${val}%. Exentos: ${sinIvaInput}. Usa "Recalcular IVA" para aplicarlo a lo cargado.`);
+    } catch {
+      setError("No se pudo guardar el IVA.");
+    } finally {
+      setGuardandoIva(false);
+    }
+  }
+
+  async function recalcularIVA() {
+    setRecalculandoIva(true);
+    setError(null);
+    try {
+      const r = await fetch("/api/admin/recalcular-iva", { method: "POST" });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "No se pudo recalcular el IVA.");
+      setMsg(`IVA separado (${d.ivaPct}%) en ${d.ajustados} ingresos de Setux.`);
+      recargar();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo recalcular el IVA.");
+    } finally {
+      setRecalculandoIva(false);
+    }
+  }
+
   // Los ingresos vienen en distintas monedas reales: Setux en euros, los
   // alquileres de inquilinos en dólares, etc. No se fuerzan a una sola: se
   // totaliza POR MONEDA para no distorsionar con tasas inventadas.
@@ -1674,6 +1715,7 @@ function IngresosMes() {
   }
 
   const propinasMes = propinas.reduce((s, p) => s + (Number(p.monto) || 0), 0);
+  const ivaMes = ingresos.reduce((s, e) => s + (Number(e.iva) || 0), 0);
   async function borrarPropina(id: string) {
     try {
       await fetch(`/api/admin/propinas?id=${id}`, { method: "DELETE" });
@@ -1724,6 +1766,23 @@ function IngresosMes() {
         <p className="text-[11px] text-cacao-mute flex-1 min-w-[12rem]">Tasa fija para pasar euros a dólares. Cámbiala cuando haga falta y dale “Recalcular” para aplicarla a todo lo ya cargado.</p>
       </div>
 
+      <div className="rounded-2xl bg-white ring-1 ring-marfil p-4 flex flex-wrap items-end gap-3">
+        <div>
+          <label className="block font-display text-[10px] tracking-[0.2em] uppercase text-cacao-mute mb-1">IVA</label>
+          <div className="flex items-center gap-1">
+            <input inputMode="decimal" value={ivaInput} onChange={(e) => setIvaInput(e.target.value)} className="w-16 border border-marfil rounded-lg px-2 py-2 text-sm text-cacao text-center" />
+            <span className="text-cacao-soft">%</span>
+          </div>
+        </div>
+        <div className="flex-1 min-w-[12rem]">
+          <label className="block font-display text-[10px] tracking-[0.2em] uppercase text-cacao-mute mb-1">Métodos sin IVA (no facturados)</label>
+          <input value={sinIvaInput} onChange={(e) => setSinIvaInput(e.target.value)} placeholder="Zelle, Dólar" className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
+        </div>
+        <button type="button" onClick={guardarIva} disabled={guardandoIva} className="rounded-lg bg-cacao text-white px-4 py-2 text-xs uppercase tracking-widest hover:bg-terracotta disabled:bg-marfil disabled:text-cacao-mute">{guardandoIva ? "Guardando…" : "Guardar IVA"}</button>
+        <button type="button" onClick={recalcularIVA} disabled={recalculandoIva} className="rounded-lg ring-1 ring-marfil text-cacao px-4 py-2 text-xs uppercase tracking-widest hover:bg-marfil-soft disabled:text-cacao-mute">{recalculandoIva ? "Recalculando…" : "Recalcular IVA cargados"}</button>
+        <p className="text-[11px] text-cacao-mute w-full">Las ventas facturadas traen el IVA incluido; se guarda el neto y el IVA aparte. Los métodos de la lista (separados por coma) no llevan IVA. “Recalcular IVA” separa el IVA de lo ya cargado (una vez).</p>
+      </div>
+
       <div className="grid gap-3 sm:grid-cols-3">
         <div className="rounded-2xl bg-[#0F0F0F] text-[#EDE7E0] ring-1 ring-[#0F0F0F] p-4">
           <div className="font-display text-[9px] tracking-[0.25em] uppercase text-[#9A938B]">Total del mes</div>
@@ -1737,6 +1796,12 @@ function IngresosMes() {
             </div>
           )}
           {monedasPresentes.length > 1 && <div className="text-[10px] text-[#9A938B] mt-1.5">Cada moneda por separado (Setux en €, alquileres en $).</div>}
+          {ivaMes > 0 && (
+            <div className="mt-2 pt-2 border-t border-[#333]">
+              <div className="text-[9px] tracking-[0.2em] uppercase text-[#9A938B]">IVA (no es ingreso)</div>
+              <div className="text-sm font-medium leading-tight mt-0.5">{fmtMonto(ivaMes, "EUR")}</div>
+            </div>
+          )}
           {propinasMes > 0 && (
             <div className="mt-2 pt-2 border-t border-[#333]">
               <div className="text-[9px] tracking-[0.2em] uppercase text-[#9A938B]">Propinas (no es ingreso)</div>
@@ -2331,11 +2396,12 @@ function ImportarSetux() {
             </ul>
             <div className="px-4 py-2.5 border-t border-marfil space-y-1 text-sm">
               <div className="grid grid-cols-[1fr_auto] gap-3">
-                <span className="font-medium text-cacao">Ingresos a registrar</span>
+                <span className="font-medium text-cacao">Ventas del día (con IVA)</span>
                 <span className="text-right font-medium text-cacao tabular-nums">
                   {fmtMonto(ingresoEUR, "EUR")}
                 </span>
               </div>
+              <div className="text-[11px] text-cacao-mute">Al guardar se registra el NETO (sin IVA) y el IVA queda aparte. Zelle y Dólar no llevan IVA.</div>
               {cobrarEUR > 0 && (
                 <div className="grid grid-cols-[1fr_auto] gap-3 text-[#7A5A18]">
                   <span>A cuentas por cobrar (CXC)</span>
