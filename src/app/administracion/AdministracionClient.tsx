@@ -2948,10 +2948,71 @@ function pctCambio(cur: number, prev: number): number | null {
   return ((cur - prev) / Math.abs(prev)) * 100;
 }
 
+// Paleta cálida (tonos tierra del tema) para los gráficos de torta/categóricos.
+const PALETA_TORTA = ["#8A5A44", "#C0563F", "#D89A6A", "#7A8B6F", "#B7A17E", "#6E4B3A", "#9AA88C", "#E0A79B", "#C9A24B", "#8C7B9B", "#4E6B52", "#D4B483"];
+
+type RebanadaTorta = { label: string; value: number };
+
+// Dona en SVG puro (sin dependencias): cada rebanada es un arco del anillo.
+function Dona({ datos }: { datos: (RebanadaTorta & { color: string })[] }) {
+  const total = datos.reduce((s, d) => s + d.value, 0);
+  const r = 58, cx = 70, cy = 70, C = 2 * Math.PI * r, sw = 24;
+  let acc = 0;
+  return (
+    <svg viewBox="0 0 140 140" className="w-36 h-36 shrink-0" role="img" aria-label="Gráfico de torta">
+      <circle cx={cx} cy={cy} r={r} fill="none" stroke="#F0E9E2" strokeWidth={sw} />
+      {total > 0 && datos.map((d, i) => {
+        const dash = (d.value / total) * C;
+        const el = (
+          <circle key={i} cx={cx} cy={cy} r={r} fill="none" stroke={d.color} strokeWidth={sw}
+            strokeDasharray={`${dash} ${C - dash}`} strokeDashoffset={-acc}
+            transform={`rotate(-90 ${cx} ${cy})`}>
+            <title>{`${d.label}: ${fmtMonto(d.value, "USD")} (${total > 0 ? Math.round((d.value / total) * 100) : 0}%)`}</title>
+          </circle>
+        );
+        acc += dash;
+        return el;
+      })}
+    </svg>
+  );
+}
+
+// Tarjeta con dona + leyenda. Agrupa por clave y ordena de mayor a menor.
+function TortaIngresos({ titulo, datos }: { titulo: string; datos: RebanadaTorta[] }) {
+  const positivos = datos.filter((d) => d.value > 0.005).sort((a, b) => b.value - a.value);
+  const total = positivos.reduce((s, d) => s + d.value, 0);
+  const conColor = positivos.map((d, i) => ({ ...d, color: PALETA_TORTA[i % PALETA_TORTA.length] }));
+  return (
+    <div className="rounded-2xl bg-white ring-1 ring-marfil p-4">
+      <div className="font-display text-[9px] tracking-[0.25em] uppercase text-cacao-mute mb-3">{titulo}</div>
+      {total <= 0 ? (
+        <p className="text-cacao-soft italic font-serif text-sm py-6 text-center">Sin ingresos en este período.</p>
+      ) : (
+        <div className="flex items-center gap-4 flex-wrap sm:flex-nowrap">
+          <Dona datos={conColor} />
+          <ul className="flex-1 min-w-[10rem] space-y-1.5">
+            {conColor.map((d) => (
+              <li key={d.label} className="flex items-center gap-2 text-sm">
+                <span className="h-2.5 w-2.5 rounded-sm shrink-0" style={{ backgroundColor: d.color }} />
+                <span className="text-cacao min-w-0 truncate flex-1">{d.label}</span>
+                <span className="text-cacao-mute tabular-nums text-[11px]">{Math.round((d.value / total) * 100)}%</span>
+                <span className="text-cacao tabular-nums whitespace-nowrap">{fmtMonto(d.value, "USD")}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SeccionHistorico() {
   const [meses, setMeses] = useState<MesHist[]>([]);
   const [monedas, setMonedas] = useState<string[]>([]);
   const [moneda, setMoneda] = useState<string>("");
+  const [porMetodo, setPorMetodo] = useState<{ mes: string; clave: string; usd: number }[]>([]);
+  const [porCategoria, setPorCategoria] = useState<{ mes: string; clave: string; usd: number }[]>([]);
+  const [periodoTorta, setPeriodoTorta] = useState<string>("todo");
   const [obs, setObs] = useState<Record<string, string>>({});
   const [obsMes, setObsMes] = useState<string>("");
   const [obsTexto, setObsTexto] = useState("");
@@ -2975,6 +3036,8 @@ function SeccionHistorico() {
         setMeses(ms);
         setMonedas(mons);
         setMoneda(mons[0] ?? "EUR");
+        setPorMetodo(dh.porMetodo ?? []);
+        setPorCategoria(dh.porCategoria ?? []);
         const observaciones: Record<string, string> = {};
         for (const [k, v] of Object.entries((dc.config ?? {}) as Record<string, string>)) {
           if (k.startsWith("obs_") && v) observaciones[k.slice(4)] = v;
@@ -3025,6 +3088,20 @@ function SeccionHistorico() {
   const peor = conMovim.length ? conMovim.reduce((a, b) => (b.bal < a.bal ? b : a)) : null;
   const ult = serie.length ? serie[serie.length - 1] : null;
   const pen = serie.length > 1 ? serie[serie.length - 2] : null;
+
+  // Tortas de ingresos (en USD): por método de pago y por categoría.
+  const agrupaTorta = (rows: { mes: string; clave: string; usd: number }[]): RebanadaTorta[] => {
+    const m = new Map<string, number>();
+    for (const r of rows) {
+      if (periodoTorta !== "todo" && r.mes !== periodoTorta) continue;
+      m.set(r.clave, (m.get(r.clave) ?? 0) + r.usd);
+    }
+    return [...m.entries()].map(([label, value]) => ({ label, value }));
+  };
+  const tortaMetodo = agrupaTorta(porMetodo);
+  const tortaCategoria = agrupaTorta(porCategoria);
+  const hayTortas = tortaMetodo.some((d) => d.value > 0.005) || tortaCategoria.some((d) => d.value > 0.005);
+  const mesesTorta = [...new Set([...porMetodo, ...porCategoria].map((r) => r.mes))].sort((a, b) => b.localeCompare(a));
 
   return (
     <div className="space-y-4">
@@ -3085,6 +3162,27 @@ function SeccionHistorico() {
               ))}
             </div>
           </div>
+
+          {/* Tortas de ingresos: por método de pago y por categoría (en USD) */}
+          {hayTortas && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <span className="font-display text-[11px] tracking-[0.25em] uppercase text-cacao-mute">Ingresos · repartición</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] uppercase tracking-widest text-cacao-mute">Período:</span>
+                  <select value={periodoTorta} onChange={(e) => setPeriodoTorta(e.target.value)} className="border border-marfil rounded-lg px-2 py-1.5 text-sm text-cacao bg-white">
+                    <option value="todo">Todo el histórico</option>
+                    {mesesTorta.map((m) => <option key={m} value={m}>{nombreMes(m)}</option>)}
+                  </select>
+                </div>
+              </div>
+              <p className="text-[11px] text-cacao-mute">Montos en $ (equivalente) para poder comparar entre monedas.</p>
+              <div className="grid gap-3 lg:grid-cols-2">
+                <TortaIngresos titulo="Por método de pago" datos={tortaMetodo} />
+                <TortaIngresos titulo="Por categoría" datos={tortaCategoria} />
+              </div>
+            </div>
+          )}
 
           {/* Tabla */}
           <section className="rounded-2xl bg-white ring-1 ring-marfil overflow-hidden">
