@@ -150,6 +150,28 @@ export async function totalesVentasPorMes(): Promise<Record<string, number>> {
   return out;
 }
 
+/**
+ * Ventas (no mermas) entre dos fechas inclusive (YYYY-MM-DD), para el dashboard
+ * de análisis. Reutiliza la misma tabla y el mismo filtro es_merma=false que el
+ * resto del módulo — no crea datos paralelos.
+ */
+export async function listVentasRango(
+  desde: string,
+  hasta: string,
+): Promise<Venta[]> {
+  const sb = createSupabaseBrowserClient();
+  const { data, error } = await sb
+    .from("ventas")
+    .select("*")
+    .eq("es_merma", false)
+    .gte("fecha", desde)
+    .lte("fecha", hasta)
+    .order("fecha", { ascending: true })
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+  return (data as Row[]).map(rowToVenta);
+}
+
 /** Solo mermas de producción (pérdidas internas de algo pre-producido). */
 export async function listMermas(limit = 200): Promise<Venta[]> {
   const sb = createSupabaseBrowserClient();
