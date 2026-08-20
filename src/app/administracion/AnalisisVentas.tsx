@@ -6,10 +6,11 @@
 // el cliente con useMemo. Modular: no toca la lógica de registro de ventas.
 
 import { useEffect, useMemo, useState } from "react";
-import type { Venta, Receta } from "@/lib/types";
-import { categoriaRecetaLabel } from "@/lib/types";
+import type { Venta, Receta, Insumo } from "@/lib/types";
+import { categoriaRecetaLabel, categoriaInsumoLabel } from "@/lib/types";
 import { listVentasRango } from "@/lib/data/ventas";
 import { listRecetas } from "@/lib/data/recetas";
+import { listInsumos } from "@/lib/data/cocina";
 import { hoyISO } from "@/lib/ui";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import {
@@ -65,15 +66,24 @@ function rangoDePreset(preset: Preset): { desde: string; hasta: string } {
 
 // Categoría de una venta (usa datos existentes, no inventa):
 //   • receta vinculada con categoría → esa categoría.
+//   • venta insumo_directo (reventa: aguas, refrescos, galletas…) → la categoría
+//     del insumo del catálogo. Namespaced con "i:" para no chocar con los slugs
+//     de categoría de receta (ej. receta "cafe" vs insumo "cafe").
 //   • consignación / servicio → su tipo.
 //   • si no → "Sin categoría".
 function categoriaDeVenta(
   v: Venta,
   catPorReceta: Map<string, string>,
+  catPorInsumo: Map<string, string>,
 ): { key: string; label: string } {
   if (v.recetaId) {
     const cat = catPorReceta.get(v.recetaId);
     if (cat && cat.trim()) return { key: cat, label: categoriaRecetaLabel(cat) };
+  }
+  if (v.insumoId) {
+    const cat = catPorInsumo.get(v.insumoId);
+    if (cat && cat.trim())
+      return { key: `i:${cat}`, label: categoriaInsumoLabel(cat) };
   }
   if (v.tipoItem === "consignacion")
     return { key: "__consignacion", label: "Consignación" };
@@ -96,14 +106,20 @@ export function AnalisisVentas() {
 
   const [ventas, setVentas] = useState<Venta[]>([]);
   const [recetas, setRecetas] = useState<Receta[]>([]);
+  const [insumos, setInsumos] = useState<Insumo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Recetas una sola vez (para el mapa de categorías).
+  // Recetas + insumos una sola vez (para los mapas de categoría: las ventas de
+  // receta usan la categoría de la receta; las de reventa (insumo_directo) usan
+  // la del insumo).
   useEffect(() => {
     let cancel = false;
     listRecetas()
       .then((r) => !cancel && setRecetas(r))
+      .catch(() => {});
+    listInsumos()
+      .then((i) => !cancel && setInsumos(i))
       .catch(() => {});
     return () => {
       cancel = true;
@@ -140,11 +156,19 @@ export function AnalisisVentas() {
     return m;
   }, [recetas]);
 
+  const catPorInsumo = useMemo(() => {
+    const m = new Map<string, string>();
+    insumos.forEach((i) => {
+      if (i.categoria) m.set(i.id, i.categoria);
+    });
+    return m;
+  }, [insumos]);
+
   // Enriquecer cada venta con producto/categoría/unidades/monto.
   const enriquecidas = useMemo(
     () =>
       ventas.map((v) => {
-        const cat = categoriaDeVenta(v, catPorReceta);
+        const cat = categoriaDeVenta(v, catPorReceta, catPorInsumo);
         return {
           fecha: v.fecha,
           producto: v.recetaNombre.trim() || "—",
@@ -154,7 +178,7 @@ export function AnalisisVentas() {
           monto: v.totalUsd ?? 0,
         };
       }),
-    [ventas, catPorReceta],
+    [ventas, catPorReceta, catPorInsumo],
   );
 
   // Opciones de los filtros (según lo que existe en el rango cargado).
