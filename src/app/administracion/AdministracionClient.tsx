@@ -1796,23 +1796,30 @@ function IngresosMes() {
             </div>
           )}
           {monedasPresentes.length > 1 && <div className="text-[10px] text-[#9A938B] mt-1.5">Cada moneda por separado (Setux en €, alquileres en $).</div>}
-          {ivaMes > 0 && (
-            <div className="mt-2 pt-2 border-t border-[#333]">
-              <div className="text-[9px] tracking-[0.2em] uppercase text-[#9A938B]">IVA (no es ingreso)</div>
-              <div className="text-sm font-medium leading-tight mt-0.5">{fmtMonto(ivaMes, "EUR")}</div>
-            </div>
-          )}
-          {propinasMes > 0 && (
-            <div className="mt-2 pt-2 border-t border-[#333]">
-              <div className="text-[9px] tracking-[0.2em] uppercase text-[#9A938B]">Propinas (no es ingreso)</div>
-              <div className="text-sm font-medium leading-tight mt-0.5">{fmtMonto(propinasMes, "EUR")}</div>
-            </div>
-          )}
+          {/* Ingreso: total y comparación con Cocina, juntos arriba */}
           <div className="mt-2 pt-2 border-t border-[#333]">
             <div className="text-[9px] tracking-[0.2em] uppercase text-[#9A938B]">Ventas en Cocina (POS)</div>
             <div className="text-sm font-medium leading-tight mt-0.5">{fmtMonto(ventasMes[mes] ?? 0, "EUR")}</div>
             <div className="text-[10px] text-[#9A938B] mt-0.5">Para comparar (misma moneda). La diferencia con los ingresos suele ser CXC y cortesías.</div>
           </div>
+          {/* No es ingreso: al fondo */}
+          {(ivaMes > 0 || propinasMes > 0) && (
+            <div className="mt-3 pt-2 border-t border-[#444]">
+              <div className="text-[9px] tracking-[0.2em] uppercase text-[#7C766E]">No es ingreso</div>
+              {ivaMes > 0 && (
+                <div className="flex justify-between text-[13px] mt-1">
+                  <span className="text-[#9A938B]">IVA</span>
+                  <span className="text-[#EDE7E0]">{fmtMonto(ivaMes, "EUR")}</span>
+                </div>
+              )}
+              {propinasMes > 0 && (
+                <div className="flex justify-between text-[13px] mt-0.5">
+                  <span className="text-[#9A938B]">Propinas</span>
+                  <span className="text-[#EDE7E0]">{fmtMonto(propinasMes, "EUR")}</span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
         <div className="sm:col-span-2 rounded-2xl bg-white ring-1 ring-marfil p-4">
           <div className="font-display text-[9px] tracking-[0.25em] uppercase text-cacao-mute mb-2">Por método de pago</div>
