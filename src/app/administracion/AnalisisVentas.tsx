@@ -64,32 +64,66 @@ function rangoDePreset(preset: Preset): { desde: string; hasta: string } {
   return { desde: isoLocal(primero), hasta: isoLocal(hoy) };
 }
 
+// Normaliza un nombre de categoría para AGRUPAR: sin acentos, en minúsculas y
+// sin espacios repetidos. Así "Otros" de receta y "Otros" de insumo (o cualquier
+// par que se escriba igual) caen en la MISMA categoría en vez de duplicarse.
+function normCat(s: string): string {
+  return s
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+// Unifica nombres equivalentes de las DOS taxonomías (categorías de receta +
+// categorías de insumo de reventa) en una sola etiqueta canónica, para que el
+// análisis no muestre categorías repetidas. Solo toca la VISTA del dashboard;
+// no cambia los datos de recetas ni insumos. Clave = nombre normalizado.
+const CANON_CATEGORIA: Record<string, string> = {
+  otros: "Otros",
+  // "Leche de Almendras" vendida como extra: el insumo está en "Lácteos", pero
+  // no es una categoría de venta propia → va a Otros.
+  lacteos: "Otros",
+  snack: "Snacks",
+  snacks: "Snacks",
+  bebidas: "Bebidas",
+  "bebida fria": "Bebidas",
+  "bebida alcoholica": "Bebidas Alcohólicas",
+  "bebidas alcoholicas": "Bebidas Alcohólicas",
+  "cafe & bebida caliente": "Café",
+  "cafe & te": "Café",
+  cafe: "Café",
+  smoothie: "Smoothie",
+  sandwich: "Sandwich",
+};
+
 // Categoría de una venta (usa datos existentes, no inventa):
 //   • receta vinculada con categoría → esa categoría.
 //   • venta insumo_directo (reventa: aguas, refrescos, galletas…) → la categoría
-//     del insumo del catálogo. Namespaced con "i:" para no chocar con los slugs
-//     de categoría de receta (ej. receta "cafe" vs insumo "cafe").
+//     del insumo del catálogo.
 //   • consignación / servicio → su tipo.
 //   • si no → "Sin categoría".
+// Se agrupa por el nombre CANÓNICO (una sola lista limpia, sin repetidos).
 function categoriaDeVenta(
   v: Venta,
   catPorReceta: Map<string, string>,
   catPorInsumo: Map<string, string>,
 ): { key: string; label: string } {
+  let label: string | null = null;
   if (v.recetaId) {
     const cat = catPorReceta.get(v.recetaId);
-    if (cat && cat.trim()) return { key: cat, label: categoriaRecetaLabel(cat) };
+    if (cat && cat.trim()) label = categoriaRecetaLabel(cat);
   }
-  if (v.insumoId) {
+  if (!label && v.insumoId) {
     const cat = catPorInsumo.get(v.insumoId);
-    if (cat && cat.trim())
-      return { key: `i:${cat}`, label: categoriaInsumoLabel(cat) };
+    if (cat && cat.trim()) label = categoriaInsumoLabel(cat);
   }
-  if (v.tipoItem === "consignacion")
-    return { key: "__consignacion", label: "Consignación" };
-  if (v.tipoItem === "servicio")
-    return { key: "__servicio", label: "Servicio" };
-  return { key: "__sin", label: "Sin categoría" };
+  if (!label && v.tipoItem === "consignacion") label = "Consignación";
+  if (!label && v.tipoItem === "servicio") label = "Servicio";
+  if (!label) label = "Sin categoría";
+  const canon = CANON_CATEGORIA[normCat(label)] ?? label;
+  return { key: normCat(canon), label: canon };
 }
 
 type OrdenTabla = "monto" | "unidades" | "pct";
