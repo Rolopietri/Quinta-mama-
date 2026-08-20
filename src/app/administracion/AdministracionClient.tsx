@@ -2532,6 +2532,7 @@ function SeccionCuentasCobrar() {
   const [correosInput, setCorreosInput] = useState("");
   const [guardandoCorreos, setGuardandoCorreos] = useState(false);
   const [probando, setProbando] = useState(false);
+  const [mostrarImport, setMostrarImport] = useState(false);
   const [tick, setTick] = useState(0);
   const recargar = useCallback(() => setTick((t) => t + 1), []);
 
@@ -2683,6 +2684,15 @@ function SeccionCuentasCobrar() {
       {error && <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419]">{error}</div>}
       {msg && <div className="rounded-lg bg-[#F1F4ED] ring-1 ring-[#C9D6BC] p-3 text-sm text-[#2F4A1F]">{msg}</div>}
 
+      <div className="flex justify-end">
+        <button type="button" onClick={() => setMostrarImport((v) => !v)} className="rounded-lg ring-1 ring-marfil text-cacao px-4 py-2 text-xs uppercase tracking-widest hover:bg-marfil-soft">
+          {mostrarImport ? "Cerrar importador" : "Importar por cliente (PDF)"}
+        </button>
+      </div>
+      {mostrarImport && (
+        <ImportarCxC onListo={() => { setMostrarImport(false); setMsg("Cuentas por cobrar actualizadas por cliente."); recargar(); }} />
+      )}
+
       <div className="grid gap-3 sm:grid-cols-3">
         <ResumenCaja titulo="Por cobrar (abiertas)" valor={fmtMonto(totalUsd, "USD")} sub={totalEur > 0 ? `${fmtMonto(totalEur, "EUR")} en Setux` : undefined} fuerte />
         <div className="sm:col-span-2 rounded-2xl bg-white ring-1 ring-marfil p-4 flex items-center justify-between">
@@ -2780,6 +2790,138 @@ function SeccionCuentasCobrar() {
           </ul>
         )}
       </section>
+    </div>
+  );
+}
+
+// ── Importador de cuentas por cobrar por cliente (PDF Estado de Cuentas) ──
+type ClienteCxCUI = { codigo: string; nombre: string; saldo: number; incluir: boolean };
+
+function ImportarCxC({ onListo }: { onListo: () => void }) {
+  const [cargando, setCargando] = useState(false);
+  const [guardando, setGuardando] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [fecha, setFecha] = useState("");
+  const [clientes, setClientes] = useState<ClienteCxCUI[]>([]);
+  const [leido, setLeido] = useState(false);
+
+  function limpiar() {
+    setClientes([]);
+    setFecha("");
+    setLeido(false);
+  }
+
+  async function subir(file: File) {
+    setError(null);
+    setCargando(true);
+    try {
+      const b64 = await new Promise<string>((resolve, reject) => {
+        const fr = new FileReader();
+        fr.onload = () => resolve(String(fr.result));
+        fr.onerror = () => reject(new Error("no se pudo leer"));
+        fr.readAsDataURL(file);
+      });
+      const r = await fetch("/api/admin/importar-cxc", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pdf_base64: b64 }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "No se pudo leer el PDF.");
+      const rep = d.reporte as { fecha: string | null; clientes: { codigo: string; nombre: string; saldo: number }[] };
+      setFecha(rep.fecha ?? hoyISO());
+      // Solo se muestran/guardan los saldos != 0 (deudores y a favor).
+      setClientes(rep.clientes.filter((c) => c.saldo !== 0).map((c) => ({ ...c, incluir: true })));
+      setLeido(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error");
+      limpiar();
+    } finally {
+      setCargando(false);
+    }
+  }
+
+  const incluidos = clientes.filter((c) => c.incluir);
+  const totalDeben = incluidos.filter((c) => c.saldo > 0).reduce((s, c) => s + c.saldo, 0);
+  const totalFavor = incluidos.filter((c) => c.saldo < 0).reduce((s, c) => s + c.saldo, 0);
+
+  async function guardar() {
+    if (incluidos.length === 0) { setError("Marca al menos un cliente."); return; }
+    setGuardando(true);
+    setError(null);
+    try {
+      const r = await fetch("/api/admin/importar-cxc", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fecha: fecha || hoyISO(),
+          clientes: incluidos.map((c) => ({ nombre: c.nombre, saldo: c.saldo })),
+        }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "No se pudo guardar.");
+      onListo();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error");
+    } finally {
+      setGuardando(false);
+    }
+  }
+
+  return (
+    <div className="rounded-2xl bg-white ring-1 ring-marfil p-4 space-y-4">
+      {error && <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419]">{error}</div>}
+
+      {!leido ? (
+        <div className="text-center py-4">
+          <p className="font-display text-[11px] tracking-[0.3em] uppercase text-cacao-mute mb-1">Importar por cliente</p>
+          <p className="text-sm text-cacao-soft mb-4 font-serif italic">Sube el PDF “Estado de Cuentas Clientes”. Reemplaza las cuentas por cobrar abiertas con el saldo actual por cliente (en $).</p>
+          <label className="inline-block rounded-lg bg-cacao text-white px-5 py-2.5 text-xs uppercase tracking-widest hover:bg-terracotta cursor-pointer">
+            {cargando ? "Leyendo…" : "Elegir PDF"}
+            <input type="file" accept="application/pdf,.pdf" className="hidden" disabled={cargando} onChange={(e) => { const f = e.target.files?.[0]; if (f) subir(f); e.target.value = ""; }} />
+          </label>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <span className="font-display text-[10px] tracking-[0.25em] uppercase text-cacao-mute">Vista previa · {incluidos.length} cliente{incluidos.length === 1 ? "" : "s"}</span>
+            <button type="button" onClick={limpiar} className="text-xs uppercase tracking-widest text-cacao-soft hover:text-cacao">Cambiar PDF</button>
+          </div>
+          <Campo label="Fecha del reporte"><input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} className="w-full max-w-[12rem] border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" /></Campo>
+
+          <div className="rounded-xl ring-1 ring-marfil overflow-hidden max-h-80 overflow-y-auto">
+            <ul className="divide-y divide-marfil">
+              {clientes.map((c, i) => (
+                <li key={`${c.codigo}-${i}`} className={`px-3 py-2 grid grid-cols-[auto_1fr_auto] gap-3 items-center ${c.incluir ? "" : "opacity-40"}`}>
+                  <input type="checkbox" checked={c.incluir} onChange={() => setClientes((cs) => cs.map((x, j) => (j === i ? { ...x, incluir: !x.incluir } : x)))} className="accent-[#0F0F0F]" />
+                  <span className="text-cacao text-sm min-w-0 truncate">{c.nombre}
+                    {c.saldo < 0 && <span className="ml-2 inline-block rounded-full bg-[#F1F4ED] text-[#2F4A1F] text-[9px] uppercase tracking-widest px-2 py-0.5 align-middle">A favor</span>}
+                  </span>
+                  <span className={`text-sm text-right tabular-nums ${c.saldo < 0 ? "text-[#2F4A1F]" : "text-cacao"}`}>{fmtMonto(c.saldo, "USD")}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          <div className="text-sm space-y-1">
+            <div className="grid grid-cols-[1fr_auto] gap-3">
+              <span className="font-medium text-cacao">Por cobrar (deudores)</span>
+              <span className="text-right font-medium text-cacao tabular-nums">{fmtMonto(totalDeben, "USD")}</span>
+            </div>
+            {totalFavor < 0 && (
+              <div className="grid grid-cols-[1fr_auto] gap-3 text-[#2F4A1F]">
+                <span>A favor de clientes</span>
+                <span className="text-right tabular-nums">{fmtMonto(totalFavor, "USD")}</span>
+              </div>
+            )}
+            <p className="text-[11px] text-cacao-mute pt-1">Se toma la columna “Saldo Divisas” (lo que aún deben en $ tras abonos). Al guardar se reemplazan las cuentas por cobrar abiertas importadas; no toca las ya cobradas ni las manuales.</p>
+          </div>
+
+          <button type="button" onClick={guardar} disabled={guardando} className="rounded-lg bg-cacao text-white px-5 py-2.5 text-xs uppercase tracking-widest hover:bg-terracotta disabled:bg-marfil disabled:text-cacao-mute">
+            {guardando ? "Guardando…" : `Reemplazar con ${incluidos.length} cliente${incluidos.length === 1 ? "" : "s"}`}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
