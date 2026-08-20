@@ -29,6 +29,7 @@ import { normalizarBusqueda } from "@/lib/text";
 import { CalendarIcon, ChevronIcon, WarningIcon } from "@/components/icons";
 import { hoyISO } from "@/lib/ui";
 import { ErrorBanner } from "@/components/ErrorBanner";
+import { AnalisisVentas } from "./AnalisisVentas";
 
 /** Fecha larga en español para los encabezados de grupo (ej. "21 jul 2026"). */
 function fmtFecha(fecha: string): string {
@@ -49,7 +50,12 @@ function todayISO() {
   return hoyISO();
 }
 
-type Tab = "registrar" | "importar" | "clasificacion" | "historial";
+type Tab =
+  | "registrar"
+  | "importar"
+  | "clasificacion"
+  | "historial"
+  | "analisis";
 
 export function VentasClient() {
   const [tab, setTab] = useState<Tab>("registrar");
@@ -531,6 +537,7 @@ export function VentasClient() {
             { v: "importar", l: "Importar Xetux" },
             { v: "clasificacion", l: "Clasificación POS" },
             { v: "historial", l: "Historial" },
+            { v: "analisis", l: "Análisis de Ventas" },
           ] as { v: Tab; l: string }[]
         ).map((t) => (
           <button
@@ -546,6 +553,8 @@ export function VentasClient() {
           </button>
         ))}
       </div>
+
+      {tab === "analisis" && <AnalisisVentas />}
 
       {/* TAB: Registro manual */}
       {tab === "registrar" && (
