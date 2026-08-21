@@ -162,7 +162,10 @@ export async function POST(req: NextRequest) {
       })
       .select("id")
       .single();
-    if (eIng) return NextResponse.json({ error: eIng.message }, { status: 500 });
+    if (eIng) {
+      const falta = (eIng as { code?: string }).code === "42P01" || /does not exist|no existe/i.test(eIng.message);
+      return NextResponse.json({ error: falta ? "Falta preparar la base de datos. Corre el SQL de 'supabase/admin-cxc-v2.sql' en Supabase (crea la tabla de pagos)." : eIng.message }, { status: 500 });
+    }
 
     // 2) Registrar el pago, enlazado al ingreso (para no duplicar).
     const { data: pago, error: ePago } = await sb
@@ -184,7 +187,8 @@ export async function POST(req: NextRequest) {
     if (ePago) {
       // Si el pago falla, deshace el ingreso para no dejarlo huérfano.
       await sb.from("admin_ingreso").delete().eq("id", ingreso.id);
-      return NextResponse.json({ error: ePago.message }, { status: 500 });
+      const falta = (ePago as { code?: string }).code === "42P01" || /does not exist|no existe/i.test(ePago.message);
+      return NextResponse.json({ error: falta ? "Falta la tabla de pagos (admin_cxc_pago). Corre el SQL de 'supabase/admin-cxc-v2.sql' en Supabase y vuelve a intentar." : ePago.message }, { status: 500 });
     }
     return NextResponse.json({ ok: true, pago_id: pago.id, ingreso_id: ingreso.id, saldo_nuevo_usd: r2(saldoUsd - montoUsd) });
   }
