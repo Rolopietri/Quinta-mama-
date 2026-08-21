@@ -160,10 +160,9 @@ export async function POST(req: NextRequest) {
     // Cuánto entrega el cliente, en euros (el euro es la referencia).
     // El dólar (efectivo/Zelle) se toma 1:1 con el euro: $1 abona €1.
     let montoEur: number;
-    let tasaStore: number | null;
-    if (moneda === "USD") { montoEur = monto; tasaStore = null; }
-    else if (moneda === "Bs") { montoEur = monto / (tasaBs as number); tasaStore = tasaEurUsd > 0 ? Math.round(((tasaBs as number) / tasaEurUsd) * 10000) / 10000 : null; }
-    else { montoEur = monto; tasaStore = tasaEurUsd; }
+    if (moneda === "USD") montoEur = monto;
+    else if (moneda === "Bs") montoEur = monto / (tasaBs as number);
+    else montoEur = monto;
 
     // Aplica el pago a las cuentas elegidas (o a todas las abiertas si no se
     // eligió ninguna), más antiguas primero. El excedente queda a favor.
@@ -180,11 +179,18 @@ export async function POST(req: NextRequest) {
     }
     // poolEur restante (si el cliente pagó de más) queda a favor: reduce su saldo.
 
-    const montoRecibido = r2(monto);
+    const montoEurR = r2(montoEur);
     const totalUsd = r2(montoEur * tasaEurUsd); // el pago completo (lo aplicado + lo que queda a favor)
     const favorEur = r2(Math.max(0, poolEur));
     const refs = asignaciones.map((a) => a.ref).filter(Boolean).join(", ");
-    // 1) Un ingreso por el total recibido (fecha y método reales; sin IVA).
+    // El ingreso y el pago se registran EN EUROS (el valor de la deuda saldada),
+    // igual que el resto del panel: Pago Móvil / Punto de Venta van en euros. El
+    // canal real queda en 'metodo' y, si pagó en $/Bs, el detalle en la nota.
+    const notaPago = moneda === "USD" ? `Pagado en $ ${r2(monto)} (dólar 1:1 con €)`
+      : moneda === "Bs" ? `Pagado en Bs ${r2(monto)} (tasa ${tasaBs} Bs/€)`
+      : null;
+    const notaBase = favorEur > 0.005 ? `Cobro de cuenta por cobrar (queda ${favorEur} € a favor)` : "Cobro de cuenta por cobrar";
+    // 1) Un ingreso por el valor cobrado, en euros (fecha y método reales; sin IVA).
     const { data: ingreso, error: eIng } = await sb
       .from("admin_ingreso")
       .insert({
@@ -192,13 +198,13 @@ export async function POST(req: NextRequest) {
         concepto: `Cobro de cuenta por cobrar — ${cliente}${refs ? ` (${refs})` : ""}${favorEur > 0.005 ? " + a favor" : ""}`,
         categoria_nombre: "Ventas",
         pagador: cliente,
-        monto: montoRecibido,
-        moneda,
-        tasa: tasaStore,
+        monto: montoEurR,
+        moneda: "EUR",
+        tasa: tasaEurUsd,
         monto_usd: totalUsd,
         metodo,
         factura: referencia,
-        nota: favorEur > 0.005 ? `Cobro de cuenta por cobrar (queda ${favorEur} € a favor)` : "Cobro de cuenta por cobrar",
+        nota: notaPago ? `${notaBase}. ${notaPago}` : notaBase,
         fuente: "cxc-cobro",
       })
       .select("id")
@@ -214,15 +220,15 @@ export async function POST(req: NextRequest) {
       .insert({
         cliente,
         fecha,
-        monto: montoRecibido,
-        moneda,
-        tasa: tasaStore,
+        monto: montoEurR,
+        moneda: "EUR",
+        tasa: tasaEurUsd,
         monto_usd: totalUsd,
         metodo,
         referencia,
         ingreso_id: ingreso.id,
         asignaciones,
-        nota: null,
+        nota: notaPago,
       })
       .select("id")
       .single();
