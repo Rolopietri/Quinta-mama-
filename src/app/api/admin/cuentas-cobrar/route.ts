@@ -47,19 +47,28 @@ type PagoRow = {
 
 // Trae cuentas ABIERTAS (cobrada=false) y todos los pagos, agrupados por cliente.
 async function cargarClientes(sb: ReturnType<typeof createServiceClient>) {
-  const [{ data: cuentasD }, { data: pagosD }] = await Promise.all([
+  const [{ data: cuentasD }, { data: pagosD }, { data: aliasD }] = await Promise.all([
     sb!.from("admin_cuenta_cobrar").select("*").eq("cobrada", false).order("fecha", { ascending: true }),
     sb!.from("admin_cxc_pago").select("*").order("fecha", { ascending: true }),
+    sb!.from("admin_cliente_alias").select("alias_key, canonico"),
   ]);
   const cuentas = (cuentasD as CuentaRow[]) ?? [];
   const pagos = (pagosD as PagoRow[]) ?? [];
+  // Alias: nombre alterno → nombre canónico (para unir clientes repetidos).
+  const alias = new Map<string, string>();
+  for (const a of (aliasD as { alias_key: string; canonico: string }[]) ?? []) alias.set(a.alias_key, a.canonico);
+  const resolver = (nombre: string | null) => {
+    const canon = alias.get(clave(nombre));
+    return canon ?? (nombre ?? "").trim();
+  };
 
   const map = new Map<string, {
     cliente: string; key: string; cuentas: CuentaRow[]; pagos: PagoRow[];
   }>();
   const get = (nombre: string | null) => {
-    const k = clave(nombre);
-    if (!map.has(k)) map.set(k, { cliente: (nombre ?? "").trim() || "—", key: k, cuentas: [], pagos: [] });
+    const display = resolver(nombre) || "—";
+    const k = clave(display);
+    if (!map.has(k)) map.set(k, { cliente: display, key: k, cuentas: [], pagos: [] });
     return map.get(k)!;
   };
   for (const c of cuentas) get(c.deudor).cuentas.push(c);

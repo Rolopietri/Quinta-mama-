@@ -2568,6 +2568,8 @@ function SeccionCuentasCobrar() {
   const [probando, setProbando] = useState(false);
   const [mostrarImport, setMostrarImport] = useState(false);
   const [verSaldados, setVerSaldados] = useState(false);
+  const [aliases, setAliases] = useState<{ alias_key: string; canonico: string }[]>([]);
+  const [unirDesde, setUnirDesde] = useState<string | null>(null); // key del cliente a unir
   const [tick, setTick] = useState(0);
   const recargar = useCallback(() => setTick((t) => t + 1), []);
 
@@ -2575,9 +2577,13 @@ function SeccionCuentasCobrar() {
     let a = true;
     (async () => {
       try {
-        const r = await fetch("/api/admin/cuentas-cobrar", { cache: "no-store" });
+        const [r, ra] = await Promise.all([
+          fetch("/api/admin/cuentas-cobrar", { cache: "no-store" }),
+          fetch("/api/admin/cliente-alias", { cache: "no-store" }),
+        ]);
         const d = await r.json();
-        if (a) { setClientes(d.clientes ?? []); if (d.tasa) setTasa(d.tasa); }
+        const da = await ra.json().catch(() => ({}));
+        if (a) { setClientes(d.clientes ?? []); if (d.tasa) setTasa(d.tasa); setAliases(da.aliases ?? []); }
       } catch {
         if (a) setError("No se pudieron cargar las cuentas por cobrar.");
       } finally {
@@ -2645,6 +2651,24 @@ function SeccionCuentasCobrar() {
       recargar();
     } catch { setError("No se pudo eliminar la cuenta."); }
   }
+  async function unirCliente(alias: string, canonico: string) {
+    setError(null);
+    try {
+      const r = await fetch("/api/admin/cliente-alias", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ alias, canonico }) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "No se pudo unir.");
+      setUnirDesde(null);
+      setMsg(`"${alias}" se unió a "${canonico}".`);
+      recargar();
+    } catch (e) { setError(e instanceof Error ? e.message : "No se pudo unir."); }
+  }
+  async function deshacerAlias(aliasKey: string) {
+    try {
+      await fetch(`/api/admin/cliente-alias?alias_key=${encodeURIComponent(aliasKey)}`, { method: "DELETE" });
+      setMsg("Se deshizo la unión.");
+      recargar();
+    } catch { setError("No se pudo deshacer."); }
+  }
 
   const eurDe = (usd: number) => (tasa > 0 ? usd / tasa : 0);
   const deudores = clientes.filter((c) => c.saldo_usd > 0.005);
@@ -2709,6 +2733,21 @@ function SeccionCuentasCobrar() {
           <p className="text-[#7A5A18]">
             Si no cobras antes del cierre {diasCierre > 0 ? `(faltan ~${diasCierre} día${diasCierre === 1 ? "" : "s"})` : "(el mes cierra hoy)"}, podrías perder ≈ <strong>{fmtMonto(perdidaTotal, "USD")}</strong> por devaluación.
           </p>
+        </div>
+      )}
+
+      {/* Clientes unidos (alias) */}
+      {aliases.length > 0 && (
+        <div className="rounded-2xl bg-white ring-1 ring-marfil p-4 space-y-2">
+          <span className="font-display text-[10px] tracking-[0.2em] uppercase text-cacao-mute">Clientes unidos</span>
+          <ul className="flex flex-wrap gap-2">
+            {aliases.map((a) => (
+              <li key={a.alias_key} className="inline-flex items-center gap-1.5 rounded-full bg-marfil-soft ring-1 ring-marfil px-3 py-1 text-[12px] text-cacao">
+                <span className="text-cacao-mute">{a.alias_key}</span> → <span className="font-medium">{a.canonico}</span>
+                <button type="button" onClick={() => deshacerAlias(a.alias_key)} className="ml-1 text-cacao-soft hover:text-terracotta" aria-label="Deshacer unión">✕</button>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 
@@ -2790,6 +2829,22 @@ function SeccionCuentasCobrar() {
                       <div className="flex items-center justify-between text-sm px-1">
                         <span className="text-cacao-mute">Generado {fmtMonto(eurDe(c.total_cuentas_usd), "EUR")} · Pagado {fmtMonto(eurDe(c.total_pagos_usd), "EUR")}</span>
                         <span className="font-medium text-cacao">Saldo: {fmtMonto(eurDe(c.saldo_usd), "EUR")} <span className="text-cacao-mute font-normal">(≈ {fmtMonto(c.saldo_usd, "USD")})</span></span>
+                      </div>
+
+                      {/* Unir con otro cliente (mismo cliente, distinto nombre en Zetux) */}
+                      <div className="px-1 pt-1 flex items-center gap-2 flex-wrap">
+                        {unirDesde === c.key ? (
+                          <>
+                            <span className="text-[12px] text-cacao-mute">Unir “{c.cliente}” con:</span>
+                            <select defaultValue="" onChange={(e) => { if (e.target.value) unirCliente(c.cliente, e.target.value); }} className="border border-marfil rounded-lg px-2 py-1 text-[12px] text-cacao bg-white max-w-[12rem]">
+                              <option value="">Elige el cliente…</option>
+                              {[...deudores, ...aFavor, ...saldados].filter((o) => o.key !== c.key).map((o) => <option key={o.key} value={o.cliente}>{o.cliente}</option>)}
+                            </select>
+                            <button type="button" onClick={() => setUnirDesde(null)} className="text-[12px] text-cacao-soft hover:text-cacao">Cancelar</button>
+                          </>
+                        ) : (
+                          <button type="button" onClick={() => setUnirDesde(c.key)} className="text-[12px] text-cacao-soft hover:text-cacao underline decoration-dotted">¿Es el mismo que otro cliente? Unir</button>
+                        )}
                       </div>
                     </div>
                   )}
