@@ -16,6 +16,7 @@ import {
   createVenta,
   createVentasBatch,
   deleteVenta,
+  deleteVentasXetuxFechas,
   parseCSV,
   valoresMonto,
   clasificarFilas,
@@ -101,6 +102,10 @@ export function VentasClient() {
   // unitario. Se inicializa con la adivinanza del parser y el usuario la puede
   // cambiar en el preview (viéndolo reflejado en los totales antes de confirmar).
   const [montoEsTotal, setMontoEsTotal] = useState(true);
+  // Para reportes de varios días: usar la fecha de cada línea del archivo en vez
+  // de una sola. Y opción de reemplazar lo ya cargado de esas fechas.
+  const [usarFechaLinea, setUsarFechaLinea] = useState(false);
+  const [reemplazarRango, setReemplazarRango] = useState(false);
   const [clasifs, setClasifs] = useState<PosClasificacion[]>([]);
   const [importing, setImporting] = useState(false);
   const [leyendoArchivo, setLeyendoArchivo] = useState(false);
@@ -213,6 +218,12 @@ export function VentasClient() {
       // de tomar el total como unitario y multiplicarlo por la cantidad
       // (montos inflados).
       setMontoEsTotal(true);
+      // Si el reporte trae fechas por línea (varios días), usarlas por defecto
+      // y ofrecer reemplazar, para no estampar una sola fecha a todo.
+      const conFechas = filas.filter((f) => f.fecha).length;
+      const variosDias = new Set(filas.map((f) => f.fecha).filter(Boolean)).size > 1;
+      setUsarFechaLinea(conFechas > 0 && variosDias);
+      setReemplazarRango(conFechas > 0 && variosDias);
       setClasif(
         clasificarFilas(filas, recetasVendibles, clasifs, insumos, recetas),
       );
@@ -451,12 +462,18 @@ export function VentasClient() {
     setImporting(true);
     try {
       const batch = nuevoBatchId();
+      // Reemplazo: borra lo ya cargado (xetux_csv) de las fechas del archivo,
+      // para no duplicar ni dejar días mal fechados. Los triggers reponen stock.
+      if (reemplazarRango && usarFechaLinea) {
+        const fechas = Array.from(new Set(clasif.map((c) => c.fila.fecha).filter((f): f is string => !!f)));
+        if (fechas.length > 0) await deleteVentasXetuxFechas(fechas);
+      }
       // Se registran TODAS las filas. Los que no son insumo van sin receta
       // (receta_id null) → no descuentan stock, pero sí registran el ingreso.
       const ventasInput = clasif.map((c) => {
         const { total, precioUnitario } = valoresMonto(c.fila, montoEsTotal);
         return {
-        fecha: iFecha,
+        fecha: usarFechaLinea && c.fila.fecha ? c.fila.fecha : iFecha,
         recetaId: c.tipo === "insumo" && c.receta ? c.receta.id : undefined,
         recetaNombre: c.receta?.nombre ?? c.insumo?.nombre ?? c.fila.nombre,
         cantidad: c.fila.cantidad,
@@ -488,9 +505,19 @@ export function VentasClient() {
         };
       });
       const created = await createVentasBatch(ventasInput);
-      setVentas((prev) => [...created, ...prev]);
+      // Si hubo reemplazo (o fechas de varios días), recargamos desde la BD para
+      // reflejar los borrados/nuevas fechas con fidelidad; si no, basta con anteponer.
+      if (reemplazarRango && usarFechaLinea) {
+        const [v, tm] = await Promise.all([listVentasDiasCompletos(30), totalesVentasPorMes()]);
+        setVentas(v);
+        setTotalesMes(tm);
+      } else {
+        setVentas((prev) => [...created, ...prev]);
+      }
       setCsvText("");
       setClasif(null);
+      setUsarFechaLinea(false);
+      setReemplazarRango(false);
       setTab("historial");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error importando");
@@ -824,6 +851,36 @@ export function VentasClient() {
                   </p>
                 )}
               </div>
+              {clasif.some((c) => c.fila.fecha) && (
+                <div className="mb-3 rounded-lg bg-[#F1F4ED] ring-1 ring-[#C9D6BC] p-3 space-y-2">
+                  <label className="flex items-start gap-2 text-xs text-cacao">
+                    <input type="checkbox" checked={usarFechaLinea} onChange={(e) => setUsarFechaLinea(e.target.checked)} className="mt-0.5 accent-[#2F4A1F]" />
+                    <span>Usar la <strong>fecha de cada línea</strong> del archivo (para reportes de varios días). Se ignora la “Fecha de la venta” de arriba.</span>
+                  </label>
+                  {usarFechaLinea && (
+                    <label className="flex items-start gap-2 text-xs text-cacao">
+                      <input type="checkbox" checked={reemplazarRango} onChange={(e) => setReemplazarRango(e.target.checked)} className="mt-0.5 accent-[#2F4A1F]" />
+                      <span><strong>Reemplazar</strong> las ventas ya cargadas de esas fechas (borra lo anterior de esos días y lo deja igual al reporte; evita duplicados).</span>
+                    </label>
+                  )}
+                  {usarFechaLinea && (() => {
+                    const porDia: Record<string, number> = {};
+                    clasif.forEach((c) => { const f = c.fila.fecha; if (!f) return; porDia[f] = (porDia[f] ?? 0) + (valoresMonto(c.fila, montoEsTotal).total ?? 0); });
+                    const dias = Object.keys(porDia).sort();
+                    const total = dias.reduce((s, d) => s + porDia[d], 0);
+                    const f2 = (n: number) => n.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                    return (
+                      <div className="text-[11px] text-cacao-soft border-t border-[#C9D6BC] pt-2">
+                        <p className="mb-1">Totales por día que se importarán (verifica contra tu reporte):</p>
+                        <ul className="space-y-0.5">
+                          {dias.map((d) => (<li key={d} className="flex justify-between tabular-nums"><span>{d}</span><span>{f2(porDia[d])} €</span></li>))}
+                        </ul>
+                        <div className="flex justify-between tabular-nums font-medium text-cacao border-t border-[#C9D6BC] mt-1 pt-1"><span>Total</span><span>{f2(total)} €</span></div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
               <ul className="divide-y divide-marfil text-sm">
                 {clasif.map((c, i) => {
                   const mv = valoresMonto(c.fila, montoEsTotal);

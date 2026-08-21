@@ -479,7 +479,42 @@ export type FilaImportada = {
    *  neta/importe), false si parece un precio UNITARIO. El usuario puede
    *  cambiar esta interpretación en el importador; por eso guardamos el crudo. */
   montoEsTotal: boolean;
+  /** Fecha de la línea (ISO YYYY-MM-DD) si el reporte trae columna de fecha
+   *  (p. ej. "Fecha de Factura"). Permite importar reportes de varios días con
+   *  la fecha real de cada venta, en vez de estampar una sola fecha a todo. */
+  fecha?: string;
 };
+
+/** Parsea la fecha de una celda del reporte de Xetux a ISO (YYYY-MM-DD).
+ *  Acepta "01-ago-2026 16:27:48" (mes en español), "01/08/2026" y "2026-08-01". */
+export function parseFechaReporte(raw: string): string | undefined {
+  const s = (raw ?? "").trim();
+  if (!s) return undefined;
+  const MESES: Record<string, number> = { ene: 1, feb: 2, mar: 3, abr: 4, may: 5, jun: 6, jul: 7, ago: 8, sep: 9, set: 9, oct: 10, nov: 11, dic: 12 };
+  let m = s.match(/(\d{1,2})[-/ ]([a-zA-Z]{3})[a-zA-Z]*[-/ ](\d{4})/);
+  if (m) { const mm = MESES[m[2].toLowerCase()]; if (mm) return `${m[3]}-${String(mm).padStart(2, "0")}-${m[1].padStart(2, "0")}`; }
+  m = s.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+  if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+  m = s.match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  return undefined;
+}
+
+/** Borra las ventas importadas (fuente xetux_csv) de un conjunto de fechas.
+ *  Se usa para "reemplazar" al reimportar y evitar duplicados/mal fechados. Al
+ *  borrar, los triggers reponen el stock; al reinsertar se vuelve a descontar. */
+export async function deleteVentasXetuxFechas(fechas: string[]): Promise<number> {
+  if (fechas.length === 0) return 0;
+  const sb = createSupabaseBrowserClient();
+  const { data, error } = await sb
+    .from("ventas")
+    .delete()
+    .eq("fuente", "xetux_csv")
+    .in("fecha", fechas)
+    .select("id");
+  if (error) throw error;
+  return (data as { id: string }[] | null)?.length ?? 0;
+}
 
 /** Dado el monto crudo de una fila y cómo interpretarlo (total de línea vs
  *  precio unitario), devuelve el total y el precio unitario coherentes. */
@@ -579,6 +614,11 @@ export function parseCSV(content: string): FilaImportada[] {
 
   const colPrecioUnit = headers.findIndex((h) => esUnitario(h));
   const colTotal = headers.findIndex((h) => esTotalLinea(h) && !esUnitario(h));
+  // Columna de fecha (opcional): "Fecha de Factura" preferida; si no, cualquier "fecha".
+  const colFecha = (() => {
+    const f = headers.findIndex((h) => /fecha\s*de\s*factura/i.test(h));
+    return f !== -1 ? f : headers.findIndex((h) => /fecha/i.test(h));
+  })();
 
   if (colNombre === -1 || colCantidad === -1) {
     throw new Error(
@@ -612,7 +652,8 @@ export function parseCSV(content: string): FilaImportada[] {
         montoEsTotal = true;
       }
     }
-    filas.push({ nombre, cantidad: cant, monto, montoEsTotal });
+    const fecha = colFecha !== -1 ? parseFechaReporte(cells[colFecha] ?? "") : undefined;
+    filas.push({ nombre, cantidad: cant, monto, montoEsTotal, fecha });
   }
   return filas;
 }
