@@ -2568,6 +2568,7 @@ function SeccionCuentasCobrar() {
   const [probando, setProbando] = useState(false);
   const [mostrarImport, setMostrarImport] = useState(false);
   const [verSaldados, setVerSaldados] = useState(false);
+  const [mostrarAjustes, setMostrarAjustes] = useState(false);
   const [aliases, setAliases] = useState<{ alias_key: string; canonico: string }[]>([]);
   const [unirDesde, setUnirDesde] = useState<string | null>(null); // key del cliente a unir
   const [tick, setTick] = useState(0);
@@ -2704,30 +2705,7 @@ function SeccionCuentasCobrar() {
         </div>
       </div>
 
-      {/* Ajuste de devaluación (lo defines tú) */}
-      <div className="rounded-2xl bg-white ring-1 ring-marfil p-4 flex flex-wrap items-end gap-3">
-        <div>
-          <label className="block font-display text-[10px] tracking-[0.2em] uppercase text-cacao-mute mb-1">Devaluación mensual estimada</label>
-          <div className="flex items-center gap-1">
-            <input inputMode="decimal" value={devalInput} onChange={(e) => setDevalInput(e.target.value)} placeholder="ej. 8" className="w-24 border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
-            <span className="text-cacao-soft">%</span>
-          </div>
-        </div>
-        <button type="button" onClick={guardarDeval} disabled={guardandoDeval} className="rounded-lg bg-cacao text-white px-4 py-2 text-xs uppercase tracking-widest hover:bg-terracotta disabled:bg-marfil disabled:text-cacao-mute">{guardandoDeval ? "Guardando…" : "Guardar"}</button>
-        <p className="text-[11px] text-cacao-mute flex-1 min-w-[12rem]">Solo se usa aquí, para estimar cuánto pierdes por tardar en cobrar. Déjalo vacío para no usarlo.</p>
-      </div>
-
-      {/* Correos del recordatorio */}
-      <div className="rounded-2xl bg-white ring-1 ring-marfil p-4 space-y-2">
-        <label className="block font-display text-[10px] tracking-[0.2em] uppercase text-cacao-mute">Correos para el recordatorio de cobros</label>
-        <div className="flex flex-wrap items-center gap-2">
-          <input value={correosInput} onChange={(e) => setCorreosInput(e.target.value)} placeholder="beatriz@…, lucia@…, tu@…" className="flex-1 min-w-[16rem] border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
-          <button type="button" onClick={guardarCorreos} disabled={guardandoCorreos} className="rounded-lg bg-cacao text-white px-4 py-2 text-xs uppercase tracking-widest hover:bg-terracotta disabled:bg-marfil disabled:text-cacao-mute">{guardandoCorreos ? "Guardando…" : "Guardar"}</button>
-          <button type="button" onClick={probarCorreo} disabled={probando} className="rounded-lg ring-1 ring-marfil text-cacao px-4 py-2 text-xs uppercase tracking-widest hover:bg-marfil-soft disabled:text-cacao-mute">{probando ? "Enviando…" : "Enviar correo de prueba"}</button>
-        </div>
-        <p className="text-[11px] text-cacao-mute">Separados por coma. Reciben el aviso en los últimos 5 días del mes si hay clientes con saldo pendiente.</p>
-      </div>
-
+      {/* Aviso de devaluación (visible; es una alerta, no un ajuste) */}
       {devalPct != null && devalPct > 0 && perdidaTotal > 0.005 && (
         <div className="rounded-2xl bg-[#FBF3E2] ring-1 ring-[#E7D3A1] p-4">
           <p className="text-[#7A5A18]">
@@ -2736,20 +2714,52 @@ function SeccionCuentasCobrar() {
         </div>
       )}
 
-      {/* Clientes unidos (alias) */}
-      {aliases.length > 0 && (
-        <div className="rounded-2xl bg-white ring-1 ring-marfil p-4 space-y-2">
-          <span className="font-display text-[10px] tracking-[0.2em] uppercase text-cacao-mute">Clientes unidos</span>
-          <ul className="flex flex-wrap gap-2">
-            {aliases.map((a) => (
-              <li key={a.alias_key} className="inline-flex items-center gap-1.5 rounded-full bg-marfil-soft ring-1 ring-marfil px-3 py-1 text-[12px] text-cacao">
-                <span className="text-cacao-mute">{a.alias_key}</span> → <span className="font-medium">{a.canonico}</span>
-                <button type="button" onClick={() => deshacerAlias(a.alias_key)} className="ml-1 text-cacao-soft hover:text-terracotta" aria-label="Deshacer unión">✕</button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+      {/* Ajustes (ocultos por defecto): devaluación, correos, clientes unidos */}
+      <div>
+        <button type="button" onClick={() => setMostrarAjustes((v) => !v)} className="text-[11px] uppercase tracking-widest text-cacao-mute hover:text-cacao flex items-center gap-1">
+          <span className={`inline-block transition-transform ${mostrarAjustes ? "rotate-90" : ""}`}>›</span>
+          Ajustes {aliases.length > 0 ? `· ${aliases.length} cliente${aliases.length === 1 ? "" : "s"} unido${aliases.length === 1 ? "" : "s"}` : ""}
+        </button>
+        {mostrarAjustes && (
+          <div className="mt-3 space-y-3">
+            <div className="rounded-2xl bg-white ring-1 ring-marfil p-4 flex flex-wrap items-end gap-3">
+              <div>
+                <label className="block font-display text-[10px] tracking-[0.2em] uppercase text-cacao-mute mb-1">Devaluación mensual estimada</label>
+                <div className="flex items-center gap-1">
+                  <input inputMode="decimal" value={devalInput} onChange={(e) => setDevalInput(e.target.value)} placeholder="ej. 8" className="w-24 border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
+                  <span className="text-cacao-soft">%</span>
+                </div>
+              </div>
+              <button type="button" onClick={guardarDeval} disabled={guardandoDeval} className="rounded-lg bg-cacao text-white px-4 py-2 text-xs uppercase tracking-widest hover:bg-terracotta disabled:bg-marfil disabled:text-cacao-mute">{guardandoDeval ? "Guardando…" : "Guardar"}</button>
+              <p className="text-[11px] text-cacao-mute flex-1 min-w-[12rem]">Solo se usa aquí, para estimar cuánto pierdes por tardar en cobrar. Déjalo vacío para no usarlo.</p>
+            </div>
+
+            <div className="rounded-2xl bg-white ring-1 ring-marfil p-4 space-y-2">
+              <label className="block font-display text-[10px] tracking-[0.2em] uppercase text-cacao-mute">Correos para el recordatorio de cobros</label>
+              <div className="flex flex-wrap items-center gap-2">
+                <input value={correosInput} onChange={(e) => setCorreosInput(e.target.value)} placeholder="beatriz@…, lucia@…, tu@…" className="flex-1 min-w-[16rem] border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
+                <button type="button" onClick={guardarCorreos} disabled={guardandoCorreos} className="rounded-lg bg-cacao text-white px-4 py-2 text-xs uppercase tracking-widest hover:bg-terracotta disabled:bg-marfil disabled:text-cacao-mute">{guardandoCorreos ? "Guardando…" : "Guardar"}</button>
+                <button type="button" onClick={probarCorreo} disabled={probando} className="rounded-lg ring-1 ring-marfil text-cacao px-4 py-2 text-xs uppercase tracking-widest hover:bg-marfil-soft disabled:text-cacao-mute">{probando ? "Enviando…" : "Enviar correo de prueba"}</button>
+              </div>
+              <p className="text-[11px] text-cacao-mute">Separados por coma. Reciben el aviso en los últimos 5 días del mes si hay clientes con saldo pendiente.</p>
+            </div>
+
+            {aliases.length > 0 && (
+              <div className="rounded-2xl bg-white ring-1 ring-marfil p-4 space-y-2">
+                <span className="font-display text-[10px] tracking-[0.2em] uppercase text-cacao-mute">Clientes unidos</span>
+                <ul className="flex flex-wrap gap-2">
+                  {aliases.map((a) => (
+                    <li key={a.alias_key} className="inline-flex items-center gap-1.5 rounded-full bg-marfil-soft ring-1 ring-marfil px-3 py-1 text-[12px] text-cacao">
+                      <span className="text-cacao-mute">{a.alias_key}</span> → <span className="font-medium">{a.canonico}</span>
+                      <button type="button" onClick={() => deshacerAlias(a.alias_key)} className="ml-1 text-cacao-soft hover:text-terracotta" aria-label="Deshacer unión">✕</button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Tabla de clientes */}
       <section className="rounded-2xl bg-white ring-1 ring-marfil overflow-hidden">
