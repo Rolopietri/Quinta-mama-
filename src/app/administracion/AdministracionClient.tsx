@@ -3018,7 +3018,7 @@ function ModalCobro({ cliente, tasaGlobal, onCerrar, onListo }: { cliente: Clien
 }
 
 // ── Importador de cuentas por cobrar por cliente (PDF Estado de Cuentas) ──
-type DocCxCUI = { fecha: string | null; ref: string; monto: number };
+type DocCxCUI = { fecha: string | null; ref: string; monto: number; refAlt?: string };
 type ClienteCxCUI = { codigo: string; nombre: string; saldo: number; documentos: DocCxCUI[]; incluir: boolean };
 
 function ImportarCxC({ onListo }: { onListo: (msg: string) => void }) {

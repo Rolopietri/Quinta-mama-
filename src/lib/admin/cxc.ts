@@ -4,7 +4,9 @@
 // posición y de ahí armamos la tabla. Solo servidor (node:zlib).
 import zlib from "node:zlib";
 
-export type DocumentoCxC = { fecha: string | null; ref: string; monto: number };
+// refAlt = referencia alterna del mismo documento en otra fuente (p. ej. el
+// "Nro de factura / NE" del Excel), para migrar/limpiar cargas anteriores.
+export type DocumentoCxC = { fecha: string | null; ref: string; monto: number; refAlt?: string };
 export type ClienteCxC = { codigo: string; nombre: string; saldo: number; documentos: DocumentoCxC[] };
 export type ReporteCxC = { fecha: string | null; clientes: ClienteCxC[] };
 

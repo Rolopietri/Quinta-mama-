@@ -157,7 +157,7 @@ function aNumero(v: string | number): number | null {
 }
 // ── Parser principal ────────────────────────────────────────────────
 // Agrupa las filas cuya "Forma de pago" es CXC por cliente, cada fila = una
-// cuenta (fecha, referencia = Nro de factura/NE, monto = Total Venta).
+// cuenta (fecha, referencia = NE-<Nro. de Orden>, monto = Total Venta).
 export function parseReporteCxCXls(buf: Buffer): ReporteCxC {
   const ole = leerOle(buf);
   const wb = ole.entries.find((e) => e.type === 2 && /workbook|book/i.test(e.name));
@@ -177,7 +177,9 @@ export function parseReporteCxCXls(buf: Buffer): ReporteCxC {
   const cCliente = col("cliente");
   const cForma = col("forma de pago");
   const cTotal = grid[hRow].findIndex((v) => norm(v) === "total venta");
-  const cRef = grid[hRow].findIndex((v) => norm(v) === "nro de factura / ne");
+  // La referencia es el "Nro. de Orden" (se muestra como NE-####), no el "Nro de factura / NE".
+  const cOrden = grid[hRow].findIndex((v) => /nro\.?\s*de\s*orden/.test(norm(v)));
+  const cRefAlt = grid[hRow].findIndex((v) => norm(v) === "nro de factura / ne"); // control viejo (NDE…)
   const cFecha = grid[hRow].findIndex((v) => /fecha de la factura/.test(norm(v)));
 
   const mapa = new Map<string, ClienteCxC>();
@@ -190,10 +192,12 @@ export function parseReporteCxCXls(buf: Buffer): ReporteCxC {
     if (!nombre || nombre === "---") continue;
     const monto = aNumero(row[cTotal] ?? "");
     if (monto == null || Math.abs(monto) < 0.005) continue;
-    const ref = cRef >= 0 ? String(row[cRef] ?? "").trim() : "";
+    const orden = cOrden >= 0 ? String(row[cOrden] ?? "").trim() : "";
+    const ref = orden ? `NE-${orden}` : "";
+    const refAlt = cRefAlt >= 0 ? String(row[cRefAlt] ?? "").trim() : "";
     const fecha = cFecha >= 0 ? fechaIso(String(row[cFecha] ?? "")) : null;
     if (fecha && !fechaRep) fechaRep = fecha;
-    const doc: DocumentoCxC = { fecha, ref, monto: Math.round(monto * 100) / 100 };
+    const doc: DocumentoCxC = { fecha, ref, monto: Math.round(monto * 100) / 100, ...(refAlt ? { refAlt } : {}) };
     const key = nombre.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, " ");
     if (!mapa.has(key)) mapa.set(key, { codigo: "", nombre, saldo: 0, documentos: [] });
     const cli = mapa.get(key)!;

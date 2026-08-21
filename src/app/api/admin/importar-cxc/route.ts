@@ -65,6 +65,7 @@ export async function PUT(req: NextRequest) {
     cobrada: boolean; fuente: string; import_hash: string;
   };
   const filas: Fila[] = [];
+  const refsViejos: string[] = []; // referencias de control anteriores (NDE…) a migrar
   for (const c of clientes) {
     const nombre = typeof c.nombre === "string" ? c.nombre.trim() : "";
     if (!nombre) continue;
@@ -73,6 +74,8 @@ export async function PUT(req: NextRequest) {
       const monto = typeof d.monto === "number" ? d.monto : Number(d.monto);
       if (!isFinite(monto) || Math.abs(monto) < 0.005) continue;
       const ref = typeof d.ref === "string" && d.ref.trim() ? d.ref.trim() : null;
+      const refAlt = typeof d.refAlt === "string" && d.refAlt.trim() ? d.refAlt.trim() : null;
+      if (refAlt) refsViejos.push(refAlt);
       const fdoc = typeof d.fecha === "string" && d.fecha ? d.fecha : fechaReporte;
       // hash de dedupe: cliente + referencia (o cliente+fecha+monto si no hay ref).
       const import_hash = ref
@@ -105,6 +108,13 @@ export async function PUT(req: NextRequest) {
     .eq("cobrada", false)
     .is("ref", null)
     .in("fuente", ["estado-cuenta", "setux"]);
+
+  // Migración: borra las cuentas cargadas antes con el número de control viejo
+  // (NDE…, la columna "Nro de factura / NE"). Este mismo archivo las reinserta
+  // con la referencia correcta (NE-<Nro. de Orden>). Solo las abiertas.
+  if (refsViejos.length) {
+    await sb.from("admin_cuenta_cobrar").delete().eq("cobrada", false).in("ref", refsViejos);
+  }
 
   // Dedupe contra lo ya importado: descarta las cuentas cuyo hash ya existe.
   const hashes = filas.map((f) => f.import_hash);
