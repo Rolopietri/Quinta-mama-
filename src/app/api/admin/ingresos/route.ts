@@ -107,6 +107,13 @@ export async function DELETE(req: NextRequest) {
   if (!sb) return NextResponse.json({ error: "servidor no configurado" }, { status: 500 });
   const id = new URL(req.url).searchParams.get("id");
   if (!id) return NextResponse.json({ error: "falta id" }, { status: 400 });
+  // Si el ingreso es un cobro de una cuenta por cobrar, borrar el ingreso también
+  // REVIERTE el cobro (borra el pago) para que el saldo del cliente vuelva a
+  // reflejar la deuda; si no, quedaría pagado sin ingreso.
+  const { data: ing } = await sb.from("admin_ingreso").select("fuente").eq("id", id).single();
+  if (ing?.fuente === "cxc-cobro" || ing?.fuente === "cxc") {
+    await sb.from("admin_cxc_pago").delete().eq("ingreso_id", id);
+  }
   const { error } = await sb.from("admin_ingreso").delete().eq("id", id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ ok: true });

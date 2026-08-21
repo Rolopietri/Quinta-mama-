@@ -53,7 +53,9 @@ async function cargarClientes(sb: ReturnType<typeof createServiceClient>) {
     sb!.from("admin_cliente_alias").select("alias_key, canonico"),
   ]);
   const cuentas = (cuentasD as CuentaRow[]) ?? [];
-  const pagos = (pagosD as PagoRow[]) ?? [];
+  // Ignora pagos huérfanos: cobros cuyo ingreso fue eliminado en el módulo de
+  // Ingresos (ingreso_id quedó nulo). Así el saldo vuelve a reflejar la deuda.
+  const pagos = ((pagosD as PagoRow[]) ?? []).filter((p) => p.ingreso_id != null);
   // Alias: nombre alterno → nombre canónico (para unir clientes repetidos).
   const alias = new Map<string, string>();
   for (const a of (aliasD as { alias_key: string; canonico: string }[]) ?? []) alias.set(a.alias_key, a.canonico);
