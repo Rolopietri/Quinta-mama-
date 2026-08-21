@@ -88,6 +88,17 @@ export async function PUT(req: NextRequest) {
   }
   if (filas.length === 0) return NextResponse.json({ error: "No hay cuentas que registrar." }, { status: 400 });
 
+  // Autolimpieza del modelo viejo: borra las CXC agregadas sin detalle (un solo
+  // monto por cliente, sin referencia) que creaba el flujo anterior. Las nuevas
+  // cuentas detalladas SIEMPRE traen referencia, así que no se tocan; tampoco las
+  // manuales ni las ya cobradas. Así la reimportación deja el saldo correcto.
+  await sb
+    .from("admin_cuenta_cobrar")
+    .delete()
+    .eq("cobrada", false)
+    .is("ref", null)
+    .in("fuente", ["estado-cuenta", "setux"]);
+
   // Dedupe contra lo ya importado: descarta las cuentas cuyo hash ya existe.
   const hashes = filas.map((f) => f.import_hash);
   const { data: prev, error: ePrev } = await sb
