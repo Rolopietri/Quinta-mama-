@@ -2978,10 +2978,10 @@ function ImportarCxC({ onListo }: { onListo: (msg: string) => void }) {
       {!leido ? (
         <div className="text-center py-4">
           <p className="font-display text-[11px] tracking-[0.3em] uppercase text-cacao-mute mb-1">Importar por cliente</p>
-          <p className="text-sm text-cacao-soft mb-4 font-serif italic">Sube el PDF “Estado de Cuentas Clientes” de Zetux. Acumula las cuentas por cliente (sin duplicar lo ya importado).</p>
+          <p className="text-sm text-cacao-soft mb-4 font-serif italic">Sube el PDF “Estado de Cuentas Clientes” o el Excel (.xls) del reporte diario de CXC de Xetux. Acumula las cuentas por cliente (sin duplicar lo ya importado).</p>
           <label className="inline-block rounded-lg bg-cacao text-white px-5 py-2.5 text-xs uppercase tracking-widest hover:bg-terracotta cursor-pointer">
-            {cargando ? "Leyendo…" : "Elegir PDF"}
-            <input type="file" accept="application/pdf,.pdf" className="hidden" disabled={cargando} onChange={(e) => { const f = e.target.files?.[0]; if (f) subir(f); e.target.value = ""; }} />
+            {cargando ? "Leyendo…" : "Elegir archivo (PDF o Excel)"}
+            <input type="file" accept="application/pdf,.pdf,.xls,.xlsx,application/vnd.ms-excel" className="hidden" disabled={cargando} onChange={(e) => { const f = e.target.files?.[0]; if (f) subir(f); e.target.value = ""; }} />
           </label>
         </div>
       ) : (

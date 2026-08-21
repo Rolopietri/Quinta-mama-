@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { tokenValido, ADMIN_COOKIE } from "@/lib/admin-auth";
 import { createServiceClient } from "@/lib/supabase/admin-service";
 import { parseEstadoCuentas } from "@/lib/admin/cxc";
+import { parseReporteCxCXls } from "@/lib/admin/xls";
 import { getTasaEurUsd } from "@/lib/admin/tasa";
 
 export const runtime = "nodejs";
@@ -15,24 +16,30 @@ function claveCliente(s: string): string {
   return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase().replace(/\s+/g, " ");
 }
 
-// POST { pdf_base64 } → lee el estado de cuentas y devuelve el detalle por
-// cliente con sus documentos individuales (no guarda). Montos en euros (como
-// las ventas: el número de "Saldo Divisas" es el valor de referencia en €).
+// POST { pdf_base64 } → lee el archivo (PDF "Estado de Cuentas" o Excel .xls del
+// reporte diario CXC de Xetux) y devuelve el detalle por cliente con sus
+// documentos individuales (no guarda). Montos en euros (como las ventas).
 export async function POST(req: NextRequest) {
   if (!autorizado(req)) return NextResponse.json({ error: "no autorizado" }, { status: 401 });
   const b = (await req.json().catch(() => ({}))) as Record<string, unknown>;
   const b64 = typeof b.pdf_base64 === "string" ? b.pdf_base64.replace(/^data:.*;base64,/, "") : "";
-  if (!b64) return NextResponse.json({ error: "No llegó el PDF." }, { status: 400 });
+  if (!b64) return NextResponse.json({ error: "No llegó el archivo." }, { status: 400 });
+  const buf = Buffer.from(b64, "base64");
+  // Detecta el formato por su firma: %PDF… o el contenedor OLE2 del .xls.
+  const esOle = buf.length >= 8 && buf.readUInt32LE(0) === 0xe011cfd0 && buf.readUInt32LE(4) === 0xe11ab1a1;
+  const esPdf = buf.subarray(0, 5).toString("latin1") === "%PDF-";
   let reporte;
   try {
-    reporte = parseEstadoCuentas(Buffer.from(b64, "base64"));
-  } catch {
-    return NextResponse.json({ error: "No pude leer el PDF." }, { status: 422 });
+    reporte = esOle ? parseReporteCxCXls(buf) : parseEstadoCuentas(buf);
+  } catch (e) {
+    const msg = esOle ? "No pude leer el Excel (.xls)." : "No pude leer el PDF.";
+    return NextResponse.json({ error: `${msg}${e instanceof Error ? ` (${e.message})` : ""}` }, { status: 422 });
   }
   // Solo clientes con al menos un documento (saldo != 0).
   const clientes = reporte.clientes.filter((c) => c.documentos.length > 0);
   if (!clientes.length) {
-    return NextResponse.json({ error: "No encontré cuentas. ¿Es el Estado de Cuentas por cliente?" }, { status: 422 });
+    const pista = esOle ? "¿Es el reporte de CXC de Xetux (Excel)?" : esPdf ? "¿Es el Estado de Cuentas por cliente?" : "Sube el PDF de Estado de Cuentas o el Excel .xls de CXC.";
+    return NextResponse.json({ error: `No encontré cuentas por cobrar. ${pista}` }, { status: 422 });
   }
   return NextResponse.json({ reporte: { fecha: reporte.fecha, clientes } });
 }
