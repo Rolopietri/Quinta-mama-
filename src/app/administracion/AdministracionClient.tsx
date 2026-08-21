@@ -2862,42 +2862,52 @@ function SeccionCuentasCobrar() {
   );
 }
 
-// Modal de cobro: elige QUÉ cuentas (NE) se están cobrando (total o parcial).
-// La deuda está en euros; el cliente puede pagar en €, $ o Bs (con su tasa).
+// Modal de cobro: escribes el MONTO que paga el cliente y eliges a qué cuentas
+// (NE) se aplica primero. Si paga de más, el excedente queda a favor.
 function ModalCobro({ cliente, tasaGlobal, onCerrar, onListo }: { cliente: ClienteCXC; tasaGlobal: number; onCerrar: () => void; onListo: (msg: string) => void }) {
   const tasa = tasaGlobal > 0 ? tasaGlobal : 1.17;
-  // Cuentas con saldo por cobrar (restante en euros), más antiguas primero.
   const filas = cliente.cuentas
     .map((c) => ({ c, restEur: Math.round((((c.monto_usd ?? 0) - (c.pagado_usd ?? 0)) / tasa) * 100) / 100 }))
     .filter((x) => x.restEur > 0.005)
     .sort((a, b) => a.c.fecha.localeCompare(b.c.fecha));
+  const totalOpenEur = Math.round(filas.reduce((s, x) => s + x.restEur, 0) * 100) / 100;
 
-  const [sel, setSel] = useState<Record<string, { on: boolean; amt: string }>>(
-    () => Object.fromEntries(filas.map((x) => [x.c.id, { on: true, amt: x.restEur.toFixed(2).replace(".", ",") }])),
-  );
+  const [sel, setSel] = useState<Record<string, boolean>>(() => Object.fromEntries(filas.map((x) => [x.c.id, true])));
   const [moneda, setMoneda] = useState<"EUR" | "USD" | "Bs">("EUR");
   const [tasaBsStr, setTasaBsStr] = useState("");
+  const [montoStr, setMontoStr] = useState(totalOpenEur.toFixed(2).replace(".", ","));
   const [metodo, setMetodo] = useState("Efectivo");
   const [fecha, setFecha] = useState(hoyISO());
   const [referencia, setReferencia] = useState("");
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const seleccion = filas
-    .filter((x) => sel[x.c.id]?.on)
-    .map((x) => ({ x, eur: parseTasa(sel[x.c.id].amt) ?? 0 }));
-  const excede = seleccion.find((s) => s.eur > s.x.restEur + 0.01);
-  const totalEur = Math.round(seleccion.reduce((s, a) => s + Math.max(0, a.eur), 0) * 100) / 100;
+  const seleccionadas = filas.filter((x) => sel[x.c.id]);
+  const selRemEur = Math.round(seleccionadas.reduce((s, x) => s + x.restEur, 0) * 100) / 100;
   const tasaBs = parseTasa(tasaBsStr) ?? 0;
   const faltaTasaBs = moneda === "Bs" && tasaBs <= 0;
-  const recibe = moneda === "EUR" ? totalEur : moneda === "USD" ? totalEur * tasa : totalEur * tasaBs;
+  const factor = moneda === "EUR" ? 1 : moneda === "USD" ? tasa : tasaBs;
+  const monto = parseTasa(montoStr) ?? 0;
+  const montoEur = moneda === "EUR" ? monto : factor > 0 ? monto / factor : 0;
+  const favorEur = Math.max(0, Math.round((montoEur - totalOpenEur) * 100) / 100);
+  const aplicadoEur = Math.min(montoEur, totalOpenEur);
 
-  function toggle(id: string) { setSel((s) => ({ ...s, [id]: { ...s[id], on: !s[id].on } })); }
-  function setAmt(id: string, amt: string) { setSel((s) => ({ ...s, [id]: { ...s[id], amt } })); }
+  // Sugerir el monto (en la moneda elegida) = lo que resta de lo seleccionado.
+  function sugerir(base = selRemEur, m = moneda, tb = tasaBs) {
+    const f = m === "EUR" ? 1 : m === "USD" ? tasa : tb;
+    setMontoStr(f > 0 ? (base * f).toFixed(2).replace(".", ",") : "");
+  }
+  function toggle(id: string) {
+    setSel((s) => {
+      const ns = { ...s, [id]: !s[id] };
+      const base = filas.filter((x) => ns[x.c.id]).reduce((t, x) => t + x.restEur, 0);
+      sugerir(Math.round(base * 100) / 100);
+      return ns;
+    });
+  }
 
   async function cobrar() {
-    if (seleccion.length === 0 || totalEur <= 0) { setError("Selecciona al menos una cuenta con monto."); return; }
-    if (excede) { setError(`El monto de ${excede.x.c.ref || "una cuenta"} supera lo que queda (${fmtMonto(excede.x.restEur, "EUR")}).`); return; }
+    if (monto <= 0) { setError("Pon el monto que paga el cliente."); return; }
     if (faltaTasaBs) { setError("Pon la tasa del día (Bs por €)."); return; }
     setGuardando(true); setError(null);
     try {
@@ -2907,15 +2917,16 @@ function ModalCobro({ cliente, tasaGlobal, onCerrar, onListo }: { cliente: Clien
         body: JSON.stringify({
           accion: "cobro",
           cliente: cliente.cliente,
-          moneda,
+          monto, moneda,
           tasa: moneda === "Bs" ? tasaBs : null,
           metodo, fecha, referencia: referencia || null,
-          cuentas: seleccion.map((s) => ({ id: s.x.c.id, monto_eur: s.eur })),
+          cuentas: seleccionadas.map((x) => x.c.id),
         }),
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || "No se pudo cobrar.");
-      onListo(`Cobro registrado: ${fmtMonto(totalEur, "EUR")} de ${cliente.cliente} en ${seleccion.length} cuenta${seleccion.length === 1 ? "" : "s"} (${metodo}). Ingreso creado el ${fmtFecha(fecha)}.`);
+      const favor = d.favor_eur > 0.005 ? ` Quedan ${fmtMonto(d.favor_eur, "EUR")} a favor.` : "";
+      onListo(`Cobro registrado: ${fmtMonto(monto, moneda)} de ${cliente.cliente} (${metodo}).${favor} Ingreso creado el ${fmtFecha(fecha)}.`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "No se pudo cobrar.");
     } finally {
@@ -2929,59 +2940,47 @@ function ModalCobro({ cliente, tasaGlobal, onCerrar, onListo }: { cliente: Clien
         <div className="flex items-start justify-between gap-3">
           <div>
             <h3 className="font-display text-lg text-cacao">Cobrar a {cliente.cliente}</h3>
-            <p className="text-sm text-cacao-soft">Elige qué cuentas (NE) estás cobrando. Puedes pagar el total o una parte de cada una.</p>
+            <p className="text-sm text-cacao-soft">Saldo pendiente: <strong>{fmtMonto(totalOpenEur, "EUR")}</strong>. Escribe cuánto paga; si paga de más, queda a favor.</p>
           </div>
           <button type="button" onClick={onCerrar} className="text-cacao-soft hover:text-cacao text-lg" aria-label="Cerrar">✕</button>
         </div>
 
         {error && <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419]">{error}</div>}
 
-        {/* Cuentas por cobrar del cliente */}
+        {/* Cuentas a las que se aplica (más antiguas primero) */}
         <div className="rounded-xl ring-1 ring-marfil overflow-hidden">
-          <div className="px-3 py-2 font-display text-[9px] tracking-[0.2em] uppercase text-cacao-mute border-b border-marfil grid grid-cols-[auto_1fr_auto_auto] gap-2">
-            <span></span><span>Cuenta</span><span className="text-right">Queda</span><span className="text-right">A cobrar (€)</span>
+          <div className="px-3 py-2 font-display text-[9px] tracking-[0.2em] uppercase text-cacao-mute border-b border-marfil flex items-center justify-between">
+            <span>Aplicar a estas cuentas (NE)</span><span>Queda</span>
           </div>
-          <ul className="divide-y divide-marfil max-h-56 overflow-y-auto">
-            {filas.map(({ c, restEur }) => {
-              const on = sel[c.id]?.on;
-              return (
-                <li key={c.id} className={`px-3 py-2 grid grid-cols-[auto_1fr_auto_auto] gap-2 items-center ${on ? "" : "opacity-45"}`}>
-                  <input type="checkbox" checked={on} onChange={() => toggle(c.id)} className="accent-[#0F0F0F]" />
-                  <span className="text-cacao text-[12px] min-w-0">
-                    <span className="font-medium">{c.ref || "Cuenta"}</span>
-                    <span className="text-cacao-mute"> · {fmtFecha(c.fecha)}</span>
-                  </span>
-                  <span className="text-right text-cacao-mute tabular-nums text-[12px]">{fmtMonto(restEur, "EUR")}</span>
-                  <input inputMode="decimal" disabled={!on} value={sel[c.id]?.amt ?? ""} onChange={(e) => setAmt(c.id, e.target.value)} className="w-24 border border-marfil rounded-lg px-2 py-1 text-[12px] text-cacao text-right disabled:bg-marfil-soft" />
-                </li>
-              );
-            })}
+          <ul className="divide-y divide-marfil max-h-44 overflow-y-auto">
+            {filas.map(({ c, restEur }) => (
+              <li key={c.id} className={`px-3 py-2 flex items-center gap-2 ${sel[c.id] ? "" : "opacity-45"}`}>
+                <input type="checkbox" checked={!!sel[c.id]} onChange={() => toggle(c.id)} className="accent-[#0F0F0F]" />
+                <span className="text-cacao text-[12px] flex-1 min-w-0"><span className="font-medium">{c.ref || "Cuenta"}</span><span className="text-cacao-mute"> · {fmtFecha(c.fecha)}</span></span>
+                <span className="text-cacao-mute tabular-nums text-[12px]">{fmtMonto(restEur, "EUR")}</span>
+              </li>
+            ))}
           </ul>
-          <div className="px-3 py-2 border-t border-marfil flex items-center justify-between text-sm">
-            <span className="text-cacao-mute">{seleccion.length} cuenta{seleccion.length === 1 ? "" : "s"} seleccionada{seleccion.length === 1 ? "" : "s"}</span>
-            <span className="font-medium text-cacao">Total a cobrar: {fmtMonto(totalEur, "EUR")}</span>
-          </div>
+          <div className="px-3 py-1.5 border-t border-marfil text-[11px] text-cacao-mute">Seleccionado: {fmtMonto(selRemEur, "EUR")} · <button type="button" onClick={() => sugerir()} className="underline decoration-dotted hover:text-cacao">usar como monto</button></div>
         </div>
 
-        {/* Cómo paga */}
+        {/* Monto que paga el cliente */}
         <div className="grid grid-cols-2 gap-3">
+          <Campo label="Monto que paga el cliente">
+            <input inputMode="decimal" value={montoStr} onChange={(e) => setMontoStr(e.target.value)} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao text-right" />
+          </Campo>
           <Campo label="Moneda del pago">
-            <select value={moneda} onChange={(e) => setMoneda(e.target.value as "EUR" | "USD" | "Bs")} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
+            <select value={moneda} onChange={(e) => { const m = e.target.value as "EUR" | "USD" | "Bs"; setMoneda(m); sugerir(selRemEur, m); }} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
               <option value="EUR">€ Euro</option>
               <option value="USD">$ Dólar</option>
               <option value="Bs">Bs Bolívares</option>
-            </select>
-          </Campo>
-          <Campo label="Método de pago">
-            <select value={metodo} onChange={(e) => setMetodo(e.target.value)} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
-              {METODOS_COBRO.map((m) => <option key={m} value={m}>{m}</option>)}
             </select>
           </Campo>
         </div>
 
         {moneda === "Bs" && (
           <Campo label="Tasa del día · Bs por €">
-            <input inputMode="decimal" value={tasaBsStr} onChange={(e) => setTasaBsStr(e.target.value)} placeholder="ej. 320,00 Bs = 1 €" className="w-52 border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
+            <input inputMode="decimal" value={tasaBsStr} onChange={(e) => { setTasaBsStr(e.target.value); }} placeholder="ej. 320,00 Bs = 1 €" className="w-52 border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
           </Campo>
         )}
         {moneda === "USD" && (
@@ -2989,25 +2988,29 @@ function ModalCobro({ cliente, tasaGlobal, onCerrar, onListo }: { cliente: Clien
         )}
 
         <div className="grid grid-cols-2 gap-3">
+          <Campo label="Método de pago">
+            <select value={metodo} onChange={(e) => setMetodo(e.target.value)} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
+              {METODOS_COBRO.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </Campo>
           <Campo label="Fecha del cobro">
             <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
           </Campo>
-          <Campo label="Referencia (opcional)">
-            <input value={referencia} onChange={(e) => setReferencia(e.target.value)} placeholder="nº recibo / operación" className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
-          </Campo>
         </div>
 
-        <div className={`rounded-lg p-3 text-sm ${excede || faltaTasaBs ? "bg-[#F9EBE7] text-[#7A2419]" : "bg-marfil-soft text-cacao-soft"}`}>
+        <Campo label="Referencia (opcional)">
+          <input value={referencia} onChange={(e) => setReferencia(e.target.value)} placeholder="nº recibo / operación" className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
+        </Campo>
+
+        <div className={`rounded-lg p-3 text-sm ${faltaTasaBs ? "bg-[#F9EBE7] text-[#7A2419]" : favorEur > 0.005 ? "bg-[#EAF0EA] text-[#2F4A1F]" : "bg-marfil-soft text-cacao-soft"}`}>
           {faltaTasaBs
-            ? "Pon la tasa del día (Bs por €) para calcular cuánto entrega el cliente."
-            : excede
-            ? "Hay una cuenta con un monto mayor a lo que queda por cobrar."
-            : <>El cliente entrega <strong>{fmtMonto(recibe, moneda)}</strong>{moneda !== "EUR" ? ` (= ${fmtMonto(totalEur, "EUR")})` : ""}. Se registra como ingreso del {fmtFecha(fecha)} · {metodo}.</>}
+            ? "Pon la tasa del día (Bs por €) para calcular el equivalente."
+            : <>El cliente entrega <strong>{fmtMonto(monto, moneda)}</strong>{moneda !== "EUR" ? ` (= ${fmtMonto(montoEur, "EUR")})` : ""}. Abona {fmtMonto(aplicadoEur, "EUR")} a la deuda{favorEur > 0.005 ? <> y quedan <strong>{fmtMonto(favorEur, "EUR")} a favor</strong> del cliente</> : ""}. Ingreso del {fmtFecha(fecha)} · {metodo}.</>}
         </div>
 
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onCerrar} className="rounded-lg ring-1 ring-marfil text-cacao px-4 py-2 text-xs uppercase tracking-widest hover:bg-marfil-soft">Cancelar</button>
-          <button type="button" onClick={cobrar} disabled={guardando || !!excede || faltaTasaBs || totalEur <= 0} className="rounded-lg bg-cacao text-white px-5 py-2 text-xs uppercase tracking-widest hover:bg-terracotta disabled:bg-marfil disabled:text-cacao-mute">{guardando ? "Registrando…" : "Registrar cobro"}</button>
+          <button type="button" onClick={cobrar} disabled={guardando || faltaTasaBs || monto <= 0} className="rounded-lg bg-cacao text-white px-5 py-2 text-xs uppercase tracking-widest hover:bg-terracotta disabled:bg-marfil disabled:text-cacao-mute">{guardando ? "Registrando…" : "Registrar cobro"}</button>
         </div>
       </div>
     </div>

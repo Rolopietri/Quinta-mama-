@@ -142,55 +142,51 @@ export async function POST(req: NextRequest) {
     const metodo = texto(b.metodo);
     const fecha = texto(b.fecha) ?? new Date().toISOString().slice(0, 10);
     const referencia = texto(b.referencia);
-    // Cuentas seleccionadas: [{ id, monto_eur }]. monto_eur opcional (por defecto lo que reste).
-    const items = Array.isArray(b.cuentas) ? (b.cuentas as Record<string, unknown>[]) : [];
+    const monto = numero(b.monto); // lo que ENTREGA el cliente, en la moneda del pago
+    // Cuentas seleccionadas (ids) a las que se aplica el pago, más antiguas primero.
+    const ids = (Array.isArray(b.cuentas) ? b.cuentas : []).map((x) => (typeof x === "string" ? x : texto((x as Record<string, unknown>)?.id))).filter(Boolean) as string[];
     if (!cliente) return NextResponse.json({ error: "Falta el cliente." }, { status: 400 });
     if (!metodo) return NextResponse.json({ error: "Elige el método de pago." }, { status: 400 });
-    if (items.length === 0) return NextResponse.json({ error: "Selecciona al menos una cuenta (NE) a cobrar." }, { status: 400 });
+    if (monto == null || monto <= 0) return NextResponse.json({ error: "Pon el monto que paga el cliente." }, { status: 400 });
+    if (moneda === "Bs" && (tasaBs == null || tasaBs <= 0)) return NextResponse.json({ error: "Pon la tasa del día (Bs por €)." }, { status: 400 });
 
     const tasaEurUsd = await getTasaEurUsd(sb); // 1 € = X $
     const clientes = await cargarClientes(sb);
     const g = clientes.find((c) => c.key === clave(cliente));
     if (!g) return NextResponse.json({ error: "No encontré cuentas de ese cliente." }, { status: 400 });
-    const porId = new Map(g.cuentas.map((c) => [c.id, c]));
 
-    // Arma las asignaciones (cuánto se paga de cada cuenta, en euros).
-    const asignaciones: { cuenta_id: string; ref: string | null; eur: number; usd: number }[] = [];
-    for (const it of items) {
-      const id = texto(it.id);
-      const cu = id ? porId.get(id) : undefined;
-      if (!cu) return NextResponse.json({ error: "Una de las cuentas ya no existe; recarga e intenta de nuevo." }, { status: 400 });
-      const restanteEur = tasaEurUsd > 0 ? ((cu.monto_usd ?? 0) - cu.pagado_usd) / tasaEurUsd : 0;
-      const pedido = numero(it.monto_eur);
-      const eur = pedido == null ? restanteEur : pedido;
-      if (eur <= 0) continue;
-      if (r2(eur) > r2(restanteEur) + 0.01) {
-        return NextResponse.json({ error: `El monto de ${cu.ref || "la cuenta"} (${r2(eur)} €) supera lo que queda por cobrar (${r2(restanteEur)} €).` }, { status: 400 });
-      }
-      asignaciones.push({ cuenta_id: cu.id, ref: cu.ref, eur: r2(eur), usd: r2(eur * tasaEurUsd) });
-    }
-    if (asignaciones.length === 0) return NextResponse.json({ error: "No hay montos que cobrar." }, { status: 400 });
-
-    const totalEur = r2(asignaciones.reduce((s, a) => s + a.eur, 0));
-    const totalUsd = r2(asignaciones.reduce((s, a) => s + a.usd, 0));
-
-    // Lo que el cliente entrega, en la moneda del pago.
-    let montoRecibido: number;
+    // Cuánto entrega el cliente, en euros (el euro es la referencia).
+    let montoEur: number;
     let tasaStore: number | null;
-    if (moneda === "USD") { montoRecibido = r2(totalEur * tasaEurUsd); tasaStore = null; }
-    else if (moneda === "Bs") {
-      if (tasaBs == null || tasaBs <= 0) return NextResponse.json({ error: "Pon la tasa del día (Bs por €)." }, { status: 400 });
-      montoRecibido = r2(totalEur * tasaBs);
-      tasaStore = tasaEurUsd > 0 ? Math.round((tasaBs / tasaEurUsd) * 10000) / 10000 : null; // Bs por $
-    } else { montoRecibido = totalEur; tasaStore = tasaEurUsd; }
+    if (moneda === "USD") { montoEur = tasaEurUsd > 0 ? monto / tasaEurUsd : monto; tasaStore = null; }
+    else if (moneda === "Bs") { montoEur = monto / (tasaBs as number); tasaStore = tasaEurUsd > 0 ? Math.round(((tasaBs as number) / tasaEurUsd) * 10000) / 10000 : null; }
+    else { montoEur = monto; tasaStore = tasaEurUsd; }
 
+    // Aplica el pago a las cuentas elegidas (o a todas las abiertas si no se
+    // eligió ninguna), más antiguas primero. El excedente queda a favor.
+    const elegibles = (ids.length ? g.cuentas.filter((c) => ids.includes(c.id)) : g.cuentas)
+      .filter((c) => (c.monto_usd ?? 0) - c.pagado_usd > 0.005)
+      .sort((a, b2) => a.fecha.localeCompare(b2.fecha));
+    let poolEur = montoEur;
+    const asignaciones: { cuenta_id: string; ref: string | null; eur: number; usd: number }[] = [];
+    for (const cu of elegibles) {
+      if (poolEur <= 0.005) break;
+      const restanteEur = tasaEurUsd > 0 ? ((cu.monto_usd ?? 0) - cu.pagado_usd) / tasaEurUsd : 0;
+      const ap = Math.min(poolEur, restanteEur);
+      if (ap > 0.005) { asignaciones.push({ cuenta_id: cu.id, ref: cu.ref, eur: r2(ap), usd: r2(ap * tasaEurUsd) }); poolEur -= ap; }
+    }
+    // poolEur restante (si el cliente pagó de más) queda a favor: reduce su saldo.
+
+    const montoRecibido = r2(monto);
+    const totalUsd = r2(montoEur * tasaEurUsd); // el pago completo (lo aplicado + lo que queda a favor)
+    const favorEur = r2(Math.max(0, poolEur));
     const refs = asignaciones.map((a) => a.ref).filter(Boolean).join(", ");
     // 1) Un ingreso por el total recibido (fecha y método reales; sin IVA).
     const { data: ingreso, error: eIng } = await sb
       .from("admin_ingreso")
       .insert({
         fecha,
-        concepto: `Cobro de cuenta por cobrar — ${cliente}${refs ? ` (${refs})` : ""}`,
+        concepto: `Cobro de cuenta por cobrar — ${cliente}${refs ? ` (${refs})` : ""}${favorEur > 0.005 ? " + a favor" : ""}`,
         categoria_nombre: "Ventas",
         pagador: cliente,
         monto: montoRecibido,
@@ -199,7 +195,7 @@ export async function POST(req: NextRequest) {
         monto_usd: totalUsd,
         metodo,
         factura: referencia,
-        nota: "Cobro de cuenta por cobrar",
+        nota: favorEur > 0.005 ? `Cobro de cuenta por cobrar (queda ${favorEur} € a favor)` : "Cobro de cuenta por cobrar",
         fuente: "cxc-cobro",
       })
       .select("id")
@@ -232,7 +228,7 @@ export async function POST(req: NextRequest) {
       const falta = (ePago as { code?: string }).code === "42P01" || /does not exist|no existe|schema cache/i.test(ePago.message);
       return NextResponse.json({ error: falta ? "Falta la tabla de pagos o la columna 'asignaciones'. Corre 'supabase/admin-cxc-v2.sql' y 'supabase/admin-cxc-asignaciones.sql'." : ePago.message }, { status: 500 });
     }
-    return NextResponse.json({ ok: true, pago_id: pago.id, ingreso_id: ingreso.id, cobrado_eur: totalEur });
+    return NextResponse.json({ ok: true, pago_id: pago.id, ingreso_id: ingreso.id, cobrado_eur: r2(montoEur), favor_eur: favorEur });
   }
 
   // ── Agregar una cuenta a mano (deuda) ──
