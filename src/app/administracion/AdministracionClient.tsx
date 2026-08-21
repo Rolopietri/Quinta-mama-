@@ -2896,7 +2896,8 @@ function ModalCobro({ cliente, tasaGlobal, onCerrar, onListo }: { cliente: Clien
   const selRemEur = Math.round(seleccionadas.reduce((s, x) => s + x.restEur, 0) * 100) / 100;
   const tasaBs = parseTasa(tasaBsStr) ?? 0;
   const faltaTasaBs = moneda === "Bs" && tasaBs <= 0;
-  const factor = moneda === "EUR" ? 1 : moneda === "USD" ? tasa : tasaBs;
+  // El $ (efectivo/Zelle) se toma 1:1 con el € → factor 1 en dólares.
+  const factor = moneda === "Bs" ? tasaBs : 1;
   const monto = parseTasa(montoStr) ?? 0;
   const montoEur = moneda === "EUR" ? monto : factor > 0 ? monto / factor : 0;
   const favorEur = Math.max(0, Math.round((montoEur - totalOpenEur) * 100) / 100);
@@ -2904,7 +2905,7 @@ function ModalCobro({ cliente, tasaGlobal, onCerrar, onListo }: { cliente: Clien
 
   // Sugerir el monto (en la moneda elegida) = lo que resta de lo seleccionado.
   function sugerir(base = selRemEur, m = moneda, tb = tasaBs) {
-    const f = m === "EUR" ? 1 : m === "USD" ? tasa : tb;
+    const f = m === "Bs" ? tb : 1; // € y $ van 1:1 con el euro
     setMontoStr(f > 0 ? (base * f).toFixed(2).replace(".", ",") : "");
   }
   function toggle(id: string) {
@@ -2994,12 +2995,12 @@ function ModalCobro({ cliente, tasaGlobal, onCerrar, onListo }: { cliente: Clien
           </Campo>
         )}
         {moneda === "USD" && (
-          <p className="text-[11px] text-cacao-mute">Se convierte con la tasa del panel: 1 € = {tasa.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $.</p>
+          <p className="text-[11px] text-cacao-mute">El dólar se toma 1:1 con el euro ($1 abona €1).</p>
         )}
 
         <div className="grid grid-cols-2 gap-3">
           <Campo label="Método de pago">
-            <select value={metodo} onChange={(e) => setMetodo(e.target.value)} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
+            <select value={metodo} onChange={(e) => { const m = e.target.value; setMetodo(m); if (/zelle|d[oó]lar/i.test(m) && moneda !== "USD") { setMoneda("USD"); sugerir(selRemEur, "USD"); } }} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
               {METODOS_COBRO.map((m) => <option key={m} value={m}>{m}</option>)}
             </select>
           </Campo>

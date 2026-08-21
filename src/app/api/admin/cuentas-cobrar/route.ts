@@ -156,9 +156,10 @@ export async function POST(req: NextRequest) {
     if (!g) return NextResponse.json({ error: "No encontré cuentas de ese cliente." }, { status: 400 });
 
     // Cuánto entrega el cliente, en euros (el euro es la referencia).
+    // El dólar (efectivo/Zelle) se toma 1:1 con el euro: $1 abona €1.
     let montoEur: number;
     let tasaStore: number | null;
-    if (moneda === "USD") { montoEur = tasaEurUsd > 0 ? monto / tasaEurUsd : monto; tasaStore = null; }
+    if (moneda === "USD") { montoEur = monto; tasaStore = null; }
     else if (moneda === "Bs") { montoEur = monto / (tasaBs as number); tasaStore = tasaEurUsd > 0 ? Math.round(((tasaBs as number) / tasaEurUsd) * 10000) / 10000 : null; }
     else { montoEur = monto; tasaStore = tasaEurUsd; }
 
