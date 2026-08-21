@@ -143,6 +143,8 @@ export function AnalisisVentas() {
   const [insumos, setInsumos] = useState<Insumo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Conciliación con Administración (componentes del rango, en euros).
+  const [conc, setConc] = useState<{ setuxNeto: number; ivaSetux: number; cxc: number; rpp: number; cobrosEur: number; otrosEur: number } | null>(null);
 
   // Recetas + insumos una sola vez (para los mapas de categoría: las ventas de
   // receta usan la categoría de la receta; las de reventa (insumo_directo) usan
@@ -181,6 +183,24 @@ export function AnalisisVentas() {
       cancel = true;
     };
   }, [desde, hasta]);
+
+  // Componentes de conciliación (Setux neto, CXC, RPP…) del mismo rango.
+  useEffect(() => {
+    let cancel = false;
+    (async () => {
+      try {
+        const r = await fetch(`/api/admin/conciliacion?desde=${desde}&hasta=${hasta}`, { cache: "no-store" });
+        const d = await r.json();
+        if (!cancel) setConc(r.ok ? d : null);
+      } catch {
+        if (!cancel) setConc(null);
+      }
+    })();
+    return () => { cancel = true; };
+  }, [desde, hasta]);
+
+  // Total de Cocina del rango (todas las ventas, sin filtros de cat/producto).
+  const cocinaTotalRango = useMemo(() => ventas.reduce((s, v) => s + (v.totalUsd ?? 0), 0), [ventas]);
 
   const catPorReceta = useMemo(() => {
     const m = new Map<string, string>();
@@ -469,6 +489,46 @@ export function AnalisisVentas() {
 
       {error && <ErrorBanner>{error}</ErrorBanner>}
 
+      {/* ── Conciliación con Administración ─────────────────────── */}
+      {conc && (cocinaTotalRango > 0.005 || conc.setuxNeto > 0.005) && (() => {
+        const esperado = cocinaTotalRango - conc.cxc - conc.rpp;
+        const residuo = Math.round((esperado - conc.setuxNeto) * 100) / 100;
+        const cuadra = Math.abs(residuo) <= 1;
+        const fEUR = (n: number) => `${n.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
+        return (
+          <section className="rounded-2xl bg-white ring-1 ring-marfil p-4">
+            <div className="flex items-center justify-between gap-2 mb-1">
+              <h3 className="font-cinzel text-base text-cacao">Conciliación con Administración</h3>
+              <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] uppercase tracking-widest ${cuadra ? "bg-[#F1F4ED] text-[#2F4A1F]" : "bg-[#FBF3E2] text-[#7A5A18]"}`}>
+                <span className={`h-1.5 w-1.5 rounded-full ${cuadra ? "bg-[#4B7A2F]" : "bg-[#C9A24B]"}`} />
+                {cuadra ? "Cuadra" : "Revisar"}
+              </span>
+            </div>
+            <p className="text-[11px] text-cacao-mute mb-3">Sobre todas las ventas del período (ignora los filtros de categoría/producto). En euros.</p>
+            <div className="text-sm max-w-md space-y-1">
+              <Fila label="Ventas en Cocina (neto)" val={fEUR(cocinaTotalRango)} />
+              <Fila label="− Ventas a crédito (CXC)" val={`− ${fEUR(conc.cxc)}`} tenue />
+              <Fila label="− Cortesías (RPP)" val={`− ${fEUR(conc.rpp)}`} tenue />
+              <div className="border-t border-marfil pt-1"><Fila label="= Ventas POS de contado (esperado)" val={fEUR(esperado)} fuerte /></div>
+              <Fila label="Ingresos netos POS en Admin (Setux)" val={fEUR(conc.setuxNeto)} />
+              <div className="border-t border-marfil pt-1">
+                <Fila label="Diferencia sin explicar" val={`${residuo < 0 ? "− " : ""}${fEUR(Math.abs(residuo))}`} fuerte />
+              </div>
+            </div>
+            {!cuadra && (
+              <p className="text-[12px] text-cacao-soft mt-2">
+                {residuo > 0
+                  ? <>Cocina registró más ventas de contado que Administración. Revisa: ¿faltan días de Setux por importar en Ingresos?, ¿se importó dos veces algún día en Cocina? {conc.ivaSetux > 1 && <>Si la diferencia se parece al IVA del período ({fEUR(conc.ivaSetux)}), es que Cocina traía IVA y Admin no.</>}</>
+                  : <>Administración tiene más ventas de contado que Cocina. Revisa: ¿faltan días por importar en Cocina?, ¿faltó cargar la CXC o las cortesías del período?</>}
+              </p>
+            )}
+            {conc.cobrosEur > 0.005 && (
+              <p className="text-[11px] text-cacao-mute mt-2">Nota: además hubo {fEUR(conc.cobrosEur)} en cobros de cuentas por cobrar en el período (son cobranzas de ventas anteriores, no ventas de este período; por eso no entran en la conciliación).</p>
+            )}
+          </section>
+        );
+      })()}
+
       {loading ? (
         <div className="rounded-2xl bg-white ring-1 ring-marfil p-12 text-center text-cacao-soft">
           Cargando análisis…
@@ -697,6 +757,15 @@ export function AnalisisVentas() {
 }
 
 // ── Subcomponentes ─────────────────────────────────────────────────────
+function Fila({ label, val, tenue, fuerte }: { label: string; val: string; tenue?: boolean; fuerte?: boolean }) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className={tenue ? "text-cacao-soft" : fuerte ? "text-cacao font-medium" : "text-cacao"}>{label}</span>
+      <span className={`tabular-nums whitespace-nowrap ${fuerte ? "text-cacao font-medium" : tenue ? "text-cacao-soft" : "text-cacao"}`}>{val}</span>
+    </div>
+  );
+}
+
 function StatCard({
   titulo,
   valor,
