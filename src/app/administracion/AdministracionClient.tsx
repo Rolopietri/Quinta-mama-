@@ -2811,36 +2811,54 @@ function SeccionCuentasCobrar() {
 }
 
 // Modal para registrar un cobro (pago) de un cliente.
+// La deuda está en euros (así lo pediste: el euro es la referencia). Al cobrar
+// en $ o Bs, se convierte a euros para descontar del saldo:
+//   € : el monto es en euros.
+//   $ : euros = monto$ / (1 € = X $)  (tasa fija del panel)
+//   Bs: euros = montoBs / (Bs por €)  (tasa del día que tú pones)
 function ModalCobro({ cliente, tasaGlobal, onCerrar, onListo }: { cliente: ClienteCXC; tasaGlobal: number; onCerrar: () => void; onListo: (msg: string) => void }) {
   const saldoUsd = cliente.saldo_usd;
   const saldoEur = tasaGlobal > 0 ? saldoUsd / tasaGlobal : 0;
   const [moneda, setMoneda] = useState<"EUR" | "USD" | "Bs">("EUR");
   const [montoStr, setMontoStr] = useState(saldoEur.toFixed(2).replace(".", ","));
-  const [tasaStr, setTasaStr] = useState(String(tasaGlobal).replace(".", ","));
+  const [tasaBsStr, setTasaBsStr] = useState(""); // Bs por € (tasa del día)
   const [metodo, setMetodo] = useState("Efectivo");
   const [fecha, setFecha] = useState(hoyISO());
   const [referencia, setReferencia] = useState("");
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Al cambiar de moneda, el euro arranca con el saldo; las demás en blanco.
+  function cambiarMoneda(m: "EUR" | "USD" | "Bs") {
+    setMoneda(m);
+    setMontoStr(m === "EUR" ? saldoEur.toFixed(2).replace(".", ",") : "");
+  }
+
   const monto = parseTasa(montoStr) ?? 0;
-  const tasaCobro = moneda === "USD" ? 1 : (parseTasa(tasaStr) ?? 0);
-  const montoUsd = moneda === "USD" ? monto : moneda === "EUR" ? monto * tasaCobro : (tasaCobro > 0 ? monto / tasaCobro : 0);
-  const supera = montoUsd > saldoUsd + 0.01;
+  const tasaBs = parseTasa(tasaBsStr) ?? 0; // Bs por €
+  const montoEur =
+    moneda === "EUR" ? monto
+    : moneda === "USD" ? (tasaGlobal > 0 ? monto / tasaGlobal : 0)
+    : (tasaBs > 0 ? monto / tasaBs : 0);
+  const montoUsd = montoEur * tasaGlobal;
+  const faltaTasaBs = moneda === "Bs" && tasaBs <= 0;
+  const supera = montoEur > saldoEur + 0.01;
+  const restanteEur = Math.max(0, saldoEur - montoEur);
 
   async function cobrar() {
     if (monto <= 0) { setError("Pon un monto mayor que 0."); return; }
-    if (supera) { setError(`El cobro (≈ ${fmtMonto(montoUsd, "USD")}) supera el saldo pendiente (≈ ${fmtMonto(saldoUsd, "USD")}).`); return; }
+    if (faltaTasaBs) { setError("Pon la tasa del día (Bs por €)."); return; }
+    if (supera) { setError(`El cobro (${fmtMonto(montoEur, "EUR")}) supera el saldo pendiente (${fmtMonto(saldoEur, "EUR")}).`); return; }
     setGuardando(true); setError(null);
     try {
       const r = await fetch("/api/admin/cuentas-cobrar", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accion: "cobro", cliente: cliente.cliente, monto, moneda, tasa: tasaCobro, metodo, fecha, referencia: referencia || null }),
+        body: JSON.stringify({ accion: "cobro", cliente: cliente.cliente, monto, moneda, tasa: moneda === "Bs" ? tasaBs : null, metodo, fecha, referencia: referencia || null }),
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || "No se pudo cobrar.");
-      onListo(`Cobro registrado: ${fmtMonto(monto, moneda)} de ${cliente.cliente} (${metodo}). Se creó el ingreso del ${fmtFecha(fecha)}.`);
+      onListo(`Cobro registrado: ${fmtMonto(monto, moneda)} de ${cliente.cliente} (${metodo}) = ${fmtMonto(montoEur, "EUR")}. Ingreso creado el ${fmtFecha(fecha)}.`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "No se pudo cobrar.");
     } finally {
@@ -2863,23 +2881,24 @@ function ModalCobro({ cliente, tasaGlobal, onCerrar, onListo }: { cliente: Clien
 
         <div className="grid grid-cols-2 gap-3">
           <Campo label="Monto a cobrar">
-            <div className="flex items-center gap-1">
-              <input inputMode="decimal" value={montoStr} onChange={(e) => setMontoStr(e.target.value)} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao text-right" />
-            </div>
+            <input inputMode="decimal" value={montoStr} onChange={(e) => setMontoStr(e.target.value)} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao text-right" />
           </Campo>
-          <Campo label="Moneda">
-            <select value={moneda} onChange={(e) => setMoneda(e.target.value as "EUR" | "USD" | "Bs")} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
+          <Campo label="Moneda del pago">
+            <select value={moneda} onChange={(e) => cambiarMoneda(e.target.value as "EUR" | "USD" | "Bs")} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
               <option value="EUR">€ Euro</option>
               <option value="USD">$ Dólar</option>
-              <option value="Bs">Bs</option>
+              <option value="Bs">Bs Bolívares</option>
             </select>
           </Campo>
         </div>
 
-        {moneda !== "USD" && (
-          <Campo label={moneda === "EUR" ? "Tasa € → $" : "Tasa Bs → $"}>
-            <input inputMode="decimal" value={tasaStr} onChange={(e) => setTasaStr(e.target.value)} placeholder={moneda === "EUR" ? "1,17" : "ej. 40"} className="w-40 border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
+        {moneda === "Bs" && (
+          <Campo label="Tasa del día · Bs por €">
+            <input inputMode="decimal" value={tasaBsStr} onChange={(e) => setTasaBsStr(e.target.value)} placeholder="ej. 320,00 Bs = 1 €" className="w-52 border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
           </Campo>
+        )}
+        {moneda === "USD" && (
+          <p className="text-[11px] text-cacao-mute">Se convierte a euros con la tasa del panel: 1 € = {tasaGlobal.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $.</p>
         )}
 
         <div className="grid grid-cols-2 gap-3">
@@ -2897,15 +2916,17 @@ function ModalCobro({ cliente, tasaGlobal, onCerrar, onListo }: { cliente: Clien
           <input value={referencia} onChange={(e) => setReferencia(e.target.value)} placeholder="nº de recibo / operación" className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
         </Campo>
 
-        <div className={`rounded-lg p-3 text-sm ${supera ? "bg-[#F9EBE7] text-[#7A2419]" : "bg-marfil-soft text-cacao-soft"}`}>
-          {supera
-            ? `El monto supera el saldo pendiente (≈ ${fmtMonto(saldoUsd, "USD")}).`
-            : <>Se registrará un ingreso de <strong>{fmtMonto(monto, moneda)}</strong> (≈ {fmtMonto(montoUsd, "USD")}) el {fmtFecha(fecha)} · método {metodo}. Saldo restante: {fmtMonto(saldoEur - (tasaGlobal > 0 ? montoUsd / tasaGlobal : 0), "EUR")}.</>}
+        <div className={`rounded-lg p-3 text-sm ${supera || faltaTasaBs ? "bg-[#F9EBE7] text-[#7A2419]" : "bg-marfil-soft text-cacao-soft"}`}>
+          {faltaTasaBs
+            ? "Pon la tasa del día (Bs por €) para calcular el equivalente."
+            : supera
+            ? `El equivalente (${fmtMonto(montoEur, "EUR")}) supera el saldo pendiente (${fmtMonto(saldoEur, "EUR")}).`
+            : <>Equivale a <strong>{fmtMonto(montoEur, "EUR")}</strong>{moneda !== "EUR" ? ` (≈ ${fmtMonto(montoUsd, "USD")})` : ""}. Se registra como ingreso del {fmtFecha(fecha)} · {metodo}. Saldo restante: <strong>{fmtMonto(restanteEur, "EUR")}</strong>.</>}
         </div>
 
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onCerrar} className="rounded-lg ring-1 ring-marfil text-cacao px-4 py-2 text-xs uppercase tracking-widest hover:bg-marfil-soft">Cancelar</button>
-          <button type="button" onClick={cobrar} disabled={guardando || supera || monto <= 0} className="rounded-lg bg-cacao text-white px-5 py-2 text-xs uppercase tracking-widest hover:bg-terracotta disabled:bg-marfil disabled:text-cacao-mute">{guardando ? "Registrando…" : "Registrar cobro"}</button>
+          <button type="button" onClick={cobrar} disabled={guardando || supera || faltaTasaBs || monto <= 0} className="rounded-lg bg-cacao text-white px-5 py-2 text-xs uppercase tracking-widest hover:bg-terracotta disabled:bg-marfil disabled:text-cacao-mute">{guardando ? "Registrando…" : "Registrar cobro"}</button>
         </div>
       </div>
     </div>

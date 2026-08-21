@@ -107,24 +107,39 @@ export async function POST(req: NextRequest) {
     const cliente = texto(b.cliente);
     const monto = numero(b.monto);
     const moneda = texto(b.moneda) ?? "EUR";
-    let tasa = numero(b.tasa);
+    const tasaBs = numero(b.tasa); // solo para Bs: Bs por €
     const metodo = texto(b.metodo);
     const fecha = texto(b.fecha) ?? new Date().toISOString().slice(0, 10);
     const referencia = texto(b.referencia);
     if (!cliente) return NextResponse.json({ error: "Falta el cliente." }, { status: 400 });
     if (monto == null || monto <= 0) return NextResponse.json({ error: "Pon un monto a cobrar mayor que 0." }, { status: 400 });
     if (!metodo) return NextResponse.json({ error: "Elige el método de pago." }, { status: 400 });
-    if (moneda === "EUR" && (tasa == null || tasa <= 0)) tasa = await getTasaEurUsd(sb);
-    if (moneda === "Bs" && (tasa == null || tasa <= 0)) return NextResponse.json({ error: "Pon la tasa Bs→$ del cobro." }, { status: 400 });
-    const montoUsd = equivUSD(monto, moneda, tasa);
-    if (montoUsd == null) return NextResponse.json({ error: "No pude calcular el equivalente en $." }, { status: 400 });
 
-    // Validación: el cobro no puede superar el saldo pendiente del cliente.
+    // La deuda está en euros. Convertimos el pago a euros (el euro es la
+    // referencia; por eso importa la tasa Bs por € al cobrar en bolívares).
+    const tasaEurUsd = await getTasaEurUsd(sb); // 1 € = X $
+    let montoEur: number;
+    let tasaStore: number | null;
+    if (moneda === "USD") {
+      montoEur = tasaEurUsd > 0 ? monto / tasaEurUsd : monto; // $ → €
+      tasaStore = null;
+    } else if (moneda === "Bs") {
+      if (tasaBs == null || tasaBs <= 0) return NextResponse.json({ error: "Pon la tasa del día (Bs por €)." }, { status: 400 });
+      montoEur = monto / tasaBs; // Bs → €
+      tasaStore = tasaEurUsd > 0 ? Math.round((tasaBs / tasaEurUsd) * 10000) / 10000 : null; // Bs por $ (para equivUSD)
+    } else {
+      montoEur = monto; // ya está en euros
+      tasaStore = tasaEurUsd;
+    }
+    const montoUsd = r2(montoEur * tasaEurUsd);
+
+    // Validación (en euros): el cobro no puede superar el saldo pendiente.
     const clientes = await cargarClientes(sb);
     const g = clientes.find((c) => c.key === clave(cliente));
     const saldoUsd = g?.saldo_usd ?? 0;
-    if (r2(montoUsd) > r2(saldoUsd) + 0.01) {
-      return NextResponse.json({ error: `El cobro (≈ $${r2(montoUsd)}) supera el saldo pendiente (≈ $${r2(saldoUsd)}).`, saldoUsd }, { status: 400 });
+    const saldoEur = tasaEurUsd > 0 ? saldoUsd / tasaEurUsd : 0;
+    if (r2(montoEur) > r2(saldoEur) + 0.01) {
+      return NextResponse.json({ error: `El cobro (${r2(montoEur)} €) supera el saldo pendiente (${r2(saldoEur)} €).`, saldoUsd }, { status: 400 });
     }
 
     // 1) Crear el ingreso (dinero que ENTRA), con la fecha y el método reales.
@@ -138,8 +153,8 @@ export async function POST(req: NextRequest) {
         pagador: cliente,
         monto: r2(monto),
         moneda,
-        tasa,
-        monto_usd: r2(montoUsd),
+        tasa: tasaStore,
+        monto_usd: montoUsd,
         metodo,
         factura: referencia,
         nota: "Cobro de cuenta por cobrar",
@@ -157,8 +172,8 @@ export async function POST(req: NextRequest) {
         fecha,
         monto: r2(monto),
         moneda,
-        tasa,
-        monto_usd: r2(montoUsd),
+        tasa: tasaStore,
+        monto_usd: montoUsd,
         metodo,
         referencia,
         ingreso_id: ingreso.id,
