@@ -38,10 +38,11 @@ type CuentaRow = {
   monto: number | null; moneda: string | null; tasa: number | null; monto_usd: number | null;
   cobrada: boolean; fuente: string | null;
 };
+type Asignacion = { cuenta_id: string; ref: string | null; eur: number; usd: number };
 type PagoRow = {
   id: string; cliente: string; fecha: string; monto: number | null; moneda: string | null;
   tasa: number | null; monto_usd: number | null; metodo: string | null; referencia: string | null;
-  ingreso_id: string | null; nota: string | null;
+  ingreso_id: string | null; nota: string | null; asignaciones: Asignacion[] | null;
 };
 
 // Trae cuentas ABIERTAS (cobrada=false) y todos los pagos, agrupados por cliente.
@@ -69,6 +70,28 @@ async function cargarClientes(sb: ReturnType<typeof createServiceClient>) {
     const totalPagosUsd = g.pagos.reduce((s, p) => s + (p.monto_usd ?? 0), 0);
     const saldoUsd = r2(totalCuentasUsd - totalPagosUsd);
     const ultima = g.cuentas.reduce<string | null>((mx, c) => (!mx || c.fecha > mx ? c.fecha : mx), null);
+    // Cuánto se ha pagado de cada cuenta (por las asignaciones de los pagos).
+    const pagadoPorCuenta = new Map<string, number>();
+    let asignadoUsd = 0;
+    for (const p of g.pagos) {
+      for (const a of p.asignaciones ?? []) {
+        pagadoPorCuenta.set(a.cuenta_id, (pagadoPorCuenta.get(a.cuenta_id) ?? 0) + (a.usd ?? 0));
+        asignadoUsd += a.usd ?? 0;
+      }
+    }
+    // Pagos antiguos sin asignación (a nivel cliente) se reparten FIFO.
+    let poolLegacy = r2(totalPagosUsd - asignadoUsd);
+    const cuentas = g.cuentas
+      .slice()
+      .sort((a, b) => a.fecha.localeCompare(b.fecha))
+      .map((c) => {
+        let pagado = pagadoPorCuenta.get(c.id) ?? 0;
+        if (poolLegacy > 0.005 && (c.monto_usd ?? 0) > pagado) {
+          const extra = Math.min(poolLegacy, (c.monto_usd ?? 0) - pagado);
+          pagado += extra; poolLegacy -= extra;
+        }
+        return { ...c, pagado_usd: r2(pagado) };
+      });
     return {
       cliente: g.cliente,
       key: g.key,
@@ -76,7 +99,7 @@ async function cargarClientes(sb: ReturnType<typeof createServiceClient>) {
       total_cuentas_usd: r2(totalCuentasUsd),
       total_pagos_usd: r2(totalPagosUsd),
       ultima,
-      cuentas: g.cuentas,
+      cuentas,
       pagos: g.pagos,
     };
   });
@@ -102,59 +125,69 @@ export async function POST(req: NextRequest) {
   if (!sb) return NextResponse.json({ error: "servidor no configurado" }, { status: 500 });
   const b = (await req.json().catch(() => ({}))) as Record<string, unknown>;
 
-  // ── Registrar un cobro (pago) → crea el ingreso y descuenta del saldo ──
+  // ── Registrar un cobro (pago) → aplica a cuentas (NE) elegidas y crea el ingreso ──
   if (b.accion === "cobro") {
     const cliente = texto(b.cliente);
-    const monto = numero(b.monto);
     const moneda = texto(b.moneda) ?? "EUR";
     const tasaBs = numero(b.tasa); // solo para Bs: Bs por €
     const metodo = texto(b.metodo);
     const fecha = texto(b.fecha) ?? new Date().toISOString().slice(0, 10);
     const referencia = texto(b.referencia);
+    // Cuentas seleccionadas: [{ id, monto_eur }]. monto_eur opcional (por defecto lo que reste).
+    const items = Array.isArray(b.cuentas) ? (b.cuentas as Record<string, unknown>[]) : [];
     if (!cliente) return NextResponse.json({ error: "Falta el cliente." }, { status: 400 });
-    if (monto == null || monto <= 0) return NextResponse.json({ error: "Pon un monto a cobrar mayor que 0." }, { status: 400 });
     if (!metodo) return NextResponse.json({ error: "Elige el método de pago." }, { status: 400 });
+    if (items.length === 0) return NextResponse.json({ error: "Selecciona al menos una cuenta (NE) a cobrar." }, { status: 400 });
 
-    // La deuda está en euros. Convertimos el pago a euros (el euro es la
-    // referencia; por eso importa la tasa Bs por € al cobrar en bolívares).
     const tasaEurUsd = await getTasaEurUsd(sb); // 1 € = X $
-    let montoEur: number;
-    let tasaStore: number | null;
-    if (moneda === "USD") {
-      montoEur = tasaEurUsd > 0 ? monto / tasaEurUsd : monto; // $ → €
-      tasaStore = null;
-    } else if (moneda === "Bs") {
-      if (tasaBs == null || tasaBs <= 0) return NextResponse.json({ error: "Pon la tasa del día (Bs por €)." }, { status: 400 });
-      montoEur = monto / tasaBs; // Bs → €
-      tasaStore = tasaEurUsd > 0 ? Math.round((tasaBs / tasaEurUsd) * 10000) / 10000 : null; // Bs por $ (para equivUSD)
-    } else {
-      montoEur = monto; // ya está en euros
-      tasaStore = tasaEurUsd;
-    }
-    const montoUsd = r2(montoEur * tasaEurUsd);
-
-    // Validación (en euros): el cobro no puede superar el saldo pendiente.
     const clientes = await cargarClientes(sb);
     const g = clientes.find((c) => c.key === clave(cliente));
-    const saldoUsd = g?.saldo_usd ?? 0;
-    const saldoEur = tasaEurUsd > 0 ? saldoUsd / tasaEurUsd : 0;
-    if (r2(montoEur) > r2(saldoEur) + 0.01) {
-      return NextResponse.json({ error: `El cobro (${r2(montoEur)} €) supera el saldo pendiente (${r2(saldoEur)} €).`, saldoUsd }, { status: 400 });
-    }
+    if (!g) return NextResponse.json({ error: "No encontré cuentas de ese cliente." }, { status: 400 });
+    const porId = new Map(g.cuentas.map((c) => [c.id, c]));
 
-    // 1) Crear el ingreso (dinero que ENTRA), con la fecha y el método reales.
-    //    Sin separar IVA (las CXC se dejan completas), como las ventas por lo demás.
+    // Arma las asignaciones (cuánto se paga de cada cuenta, en euros).
+    const asignaciones: { cuenta_id: string; ref: string | null; eur: number; usd: number }[] = [];
+    for (const it of items) {
+      const id = texto(it.id);
+      const cu = id ? porId.get(id) : undefined;
+      if (!cu) return NextResponse.json({ error: "Una de las cuentas ya no existe; recarga e intenta de nuevo." }, { status: 400 });
+      const restanteEur = tasaEurUsd > 0 ? ((cu.monto_usd ?? 0) - cu.pagado_usd) / tasaEurUsd : 0;
+      const pedido = numero(it.monto_eur);
+      const eur = pedido == null ? restanteEur : pedido;
+      if (eur <= 0) continue;
+      if (r2(eur) > r2(restanteEur) + 0.01) {
+        return NextResponse.json({ error: `El monto de ${cu.ref || "la cuenta"} (${r2(eur)} €) supera lo que queda por cobrar (${r2(restanteEur)} €).` }, { status: 400 });
+      }
+      asignaciones.push({ cuenta_id: cu.id, ref: cu.ref, eur: r2(eur), usd: r2(eur * tasaEurUsd) });
+    }
+    if (asignaciones.length === 0) return NextResponse.json({ error: "No hay montos que cobrar." }, { status: 400 });
+
+    const totalEur = r2(asignaciones.reduce((s, a) => s + a.eur, 0));
+    const totalUsd = r2(asignaciones.reduce((s, a) => s + a.usd, 0));
+
+    // Lo que el cliente entrega, en la moneda del pago.
+    let montoRecibido: number;
+    let tasaStore: number | null;
+    if (moneda === "USD") { montoRecibido = r2(totalEur * tasaEurUsd); tasaStore = null; }
+    else if (moneda === "Bs") {
+      if (tasaBs == null || tasaBs <= 0) return NextResponse.json({ error: "Pon la tasa del día (Bs por €)." }, { status: 400 });
+      montoRecibido = r2(totalEur * tasaBs);
+      tasaStore = tasaEurUsd > 0 ? Math.round((tasaBs / tasaEurUsd) * 10000) / 10000 : null; // Bs por $
+    } else { montoRecibido = totalEur; tasaStore = tasaEurUsd; }
+
+    const refs = asignaciones.map((a) => a.ref).filter(Boolean).join(", ");
+    // 1) Un ingreso por el total recibido (fecha y método reales; sin IVA).
     const { data: ingreso, error: eIng } = await sb
       .from("admin_ingreso")
       .insert({
         fecha,
-        concepto: `Cobro de cuenta por cobrar — ${cliente}`,
+        concepto: `Cobro de cuenta por cobrar — ${cliente}${refs ? ` (${refs})` : ""}`,
         categoria_nombre: "Ventas",
         pagador: cliente,
-        monto: r2(monto),
+        monto: montoRecibido,
         moneda,
         tasa: tasaStore,
-        monto_usd: montoUsd,
+        monto_usd: totalUsd,
         metodo,
         factura: referencia,
         nota: "Cobro de cuenta por cobrar",
@@ -163,34 +196,34 @@ export async function POST(req: NextRequest) {
       .select("id")
       .single();
     if (eIng) {
-      const falta = (eIng as { code?: string }).code === "42P01" || /does not exist|no existe/i.test(eIng.message);
-      return NextResponse.json({ error: falta ? "Falta preparar la base de datos. Corre el SQL de 'supabase/admin-cxc-v2.sql' en Supabase (crea la tabla de pagos)." : eIng.message }, { status: 500 });
+      const falta = (eIng as { code?: string }).code === "42P01" || /does not exist|no existe|schema cache/i.test(eIng.message);
+      return NextResponse.json({ error: falta ? "Falta preparar la base de datos. Corre el SQL de 'supabase/admin-cxc-v2.sql' en Supabase." : eIng.message }, { status: 500 });
     }
 
-    // 2) Registrar el pago, enlazado al ingreso (para no duplicar).
+    // 2) Un pago (el cobro) enlazado al ingreso, con las asignaciones por cuenta.
     const { data: pago, error: ePago } = await sb
       .from("admin_cxc_pago")
       .insert({
         cliente,
         fecha,
-        monto: r2(monto),
+        monto: montoRecibido,
         moneda,
         tasa: tasaStore,
-        monto_usd: montoUsd,
+        monto_usd: totalUsd,
         metodo,
         referencia,
         ingreso_id: ingreso.id,
+        asignaciones,
         nota: null,
       })
       .select("id")
       .single();
     if (ePago) {
-      // Si el pago falla, deshace el ingreso para no dejarlo huérfano.
       await sb.from("admin_ingreso").delete().eq("id", ingreso.id);
-      const falta = (ePago as { code?: string }).code === "42P01" || /does not exist|no existe/i.test(ePago.message);
-      return NextResponse.json({ error: falta ? "Falta la tabla de pagos (admin_cxc_pago). Corre el SQL de 'supabase/admin-cxc-v2.sql' en Supabase y vuelve a intentar." : ePago.message }, { status: 500 });
+      const falta = (ePago as { code?: string }).code === "42P01" || /does not exist|no existe|schema cache/i.test(ePago.message);
+      return NextResponse.json({ error: falta ? "Falta la tabla de pagos o la columna 'asignaciones'. Corre 'supabase/admin-cxc-v2.sql' y 'supabase/admin-cxc-asignaciones.sql'." : ePago.message }, { status: 500 });
     }
-    return NextResponse.json({ ok: true, pago_id: pago.id, ingreso_id: ingreso.id, saldo_nuevo_usd: r2(saldoUsd - montoUsd) });
+    return NextResponse.json({ ok: true, pago_id: pago.id, ingreso_id: ingreso.id, cobrado_eur: totalEur });
   }
 
   // ── Agregar una cuenta a mano (deuda) ──

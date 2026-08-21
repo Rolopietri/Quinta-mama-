@@ -2474,12 +2474,13 @@ function ImportarSetux() {
 type CuentaMov = {
   id: string; fecha: string; descripcion: string | null; deudor: string | null; ref: string | null;
   monto: number | null; moneda: string | null; tasa: number | null; monto_usd: number | null;
-  cobrada: boolean; fuente: string | null;
+  cobrada: boolean; fuente: string | null; pagado_usd?: number;
 };
+type Asignacion = { cuenta_id: string; ref: string | null; eur: number; usd: number };
 type PagoMov = {
   id: string; cliente: string; fecha: string; monto: number | null; moneda: string | null;
   tasa: number | null; monto_usd: number | null; metodo: string | null; referencia: string | null;
-  ingreso_id: string | null; nota: string | null;
+  ingreso_id: string | null; nota: string | null; asignaciones: Asignacion[] | null;
 };
 type ClienteCXC = {
   cliente: string; key: string; saldo_usd: number; total_cuentas_usd: number; total_pagos_usd: number;
@@ -2538,19 +2539,15 @@ function AlertaCobrar({ refreshKey, onIr }: { refreshKey: string; onIr: () => vo
   );
 }
 
-// Estado por cuenta: reparte lo pagado (en $) a las cuentas más antiguas (FIFO).
-function estadosDeCuentas(cuentas: CuentaMov[], totalPagadoUsd: number) {
-  let pool = totalPagadoUsd;
+// Estado por cuenta según lo pagado de cada una (asignaciones del servidor).
+function estadosDeCuentas(cuentas: CuentaMov[]) {
   const ordenadas = [...cuentas].sort((a, b) => a.fecha.localeCompare(b.fecha));
   return ordenadas.map((c) => {
     const cu = c.monto_usd ?? 0;
+    const pagado = c.pagado_usd ?? 0;
     let estado: "Pendiente" | "Parcial" | "Pagada" | "A favor" = "Pendiente";
-    if (cu <= 0) { estado = "A favor"; }
-    else {
-      const aplicado = Math.max(0, Math.min(pool, cu));
-      pool -= aplicado;
-      estado = aplicado >= cu - 0.005 ? "Pagada" : aplicado > 0.005 ? "Parcial" : "Pendiente";
-    }
+    if (cu <= 0) estado = "A favor";
+    else estado = pagado >= cu - 0.005 ? "Pagada" : pagado > 0.005 ? "Parcial" : "Pendiente";
     return { c, estado };
   });
 }
@@ -2729,7 +2726,7 @@ function SeccionCuentasCobrar() {
             {[...deudores, ...aFavor, ...(verSaldados ? saldados : [])].map((c) => {
               const abiertoAqui = abierto === c.key;
               const enFavor = c.saldo_usd < 0;
-              const estados = estadosDeCuentas(c.cuentas, c.total_pagos_usd);
+              const estados = estadosDeCuentas(c.cuentas);
               return (
                 <li key={c.key} className="text-sm">
                   <div className="grid grid-cols-[1fr_auto_auto_auto] gap-3 px-4 py-3 items-center">
@@ -2780,7 +2777,7 @@ function SeccionCuentasCobrar() {
                             {c.pagos.map((p) => (
                               <li key={p.id} className="px-3 py-2 grid grid-cols-[auto_1fr_auto_auto] gap-2 items-center">
                                 <span className="text-cacao-mute tabular-nums text-[12px]">{fmtFecha(p.fecha)}</span>
-                                <span className="text-cacao text-[12px]">{p.metodo || "—"}{p.referencia ? ` · ${p.referencia}` : ""}</span>
+                                <span className="text-cacao text-[12px] min-w-0">{p.metodo || "—"}{p.asignaciones?.length ? <span className="text-cacao-mute"> · {p.asignaciones.map((a) => a.ref).filter(Boolean).join(", ")}</span> : p.referencia ? ` · ${p.referencia}` : ""}</span>
                                 <span className="text-right text-[#2F4A1F] tabular-nums text-[12px]">− {p.monto != null ? fmtMonto(p.monto, p.moneda || "EUR") : "—"}</span>
                                 <button type="button" onClick={() => borrarPago(p.id)} className="text-right text-cacao-soft hover:text-terracotta text-xs" aria-label="Revertir pago">↺</button>
                               </li>
@@ -2810,55 +2807,60 @@ function SeccionCuentasCobrar() {
   );
 }
 
-// Modal para registrar un cobro (pago) de un cliente.
-// La deuda está en euros (así lo pediste: el euro es la referencia). Al cobrar
-// en $ o Bs, se convierte a euros para descontar del saldo:
-//   € : el monto es en euros.
-//   $ : euros = monto$ / (1 € = X $)  (tasa fija del panel)
-//   Bs: euros = montoBs / (Bs por €)  (tasa del día que tú pones)
+// Modal de cobro: elige QUÉ cuentas (NE) se están cobrando (total o parcial).
+// La deuda está en euros; el cliente puede pagar en €, $ o Bs (con su tasa).
 function ModalCobro({ cliente, tasaGlobal, onCerrar, onListo }: { cliente: ClienteCXC; tasaGlobal: number; onCerrar: () => void; onListo: (msg: string) => void }) {
-  const saldoUsd = cliente.saldo_usd;
-  const saldoEur = tasaGlobal > 0 ? saldoUsd / tasaGlobal : 0;
+  const tasa = tasaGlobal > 0 ? tasaGlobal : 1.17;
+  // Cuentas con saldo por cobrar (restante en euros), más antiguas primero.
+  const filas = cliente.cuentas
+    .map((c) => ({ c, restEur: Math.round((((c.monto_usd ?? 0) - (c.pagado_usd ?? 0)) / tasa) * 100) / 100 }))
+    .filter((x) => x.restEur > 0.005)
+    .sort((a, b) => a.c.fecha.localeCompare(b.c.fecha));
+
+  const [sel, setSel] = useState<Record<string, { on: boolean; amt: string }>>(
+    () => Object.fromEntries(filas.map((x) => [x.c.id, { on: true, amt: x.restEur.toFixed(2).replace(".", ",") }])),
+  );
   const [moneda, setMoneda] = useState<"EUR" | "USD" | "Bs">("EUR");
-  const [montoStr, setMontoStr] = useState(saldoEur.toFixed(2).replace(".", ","));
-  const [tasaBsStr, setTasaBsStr] = useState(""); // Bs por € (tasa del día)
+  const [tasaBsStr, setTasaBsStr] = useState("");
   const [metodo, setMetodo] = useState("Efectivo");
   const [fecha, setFecha] = useState(hoyISO());
   const [referencia, setReferencia] = useState("");
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Al cambiar de moneda, el euro arranca con el saldo; las demás en blanco.
-  function cambiarMoneda(m: "EUR" | "USD" | "Bs") {
-    setMoneda(m);
-    setMontoStr(m === "EUR" ? saldoEur.toFixed(2).replace(".", ",") : "");
-  }
-
-  const monto = parseTasa(montoStr) ?? 0;
-  const tasaBs = parseTasa(tasaBsStr) ?? 0; // Bs por €
-  const montoEur =
-    moneda === "EUR" ? monto
-    : moneda === "USD" ? (tasaGlobal > 0 ? monto / tasaGlobal : 0)
-    : (tasaBs > 0 ? monto / tasaBs : 0);
-  const montoUsd = montoEur * tasaGlobal;
+  const seleccion = filas
+    .filter((x) => sel[x.c.id]?.on)
+    .map((x) => ({ x, eur: parseTasa(sel[x.c.id].amt) ?? 0 }));
+  const excede = seleccion.find((s) => s.eur > s.x.restEur + 0.01);
+  const totalEur = Math.round(seleccion.reduce((s, a) => s + Math.max(0, a.eur), 0) * 100) / 100;
+  const tasaBs = parseTasa(tasaBsStr) ?? 0;
   const faltaTasaBs = moneda === "Bs" && tasaBs <= 0;
-  const supera = montoEur > saldoEur + 0.01;
-  const restanteEur = Math.max(0, saldoEur - montoEur);
+  const recibe = moneda === "EUR" ? totalEur : moneda === "USD" ? totalEur * tasa : totalEur * tasaBs;
+
+  function toggle(id: string) { setSel((s) => ({ ...s, [id]: { ...s[id], on: !s[id].on } })); }
+  function setAmt(id: string, amt: string) { setSel((s) => ({ ...s, [id]: { ...s[id], amt } })); }
 
   async function cobrar() {
-    if (monto <= 0) { setError("Pon un monto mayor que 0."); return; }
+    if (seleccion.length === 0 || totalEur <= 0) { setError("Selecciona al menos una cuenta con monto."); return; }
+    if (excede) { setError(`El monto de ${excede.x.c.ref || "una cuenta"} supera lo que queda (${fmtMonto(excede.x.restEur, "EUR")}).`); return; }
     if (faltaTasaBs) { setError("Pon la tasa del día (Bs por €)."); return; }
-    if (supera) { setError(`El cobro (${fmtMonto(montoEur, "EUR")}) supera el saldo pendiente (${fmtMonto(saldoEur, "EUR")}).`); return; }
     setGuardando(true); setError(null);
     try {
       const r = await fetch("/api/admin/cuentas-cobrar", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accion: "cobro", cliente: cliente.cliente, monto, moneda, tasa: moneda === "Bs" ? tasaBs : null, metodo, fecha, referencia: referencia || null }),
+        body: JSON.stringify({
+          accion: "cobro",
+          cliente: cliente.cliente,
+          moneda,
+          tasa: moneda === "Bs" ? tasaBs : null,
+          metodo, fecha, referencia: referencia || null,
+          cuentas: seleccion.map((s) => ({ id: s.x.c.id, monto_eur: s.eur })),
+        }),
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || "No se pudo cobrar.");
-      onListo(`Cobro registrado: ${fmtMonto(monto, moneda)} de ${cliente.cliente} (${metodo}) = ${fmtMonto(montoEur, "EUR")}. Ingreso creado el ${fmtFecha(fecha)}.`);
+      onListo(`Cobro registrado: ${fmtMonto(totalEur, "EUR")} de ${cliente.cliente} en ${seleccion.length} cuenta${seleccion.length === 1 ? "" : "s"} (${metodo}). Ingreso creado el ${fmtFecha(fecha)}.`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "No se pudo cobrar.");
     } finally {
@@ -2868,26 +2870,56 @@ function ModalCobro({ cliente, tasaGlobal, onCerrar, onListo }: { cliente: Clien
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30" onClick={onCerrar}>
-      <div className="w-full max-w-md rounded-2xl bg-white ring-1 ring-marfil p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
+      <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl bg-white ring-1 ring-marfil p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between gap-3">
           <div>
             <h3 className="font-display text-lg text-cacao">Cobrar a {cliente.cliente}</h3>
-            <p className="text-sm text-cacao-soft">Saldo pendiente: <strong>{fmtMonto(saldoEur, "EUR")}</strong> (≈ {fmtMonto(saldoUsd, "USD")})</p>
+            <p className="text-sm text-cacao-soft">Elige qué cuentas (NE) estás cobrando. Puedes pagar el total o una parte de cada una.</p>
           </div>
           <button type="button" onClick={onCerrar} className="text-cacao-soft hover:text-cacao text-lg" aria-label="Cerrar">✕</button>
         </div>
 
         {error && <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419]">{error}</div>}
 
+        {/* Cuentas por cobrar del cliente */}
+        <div className="rounded-xl ring-1 ring-marfil overflow-hidden">
+          <div className="px-3 py-2 font-display text-[9px] tracking-[0.2em] uppercase text-cacao-mute border-b border-marfil grid grid-cols-[auto_1fr_auto_auto] gap-2">
+            <span></span><span>Cuenta</span><span className="text-right">Queda</span><span className="text-right">A cobrar (€)</span>
+          </div>
+          <ul className="divide-y divide-marfil max-h-56 overflow-y-auto">
+            {filas.map(({ c, restEur }) => {
+              const on = sel[c.id]?.on;
+              return (
+                <li key={c.id} className={`px-3 py-2 grid grid-cols-[auto_1fr_auto_auto] gap-2 items-center ${on ? "" : "opacity-45"}`}>
+                  <input type="checkbox" checked={on} onChange={() => toggle(c.id)} className="accent-[#0F0F0F]" />
+                  <span className="text-cacao text-[12px] min-w-0">
+                    <span className="font-medium">{c.ref || "Cuenta"}</span>
+                    <span className="text-cacao-mute"> · {fmtFecha(c.fecha)}</span>
+                  </span>
+                  <span className="text-right text-cacao-mute tabular-nums text-[12px]">{fmtMonto(restEur, "EUR")}</span>
+                  <input inputMode="decimal" disabled={!on} value={sel[c.id]?.amt ?? ""} onChange={(e) => setAmt(c.id, e.target.value)} className="w-24 border border-marfil rounded-lg px-2 py-1 text-[12px] text-cacao text-right disabled:bg-marfil-soft" />
+                </li>
+              );
+            })}
+          </ul>
+          <div className="px-3 py-2 border-t border-marfil flex items-center justify-between text-sm">
+            <span className="text-cacao-mute">{seleccion.length} cuenta{seleccion.length === 1 ? "" : "s"} seleccionada{seleccion.length === 1 ? "" : "s"}</span>
+            <span className="font-medium text-cacao">Total a cobrar: {fmtMonto(totalEur, "EUR")}</span>
+          </div>
+        </div>
+
+        {/* Cómo paga */}
         <div className="grid grid-cols-2 gap-3">
-          <Campo label="Monto a cobrar">
-            <input inputMode="decimal" value={montoStr} onChange={(e) => setMontoStr(e.target.value)} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao text-right" />
-          </Campo>
           <Campo label="Moneda del pago">
-            <select value={moneda} onChange={(e) => cambiarMoneda(e.target.value as "EUR" | "USD" | "Bs")} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
+            <select value={moneda} onChange={(e) => setMoneda(e.target.value as "EUR" | "USD" | "Bs")} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
               <option value="EUR">€ Euro</option>
               <option value="USD">$ Dólar</option>
               <option value="Bs">Bs Bolívares</option>
+            </select>
+          </Campo>
+          <Campo label="Método de pago">
+            <select value={metodo} onChange={(e) => setMetodo(e.target.value)} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
+              {METODOS_COBRO.map((m) => <option key={m} value={m}>{m}</option>)}
             </select>
           </Campo>
         </div>
@@ -2898,35 +2930,29 @@ function ModalCobro({ cliente, tasaGlobal, onCerrar, onListo }: { cliente: Clien
           </Campo>
         )}
         {moneda === "USD" && (
-          <p className="text-[11px] text-cacao-mute">Se convierte a euros con la tasa del panel: 1 € = {tasaGlobal.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $.</p>
+          <p className="text-[11px] text-cacao-mute">Se convierte con la tasa del panel: 1 € = {tasa.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $.</p>
         )}
 
         <div className="grid grid-cols-2 gap-3">
-          <Campo label="Método de pago">
-            <select value={metodo} onChange={(e) => setMetodo(e.target.value)} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
-              {METODOS_COBRO.map((m) => <option key={m} value={m}>{m}</option>)}
-            </select>
-          </Campo>
           <Campo label="Fecha del cobro">
             <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
           </Campo>
+          <Campo label="Referencia (opcional)">
+            <input value={referencia} onChange={(e) => setReferencia(e.target.value)} placeholder="nº recibo / operación" className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
+          </Campo>
         </div>
 
-        <Campo label="Referencia (opcional)">
-          <input value={referencia} onChange={(e) => setReferencia(e.target.value)} placeholder="nº de recibo / operación" className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
-        </Campo>
-
-        <div className={`rounded-lg p-3 text-sm ${supera || faltaTasaBs ? "bg-[#F9EBE7] text-[#7A2419]" : "bg-marfil-soft text-cacao-soft"}`}>
+        <div className={`rounded-lg p-3 text-sm ${excede || faltaTasaBs ? "bg-[#F9EBE7] text-[#7A2419]" : "bg-marfil-soft text-cacao-soft"}`}>
           {faltaTasaBs
-            ? "Pon la tasa del día (Bs por €) para calcular el equivalente."
-            : supera
-            ? `El equivalente (${fmtMonto(montoEur, "EUR")}) supera el saldo pendiente (${fmtMonto(saldoEur, "EUR")}).`
-            : <>Equivale a <strong>{fmtMonto(montoEur, "EUR")}</strong>{moneda !== "EUR" ? ` (≈ ${fmtMonto(montoUsd, "USD")})` : ""}. Se registra como ingreso del {fmtFecha(fecha)} · {metodo}. Saldo restante: <strong>{fmtMonto(restanteEur, "EUR")}</strong>.</>}
+            ? "Pon la tasa del día (Bs por €) para calcular cuánto entrega el cliente."
+            : excede
+            ? "Hay una cuenta con un monto mayor a lo que queda por cobrar."
+            : <>El cliente entrega <strong>{fmtMonto(recibe, moneda)}</strong>{moneda !== "EUR" ? ` (= ${fmtMonto(totalEur, "EUR")})` : ""}. Se registra como ingreso del {fmtFecha(fecha)} · {metodo}.</>}
         </div>
 
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onCerrar} className="rounded-lg ring-1 ring-marfil text-cacao px-4 py-2 text-xs uppercase tracking-widest hover:bg-marfil-soft">Cancelar</button>
-          <button type="button" onClick={cobrar} disabled={guardando || supera || faltaTasaBs || monto <= 0} className="rounded-lg bg-cacao text-white px-5 py-2 text-xs uppercase tracking-widest hover:bg-terracotta disabled:bg-marfil disabled:text-cacao-mute">{guardando ? "Registrando…" : "Registrar cobro"}</button>
+          <button type="button" onClick={cobrar} disabled={guardando || !!excede || faltaTasaBs || totalEur <= 0} className="rounded-lg bg-cacao text-white px-5 py-2 text-xs uppercase tracking-widest hover:bg-terracotta disabled:bg-marfil disabled:text-cacao-mute">{guardando ? "Registrando…" : "Registrar cobro"}</button>
         </div>
       </div>
     </div>
