@@ -4,7 +4,8 @@
 // posición y de ahí armamos la tabla. Solo servidor (node:zlib).
 import zlib from "node:zlib";
 
-export type ClienteCxC = { codigo: string; nombre: string; saldo: number };
+export type DocumentoCxC = { fecha: string | null; ref: string; monto: number };
+export type ClienteCxC = { codigo: string; nombre: string; saldo: number; documentos: DocumentoCxC[] };
 export type ReporteCxC = { fecha: string | null; clientes: ClienteCxC[] };
 
 type Tok = { x: number; y: number; text: string };
@@ -78,6 +79,17 @@ export function parseEstadoCuentas(buf: Buffer): ReporteCxC {
   const clientes: ClienteCxC[] = [];
   let actual: { codigo: string; nombre: string } | null = null;
   let acc = 0; // suma de "Saldo Divisas" del cliente en curso
+  let docs: DocumentoCxC[] = []; // documentos individuales del cliente en curso
+  const cerrar = () => {
+    if (!actual) return;
+    clientes.push({ codigo: actual.codigo, nombre: actual.nombre, saldo: Math.round(acc * 100) / 100, documentos: docs });
+    actual = null; acc = 0; docs = [];
+  };
+  // "DD/MM/YYYY" → "YYYY-MM-DD"
+  const isoFecha = (s: string): string | null => {
+    const m = s.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+    return m ? `${m[3]}-${m[2]}-${m[1]}` : null;
+  };
 
   for (const pg of pages) {
     const tk = bloques(pg);
@@ -101,26 +113,34 @@ export function parseEstadoCuentas(buf: Buffer): ReporteCxC {
       const linea = f.items.map((i) => i.text).join(" ");
       const mc = linea.match(/Cliente:\s*([A-Z0-9]+)\s*-\s*(.+?)\s+Tlf/i);
       if (mc) {
-        // Cierra el cliente anterior (por si no traía "Total Cliente").
-        if (actual) clientes.push({ codigo: actual.codigo, nombre: actual.nombre, saldo: Math.round(acc * 100) / 100 });
+        cerrar(); // cierra el cliente anterior (por si no traía "Total Cliente")
         actual = { codigo: mc[1], nombre: mc[2].trim() };
-        acc = 0;
         continue;
       }
       // El "** Total Cliente CxC Bs." es el total en bolívares (0 en divisas);
       // el saldo real por cobrar es la suma de la columna "Saldo Divisas".
-      if (/Total\s+Cliente/i.test(linea)) {
-        if (actual) { clientes.push({ codigo: actual.codigo, nombre: actual.nombre, saldo: Math.round(acc * 100) / 100 }); actual = null; acc = 0; }
-        continue;
-      }
+      if (/Total\s+Cliente/i.test(linea)) { cerrar(); continue; }
       if (actual) {
-        // Columna "Saldo Divisas" (lo que aún deben en $, tras abonos): x ~ 460..500.
+        // Columna "Saldo Divisas" (lo que aún deben, tras abonos): x ~ 460..500.
         const sd = f.items.filter((i) => i.x > 455 && i.x < 505).map((i) => num(i.text)).filter((v): v is number => v != null);
-        if (sd.length) acc += sd[sd.length - 1];
+        if (sd.length) {
+          const monto = sd[sd.length - 1];
+          acc += monto;
+          // Cada documento con saldo != 0 es una cuenta individual.
+          if (Math.abs(monto) > 0.005) {
+            // fecha = primer token (x < 45); referencia = token en x ~ 70..140.
+            const tFecha = f.items.find((i) => i.x < 45 && /\d{2}\/\d{2}\/\d{4}/.test(i.text));
+            const tRef = f.items.find((i) => i.x >= 45 && i.x < 145 && i.text.trim());
+            docs.push({
+              fecha: tFecha ? isoFecha(tFecha.text) : null,
+              ref: (tRef?.text ?? "").trim(),
+              monto: Math.round(monto * 100) / 100,
+            });
+          }
+        }
       }
     }
   }
-  // Cierra el último cliente si el PDF no terminó con "Total Cliente".
-  if (actual) clientes.push({ codigo: actual.codigo, nombre: actual.nombre, saldo: Math.round(acc * 100) / 100 });
+  cerrar(); // cierra el último cliente si el PDF no terminó con "Total Cliente"
   return { fecha, clientes };
 }

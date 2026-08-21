@@ -2233,7 +2233,7 @@ function DesglosePorMoneda({ titulo, filas, orden }: { titulo: string; filas: [s
 // Beatriz sube el PDF diario de Setux; el servidor lo lee y muestra la vista
 // previa; confirma → crea un ingreso por método (en euros; el USD sale con la
 // tasa fija del panel).
-type LineaSetuxUI = { metodo: string; metodoBonito: string; cantidad: number | null; total: number; propina: number | null; incluir: boolean; destino: "ingreso" | "cobrar" | "excluir" | "egreso" };
+type LineaSetuxUI = { metodo: string; metodoBonito: string; cantidad: number | null; total: number; propina: number | null; incluir: boolean; destino: "ingreso" | "detalle" | "excluir" | "egreso" };
 type ReporteSetuxUI = { fecha: string | null; desde: string | null; hasta: string | null; usuario: string | null; total: number | null };
 
 function ImportarSetux() {
@@ -2298,7 +2298,7 @@ function ImportarSetux() {
       setReporte({ fecha: rep.fecha, desde: rep.desde, hasta: rep.hasta, usuario: rep.usuario, total: rep.total });
       setFecha(rep.fecha ?? "");
       // RPP (cortesías) no se cuenta: llega desmarcado.
-      const ls = (rep.lineas as Omit<LineaSetuxUI, "incluir">[]).map((l) => ({ ...l, incluir: l.destino !== "excluir" }));
+      const ls = (rep.lineas as Omit<LineaSetuxUI, "incluir">[]).map((l) => ({ ...l, incluir: l.destino !== "excluir" && l.destino !== "detalle" }));
       setLineas(ls);
       // Propina por defecto = suma de TODAS las propinas (editable para quitar errores).
       const propAuto = ls.filter((l) => l.destino !== "excluir").reduce((s, l) => s + (l.propina ?? 0), 0);
@@ -2311,9 +2311,8 @@ function ImportarSetux() {
     }
   }
 
-  const incluidas = lineas.filter((l) => l.incluir && l.destino !== "excluir");
+  const incluidas = lineas.filter((l) => l.incluir && l.destino !== "excluir" && l.destino !== "detalle");
   const ingresoEUR = incluidas.filter((l) => l.destino === "ingreso").reduce((s, l) => s + l.total, 0);
-  const cobrarEUR = incluidas.filter((l) => l.destino === "cobrar").reduce((s, l) => s + l.total, 0);
   const egresoEUR = incluidas.filter((l) => l.destino === "egreso").reduce((s, l) => s + l.total, 0);
   // Propina: aparte (no es ingreso). El total lo controlas tú (editable).
   const propinaTotal = parseTasa(propinaEdit) ?? 0;
@@ -2343,7 +2342,6 @@ function ImportarSetux() {
       if (r.status === 409 && d.yaExiste) { setConflicto(d.cuantos ?? 0); setGuardando(false); return; }
       if (!r.ok) throw new Error(d.error || "No se pudo registrar.");
       const partes = [`${d.creados} ingreso${d.creados === 1 ? "" : "s"}`];
-      if (d.porCobrar > 0) partes.push(`${d.porCobrar} cuenta${d.porCobrar === 1 ? "" : "s"} por cobrar`);
       if (d.egresos > 0) partes.push(`${d.egresos} egreso${d.egresos === 1 ? "" : "s"} (cortesías)`);
       let extra = "";
       if (d.propina > 0) extra = ` Propina registrada aparte: ${fmtMonto(d.propina, "EUR")}.`;
@@ -2399,7 +2397,7 @@ function ImportarSetux() {
                   <input type="checkbox" checked={l.incluir} disabled={l.destino === "excluir"} onChange={() => setLineas((ls) => ls.map((x, j) => (j === i ? { ...x, incluir: !x.incluir } : x)))} className="accent-[#0F0F0F]" />
                   <span className="text-cacao text-sm">
                     {l.metodoBonito}
-                    {l.destino === "cobrar" && <span className="ml-2 inline-block rounded-full bg-[#FBF3E2] text-[#7A5A18] text-[9px] uppercase tracking-widest px-2 py-0.5 align-middle">→ Por cobrar</span>}
+                    {l.destino === "detalle" && <span className="ml-2 inline-block rounded-full bg-[#FBF3E2] text-[#7A5A18] text-[9px] uppercase tracking-widest px-2 py-0.5 align-middle">→ Reporte detallado</span>}
                     {l.destino === "egreso" && <span className="ml-2 inline-block rounded-full bg-[#F9EBE7] text-[#7A2419] text-[9px] uppercase tracking-widest px-2 py-0.5 align-middle">→ Egreso · cortesía</span>}
                     {l.destino === "excluir" && <span className="ml-2 inline-block rounded-full bg-marfil-soft text-cacao-mute text-[9px] uppercase tracking-widest px-2 py-0.5 align-middle">No cuenta</span>}
                   </span>
@@ -2416,10 +2414,10 @@ function ImportarSetux() {
                 </span>
               </div>
               <div className="text-[11px] text-cacao-mute">Al guardar se registra el NETO (sin IVA) y el IVA queda aparte. Zelle y Dólar no llevan IVA.</div>
-              {cobrarEUR > 0 && (
+              {lineas.some((l) => l.destino === "detalle") && (
                 <div className="grid grid-cols-[1fr_auto] gap-3 text-[#7A5A18]">
-                  <span>A cuentas por cobrar (CXC)</span>
-                  <span className="text-right tabular-nums">{fmtMonto(cobrarEUR, "EUR")}</span>
+                  <span>CXC (ventas a crédito)</span>
+                  <span className="text-right text-[11px]">Impórtalas por el reporte detallado por cliente</span>
                 </div>
               )}
               {egresoEUR > 0 && (
@@ -2469,18 +2467,27 @@ function ImportarSetux() {
 }
 
 // ── Cuentas por cobrar (CXC) ────────────────────────────────────────
-type CuentaCobrar = {
-  id: string;
-  fecha: string;
-  descripcion: string | null;
-  deudor: string | null;
-  monto: number | null;
-  moneda: string | null;
-  tasa: number | null;
-  monto_usd: number | null;
-  cobrada: boolean;
-  fecha_cobro: string | null;
+// ── Cuentas por cobrar (CXC) · saldos por cliente ───────────────────
+// Modelo: cada cliente tiene CUENTAS (deudas) y PAGOS (cobros).
+//   saldo del cliente = Σ cuentas − Σ pagos   (se calcula en el servidor)
+// Todo se expresa como las ventas: en euros, con equivalente en $ a la tasa.
+type CuentaMov = {
+  id: string; fecha: string; descripcion: string | null; deudor: string | null; ref: string | null;
+  monto: number | null; moneda: string | null; tasa: number | null; monto_usd: number | null;
+  cobrada: boolean; fuente: string | null;
 };
+type PagoMov = {
+  id: string; cliente: string; fecha: string; monto: number | null; moneda: string | null;
+  tasa: number | null; monto_usd: number | null; metodo: string | null; referencia: string | null;
+  ingreso_id: string | null; nota: string | null;
+};
+type ClienteCXC = {
+  cliente: string; key: string; saldo_usd: number; total_cuentas_usd: number; total_pagos_usd: number;
+  ultima: string | null; cuentas: CuentaMov[]; pagos: PagoMov[];
+};
+
+// Métodos de pago disponibles (los mismos que reporta el sistema/Setux).
+const METODOS_COBRO = ["Efectivo", "Pago Móvil", "Zelle", "Punto de Venta", "Transferencia", "Dólar", "Tarjeta de crédito", "Tarjeta de débito", "Otro"];
 
 function hoyISO(): string {
   const d = new Date();
@@ -2492,16 +2499,17 @@ function diasHastaCierre(): number {
   return Math.max(0, ultimo - d.getDate());
 }
 
-// Banner de alerta: aparece arriba del panel cuando hay cuentas por cobrar.
+// Banner de alerta: aparece arriba del panel cuando hay clientes con saldo.
 function AlertaCobrar({ refreshKey, onIr }: { refreshKey: string; onIr: () => void }) {
-  const [abiertas, setAbiertas] = useState<CuentaCobrar[]>([]);
+  const [clientes, setClientes] = useState<ClienteCXC[]>([]);
+  const [tasa, setTasa] = useState(1.17);
   useEffect(() => {
     let a = true;
     (async () => {
       try {
-        const r = await fetch("/api/admin/cuentas-cobrar?abiertas=1", { cache: "no-store" });
+        const r = await fetch("/api/admin/cuentas-cobrar", { cache: "no-store" });
         const d = await r.json();
-        if (a) setAbiertas(d.cuentas ?? []);
+        if (a) { setClientes(d.clientes ?? []); if (d.tasa) setTasa(d.tasa); }
       } catch {
         /* silencioso: la alerta es informativa */
       }
@@ -2509,9 +2517,10 @@ function AlertaCobrar({ refreshKey, onIr }: { refreshKey: string; onIr: () => vo
     return () => { a = false; };
   }, [refreshKey]);
 
-  if (abiertas.length === 0) return null;
-  const usd = abiertas.reduce((s, c) => s + (c.monto_usd ?? 0), 0);
-  const eur = abiertas.filter((c) => c.moneda === "EUR").reduce((s, c) => s + (c.monto ?? 0), 0);
+  const deudores = clientes.filter((c) => c.saldo_usd > 0.005);
+  if (deudores.length === 0) return null;
+  const usd = deudores.reduce((s, c) => s + c.saldo_usd, 0);
+  const eur = tasa > 0 ? usd / tasa : 0;
 
   return (
     <div className="rounded-2xl bg-[#F9EBE7] ring-1 ring-[#E0A79B] p-4 flex flex-wrap items-center justify-between gap-3">
@@ -2519,26 +2528,41 @@ function AlertaCobrar({ refreshKey, onIr }: { refreshKey: string; onIr: () => vo
         <span className="h-2.5 w-2.5 rounded-full bg-[#C0563F] shrink-0" />
         <div>
           <p className="text-[#7A2419] font-medium">
-            Tienes {abiertas.length} cuenta{abiertas.length === 1 ? "" : "s"} por cobrar
-            {usd > 0 ? ` · ≈ ${fmtMonto(usd, "USD")}` : ""}{eur > 0 ? ` (${fmtMonto(eur, "EUR")})` : ""}
+            {deudores.length} cliente{deudores.length === 1 ? "" : "s"} con saldo pendiente · {fmtMonto(eur, "EUR")} (≈ {fmtMonto(usd, "USD")})
           </p>
-          <p className="text-xs text-[#9A4C3D]">Cóbralas antes de que cierre el mes.</p>
+          <p className="text-xs text-[#9A4C3D]">Cóbralos antes de que cierre el mes.</p>
         </div>
       </div>
-      <button type="button" onClick={onIr} className="rounded-lg bg-[#7A2419] text-white px-4 py-2 text-xs uppercase tracking-widest hover:bg-[#5F1B12] shrink-0">Ver cuentas</button>
+      <button type="button" onClick={onIr} className="rounded-lg bg-[#7A2419] text-white px-4 py-2 text-xs uppercase tracking-widest hover:bg-[#5F1B12] shrink-0">Ver clientes</button>
     </div>
   );
 }
 
+// Estado por cuenta: reparte lo pagado (en $) a las cuentas más antiguas (FIFO).
+function estadosDeCuentas(cuentas: CuentaMov[], totalPagadoUsd: number) {
+  let pool = totalPagadoUsd;
+  const ordenadas = [...cuentas].sort((a, b) => a.fecha.localeCompare(b.fecha));
+  return ordenadas.map((c) => {
+    const cu = c.monto_usd ?? 0;
+    let estado: "Pendiente" | "Parcial" | "Pagada" | "A favor" = "Pendiente";
+    if (cu <= 0) { estado = "A favor"; }
+    else {
+      const aplicado = Math.max(0, Math.min(pool, cu));
+      pool -= aplicado;
+      estado = aplicado >= cu - 0.005 ? "Pagada" : aplicado > 0.005 ? "Parcial" : "Pendiente";
+    }
+    return { c, estado };
+  });
+}
+
 function SeccionCuentasCobrar() {
-  const [cuentas, setCuentas] = useState<CuentaCobrar[]>([]);
+  const [clientes, setClientes] = useState<ClienteCXC[]>([]);
+  const [tasa, setTasa] = useState(1.17);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
-  const [verTodas, setVerTodas] = useState(false);
-  const [cobrando, setCobrando] = useState<string | null>(null);
-  const [fechaCobro, setFechaCobro] = useState(hoyISO());
-  const [tasaCobro, setTasaCobro] = useState("");
+  const [abierto, setAbierto] = useState<string | null>(null);       // detalle del cliente (key)
+  const [cobrando, setCobrando] = useState<ClienteCXC | null>(null); // modal de cobro
   const [devalInput, setDevalInput] = useState("");
   const [devalPct, setDevalPct] = useState<number | null>(null);
   const [guardandoDeval, setGuardandoDeval] = useState(false);
@@ -2546,6 +2570,7 @@ function SeccionCuentasCobrar() {
   const [guardandoCorreos, setGuardandoCorreos] = useState(false);
   const [probando, setProbando] = useState(false);
   const [mostrarImport, setMostrarImport] = useState(false);
+  const [verSaldados, setVerSaldados] = useState(false);
   const [tick, setTick] = useState(0);
   const recargar = useCallback(() => setTick((t) => t + 1), []);
 
@@ -2555,7 +2580,7 @@ function SeccionCuentasCobrar() {
       try {
         const r = await fetch("/api/admin/cuentas-cobrar", { cache: "no-store" });
         const d = await r.json();
-        if (a) setCuentas(d.cuentas ?? []);
+        if (a) { setClientes(d.clientes ?? []); if (d.tasa) setTasa(d.tasa); }
       } catch {
         if (a) setError("No se pudieron cargar las cuentas por cobrar.");
       } finally {
@@ -2582,28 +2607,16 @@ function SeccionCuentasCobrar() {
   }, []);
 
   async function guardarCorreos() {
-    setGuardandoCorreos(true);
-    setError(null);
+    setGuardandoCorreos(true); setError(null);
     try {
       const limpio = correosInput.split(",").map((s) => s.trim()).filter(Boolean).join(", ");
-      await fetch("/api/admin/config", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clave: "alerta_correos", valor: limpio }),
-      });
+      await fetch("/api/admin/config", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clave: "alerta_correos", valor: limpio }) });
       setCorreosInput(limpio);
       setMsg(limpio ? "Correos de alerta guardados." : "Se quitaron los correos de alerta.");
-    } catch {
-      setError("No se pudieron guardar los correos.");
-    } finally {
-      setGuardandoCorreos(false);
-    }
+    } catch { setError("No se pudieron guardar los correos."); } finally { setGuardandoCorreos(false); }
   }
-
   async function probarCorreo() {
-    setProbando(true);
-    setError(null);
-    setMsg(null);
+    setProbando(true); setError(null); setMsg(null);
     try {
       const r = await fetch("/api/admin/probar-correo", { method: "POST" });
       const d = await r.json();
@@ -2611,86 +2624,40 @@ function SeccionCuentasCobrar() {
       if (!r.ok) throw new Error(d.error || "No se pudo enviar.");
       if (d.fallidos?.length) setError(`Enviados ${d.enviados}/${d.total} (remitente: ${d.from}). Error de Resend: ${d.detalle ?? d.fallidos.join(", ")}`);
       else setMsg(`Correo de prueba enviado a ${d.enviados} correo${d.enviados === 1 ? "" : "s"} (desde ${d.from}). Revisa la bandeja (y spam).`);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "No se pudo enviar.");
-    } finally {
-      setProbando(false);
-    }
+    } catch (e) { setError(e instanceof Error ? e.message : "No se pudo enviar."); } finally { setProbando(false); }
   }
-
   async function guardarDeval() {
-    setGuardandoDeval(true);
-    setError(null);
+    setGuardandoDeval(true); setError(null);
     try {
       const val = parseTasa(devalInput);
-      await fetch("/api/admin/config", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clave: "devaluacion_mensual", valor: val != null ? String(val) : "" }),
-      });
+      await fetch("/api/admin/config", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clave: "devaluacion_mensual", valor: val != null ? String(val) : "" }) });
       setDevalPct(val);
       setMsg(val ? `Devaluación mensual estimada: ${val}%.` : "Ajuste de devaluación desactivado.");
-    } catch {
-      setError("No se pudo guardar el ajuste.");
-    } finally {
-      setGuardandoDeval(false);
-    }
+    } catch { setError("No se pudo guardar el ajuste."); } finally { setGuardandoDeval(false); }
+  }
+  async function borrarPago(pagoId: string) {
+    try {
+      await fetch(`/api/admin/cuentas-cobrar?pago=${pagoId}`, { method: "DELETE" });
+      setMsg("Pago revertido (se quitó el ingreso y volvió al saldo).");
+      recargar();
+    } catch { setError("No se pudo revertir el pago."); }
+  }
+  async function borrarCuenta(cuentaId: string) {
+    try {
+      await fetch(`/api/admin/cuentas-cobrar?cuenta=${cuentaId}`, { method: "DELETE" });
+      recargar();
+    } catch { setError("No se pudo eliminar la cuenta."); }
   }
 
-  const abiertas = cuentas.filter((c) => !c.cobrada);
-  const totalUsd = abiertas.reduce((s, c) => s + (c.monto_usd ?? 0), 0);
-  const totalEur = abiertas.filter((c) => c.moneda === "EUR").reduce((s, c) => s + (c.monto ?? 0), 0);
-  const lista = verTodas ? cuentas : abiertas;
+  const eurDe = (usd: number) => (tasa > 0 ? usd / tasa : 0);
+  const deudores = clientes.filter((c) => c.saldo_usd > 0.005);
+  const aFavor = clientes.filter((c) => c.saldo_usd < -0.005);
+  const saldados = clientes.filter((c) => Math.abs(c.saldo_usd) <= 0.005 && (c.cuentas.length > 0 || c.pagos.length > 0));
+  const totalUsd = deudores.reduce((s, c) => s + c.saldo_usd, 0);
 
-  // Merma por devaluación si esperas hasta el cierre del mes.
   const diasCierre = diasHastaCierre();
   const factorEspera = devalPct && devalPct > 0 ? Math.pow(1 - devalPct / 100, diasCierre / 30) : 1;
-  const perdidaDe = (c: CuentaCobrar): number | null =>
-    devalPct && devalPct > 0 && c.monto_usd != null ? c.monto_usd * (1 - factorEspera) : null;
-  const perdidaTotal = abiertas.reduce((s, c) => s + (perdidaDe(c) ?? 0), 0);
-
-  function abrirCobro(c: CuentaCobrar) {
-    setCobrando(c.id);
-    setFechaCobro(hoyISO());
-    setTasaCobro(c.tasa != null ? String(c.tasa) : "");
-  }
-  async function confirmarCobro(id: string) {
-    try {
-      const r = await fetch("/api/admin/cuentas-cobrar", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id, accion: "cobrar", fecha_cobro: fechaCobro, tasa: parseTasa(tasaCobro) }),
-      });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error);
-      setMsg("Cuenta cobrada: se registró como ingreso.");
-      setCobrando(null);
-      recargar();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "No se pudo cobrar.");
-    }
-  }
-  async function reabrir(id: string) {
-    try {
-      await fetch("/api/admin/cuentas-cobrar", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id, accion: "reabrir" }),
-      });
-      setMsg("Cuenta reabierta (se quitó el ingreso).");
-      recargar();
-    } catch {
-      setError("No se pudo reabrir.");
-    }
-  }
-  async function borrar(id: string) {
-    try {
-      await fetch(`/api/admin/cuentas-cobrar?id=${id}`, { method: "DELETE" });
-      recargar();
-    } catch {
-      setError("No se pudo eliminar.");
-    }
-  }
+  const perdidaTotal = devalPct && devalPct > 0 ? totalUsd * (1 - factorEspera) : 0;
 
   return (
     <div className="space-y-4">
@@ -2703,14 +2670,16 @@ function SeccionCuentasCobrar() {
         </button>
       </div>
       {mostrarImport && (
-        <ImportarCxC onListo={() => { setMostrarImport(false); setMsg("Cuentas por cobrar actualizadas por cliente."); recargar(); }} />
+        <ImportarCxC onListo={(r) => { setMostrarImport(false); setMsg(r); recargar(); }} />
       )}
 
       <div className="grid gap-3 sm:grid-cols-3">
-        <ResumenCaja titulo="Por cobrar (abiertas)" valor={fmtMonto(totalUsd, "USD")} sub={totalEur > 0 ? `${fmtMonto(totalEur, "EUR")} en Setux` : undefined} fuerte />
-        <div className="sm:col-span-2 rounded-2xl bg-white ring-1 ring-marfil p-4 flex items-center justify-between">
-          <p className="text-sm text-cacao-soft">{abiertas.length} cuenta{abiertas.length === 1 ? "" : "s"} abierta{abiertas.length === 1 ? "" : "s"}. Cóbralas antes del cierre del mes.</p>
-          <button type="button" onClick={() => setVerTodas((v) => !v)} className="rounded-lg ring-1 ring-marfil text-cacao px-3 py-1.5 text-xs uppercase tracking-widest hover:bg-marfil-soft shrink-0">{verTodas ? "Ver solo abiertas" : "Ver todas"}</button>
+        <ResumenCaja titulo="Por cobrar" valor={fmtMonto(eurDe(totalUsd), "EUR")} sub={`≈ ${fmtMonto(totalUsd, "USD")} · ${deudores.length} cliente${deudores.length === 1 ? "" : "s"}`} fuerte />
+        <div className="sm:col-span-2 rounded-2xl bg-white ring-1 ring-marfil p-4 flex items-center justify-between gap-3">
+          <p className="text-sm text-cacao-soft">{deudores.length} cliente{deudores.length === 1 ? "" : "s"} con saldo pendiente. Selecciona uno para ver su detalle o cobrarle. El historial se conserva siempre.</p>
+          {saldados.length > 0 && (
+            <button type="button" onClick={() => setVerSaldados((v) => !v)} className="rounded-lg ring-1 ring-marfil text-cacao px-3 py-1.5 text-[11px] uppercase tracking-widest hover:bg-marfil-soft shrink-0">{verSaldados ? "Ocultar saldados" : `Ver saldados (${saldados.length})`}</button>
+          )}
         </div>
       </div>
 
@@ -2724,10 +2693,10 @@ function SeccionCuentasCobrar() {
           </div>
         </div>
         <button type="button" onClick={guardarDeval} disabled={guardandoDeval} className="rounded-lg bg-cacao text-white px-4 py-2 text-xs uppercase tracking-widest hover:bg-terracotta disabled:bg-marfil disabled:text-cacao-mute">{guardandoDeval ? "Guardando…" : "Guardar"}</button>
-        <p className="text-[11px] text-cacao-mute flex-1 min-w-[12rem]">Cámbialo cuando cambie la realidad. Solo se usa aquí, para estimar cuánto pierdes por tardar en cobrar. Déjalo vacío para no usarlo.</p>
+        <p className="text-[11px] text-cacao-mute flex-1 min-w-[12rem]">Solo se usa aquí, para estimar cuánto pierdes por tardar en cobrar. Déjalo vacío para no usarlo.</p>
       </div>
 
-      {/* Correos del recordatorio (5 días antes del cierre) */}
+      {/* Correos del recordatorio */}
       <div className="rounded-2xl bg-white ring-1 ring-marfil p-4 space-y-2">
         <label className="block font-display text-[10px] tracking-[0.2em] uppercase text-cacao-mute">Correos para el recordatorio de cobros</label>
         <div className="flex flex-wrap items-center gap-2">
@@ -2735,7 +2704,7 @@ function SeccionCuentasCobrar() {
           <button type="button" onClick={guardarCorreos} disabled={guardandoCorreos} className="rounded-lg bg-cacao text-white px-4 py-2 text-xs uppercase tracking-widest hover:bg-terracotta disabled:bg-marfil disabled:text-cacao-mute">{guardandoCorreos ? "Guardando…" : "Guardar"}</button>
           <button type="button" onClick={probarCorreo} disabled={probando} className="rounded-lg ring-1 ring-marfil text-cacao px-4 py-2 text-xs uppercase tracking-widest hover:bg-marfil-soft disabled:text-cacao-mute">{probando ? "Enviando…" : "Enviar correo de prueba"}</button>
         </div>
-        <p className="text-[11px] text-cacao-mute">Separados por coma. Reciben el aviso en los últimos 5 días del mes si hay cuentas por cobrar abiertas. El envío automático corre en producción.</p>
+        <p className="text-[11px] text-cacao-mute">Separados por coma. Reciben el aviso en los últimos 5 días del mes si hay clientes con saldo pendiente.</p>
       </div>
 
       {devalPct != null && devalPct > 0 && perdidaTotal > 0.005 && (
@@ -2746,71 +2715,208 @@ function SeccionCuentasCobrar() {
         </div>
       )}
 
+      {/* Tabla de clientes */}
       <section className="rounded-2xl bg-white ring-1 ring-marfil overflow-hidden">
+        <div className="grid grid-cols-[1fr_auto_auto_auto] gap-3 px-4 py-2.5 font-display text-[9px] tracking-[0.2em] uppercase text-cacao-mute border-b border-marfil">
+          <span>Cliente</span><span className="text-right">Saldo</span><span className="text-right hidden sm:block">Última cuenta</span><span className="text-right">Acción</span>
+        </div>
         {cargando ? (
           <p className="p-5 text-cacao-soft italic font-serif">Cargando…</p>
-        ) : lista.length === 0 ? (
-          <p className="p-8 text-center text-cacao-soft italic font-serif">{verTodas ? "No hay cuentas por cobrar." : "No hay cuentas por cobrar abiertas."}</p>
+        ) : deudores.length === 0 && aFavor.length === 0 ? (
+          <p className="p-8 text-center text-cacao-soft italic font-serif">No hay clientes con saldo pendiente. Importa el reporte detallado de Zetux para empezar.</p>
         ) : (
           <ul className="divide-y divide-marfil">
-            {lista.map((c) => (
-              <li key={c.id} className="p-3.5">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="text-cacao font-medium">{c.descripcion || "Cuenta por cobrar"}</div>
-                    <div className="text-[11px] text-cacao-mute mt-1 flex flex-wrap gap-x-2">
-                      <span>{fmtFecha(c.fecha)}</span>
-                      {c.deudor && <span>· {c.deudor}</span>}
-                      {c.monto_usd != null && <span>· ≈ {fmtMonto(c.monto_usd, "USD")}</span>}
-                      {c.cobrada && <span>· cobrada {c.fecha_cobro ? fmtFecha(c.fecha_cobro) : ""}</span>}
-                      {!c.cobrada && perdidaDe(c) != null && perdidaDe(c)! > 0.005 && (
-                        <span className="text-[#9A4C3D]">· pierdes ≈ {fmtMonto(perdidaDe(c)!, "USD")} si esperas al cierre</span>
-                      )}
+            {[...deudores, ...aFavor, ...(verSaldados ? saldados : [])].map((c) => {
+              const abiertoAqui = abierto === c.key;
+              const enFavor = c.saldo_usd < 0;
+              const estados = estadosDeCuentas(c.cuentas, c.total_pagos_usd);
+              return (
+                <li key={c.key} className="text-sm">
+                  <div className="grid grid-cols-[1fr_auto_auto_auto] gap-3 px-4 py-3 items-center">
+                    <button type="button" onClick={() => setAbierto(abiertoAqui ? null : c.key)} className="text-left min-w-0">
+                      <span className="text-cacao font-medium truncate block">{c.cliente}</span>
+                      <span className="text-[11px] text-cacao-mute">{c.cuentas.length} cuenta{c.cuentas.length === 1 ? "" : "s"}{c.pagos.length > 0 ? ` · ${c.pagos.length} pago${c.pagos.length === 1 ? "" : "s"}` : ""}</span>
+                    </button>
+                    <span className={`text-right tabular-nums font-medium ${enFavor ? "text-[#2F4A1F]" : "text-cacao"}`}>
+                      {fmtMonto(eurDe(Math.abs(c.saldo_usd)), "EUR")}{enFavor ? " a favor" : ""}
+                      <span className="block text-[10px] text-cacao-mute font-normal">≈ {fmtMonto(Math.abs(c.saldo_usd), "USD")}</span>
+                    </span>
+                    <span className="text-right text-cacao-mute tabular-nums hidden sm:block">{c.ultima ? fmtFecha(c.ultima) : "—"}</span>
+                    <div className="flex items-center gap-2 justify-end">
+                      <button type="button" onClick={() => setAbierto(abiertoAqui ? null : c.key)} className="rounded-lg ring-1 ring-marfil text-cacao px-3 py-1.5 text-[11px] uppercase tracking-widest hover:bg-marfil-soft">{abiertoAqui ? "Ocultar" : "Ver"}</button>
+                      {c.saldo_usd > 0.005 && <button type="button" onClick={() => setCobrando(c)} className="rounded-lg bg-cacao text-white px-3 py-1.5 text-[11px] uppercase tracking-widest hover:bg-terracotta">Cobrar</button>}
                     </div>
                   </div>
-                  <div className="flex items-center gap-3 shrink-0">
-                    <span className="text-cacao whitespace-nowrap">{c.monto != null ? fmtMonto(c.monto, c.moneda || "EUR") : "—"}</span>
-                    {!c.cobrada ? (
-                      <button type="button" onClick={() => abrirCobro(c)} className="rounded-lg bg-cacao text-white px-3 py-1.5 text-[11px] uppercase tracking-widest hover:bg-terracotta">Cobrar</button>
-                    ) : (
-                      <>
-                        <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] uppercase tracking-widest bg-[#F1F4ED] text-[#2F4A1F]">
-                          <span className="h-1.5 w-1.5 rounded-full bg-[#4B7A2F]" />Cobrada
-                        </span>
-                        <button type="button" onClick={() => reabrir(c.id)} className="text-cacao-soft hover:text-cacao text-sm" aria-label="Reabrir">↺</button>
-                      </>
-                    )}
-                    <button type="button" onClick={() => borrar(c.id)} className="text-cacao-soft hover:text-terracotta text-sm" aria-label="Eliminar">✕</button>
-                  </div>
-                </div>
 
-                {cobrando === c.id && !c.cobrada && (
-                  <div className="mt-3 rounded-xl bg-marfil-soft ring-1 ring-marfil p-3 flex flex-wrap items-end gap-3">
-                    <div>
-                      <label className="block font-display text-[10px] tracking-[0.2em] uppercase text-cacao-mute mb-1">Fecha de cobro</label>
-                      <input type="date" value={fechaCobro} onChange={(e) => setFechaCobro(e.target.value)} className="border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
+                  {abiertoAqui && (
+                    <div className="px-4 pb-4 pt-1 bg-marfil-soft/40 space-y-3">
+                      {/* Cuentas generadas */}
+                      <div className="rounded-xl bg-white ring-1 ring-marfil overflow-hidden">
+                        <div className="px-3 py-2 font-display text-[9px] tracking-[0.2em] uppercase text-cacao-mute border-b border-marfil grid grid-cols-[auto_1fr_auto_auto] gap-2">
+                          <span>Fecha</span><span>Referencia</span><span className="text-right">Monto</span><span className="text-right">Estado</span>
+                        </div>
+                        <ul className="divide-y divide-marfil">
+                          {estados.map(({ c: cu, estado }) => (
+                            <li key={cu.id} className="px-3 py-2 grid grid-cols-[auto_1fr_auto_auto] gap-2 items-center">
+                              <span className="text-cacao-mute tabular-nums text-[12px]">{fmtFecha(cu.fecha)}</span>
+                              <span className="text-cacao text-[12px] min-w-0 truncate">{cu.ref || cu.descripcion || "Cuenta"}</span>
+                              <span className="text-right text-cacao tabular-nums text-[12px]">{cu.monto != null ? fmtMonto(cu.monto, cu.moneda || "EUR") : "—"}</span>
+                              <span className="text-right">
+                                <span className={`inline-block rounded-full px-2 py-0.5 text-[9px] uppercase tracking-widest ${estado === "Pagada" ? "bg-[#F1F4ED] text-[#2F4A1F]" : estado === "Parcial" ? "bg-[#FBF3E2] text-[#7A5A18]" : estado === "A favor" ? "bg-[#EAF0EA] text-[#2F4A1F]" : "bg-[#F9EBE7] text-[#7A2419]"}`}>{estado}</span>
+                                <button type="button" onClick={() => borrarCuenta(cu.id)} className="ml-2 text-cacao-soft hover:text-terracotta text-xs" aria-label="Eliminar cuenta">✕</button>
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+
+                      {/* Pagos realizados */}
+                      {c.pagos.length > 0 && (
+                        <div className="rounded-xl bg-white ring-1 ring-marfil overflow-hidden">
+                          <div className="px-3 py-2 font-display text-[9px] tracking-[0.2em] uppercase text-cacao-mute border-b border-marfil grid grid-cols-[auto_1fr_auto_auto] gap-2">
+                            <span>Fecha pago</span><span>Método</span><span className="text-right">Monto</span><span></span>
+                          </div>
+                          <ul className="divide-y divide-marfil">
+                            {c.pagos.map((p) => (
+                              <li key={p.id} className="px-3 py-2 grid grid-cols-[auto_1fr_auto_auto] gap-2 items-center">
+                                <span className="text-cacao-mute tabular-nums text-[12px]">{fmtFecha(p.fecha)}</span>
+                                <span className="text-cacao text-[12px]">{p.metodo || "—"}{p.referencia ? ` · ${p.referencia}` : ""}</span>
+                                <span className="text-right text-[#2F4A1F] tabular-nums text-[12px]">− {p.monto != null ? fmtMonto(p.monto, p.moneda || "EUR") : "—"}</span>
+                                <button type="button" onClick={() => borrarPago(p.id)} className="text-right text-cacao-soft hover:text-terracotta text-xs" aria-label="Revertir pago">↺</button>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {/* Saldo */}
+                      <div className="flex items-center justify-between text-sm px-1">
+                        <span className="text-cacao-mute">Generado {fmtMonto(eurDe(c.total_cuentas_usd), "EUR")} · Pagado {fmtMonto(eurDe(c.total_pagos_usd), "EUR")}</span>
+                        <span className="font-medium text-cacao">Saldo: {fmtMonto(eurDe(c.saldo_usd), "EUR")} <span className="text-cacao-mute font-normal">(≈ {fmtMonto(c.saldo_usd, "USD")})</span></span>
+                      </div>
                     </div>
-                    <div>
-                      <label className="block font-display text-[10px] tracking-[0.2em] uppercase text-cacao-mute mb-1">Tasa €→USD</label>
-                      <input inputMode="decimal" value={tasaCobro} onChange={(e) => setTasaCobro(e.target.value)} placeholder="ej. 1,08" className="w-28 border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
-                    </div>
-                    <button type="button" onClick={() => confirmarCobro(c.id)} className="rounded-lg bg-cacao text-white px-4 py-2 text-xs uppercase tracking-widest hover:bg-terracotta">Confirmar cobro</button>
-                    <button type="button" onClick={() => setCobrando(null)} className="rounded-lg ring-1 ring-marfil text-cacao px-4 py-2 text-xs uppercase tracking-widest">Cancelar</button>
-                  </div>
-                )}
-              </li>
-            ))}
+                  )}
+                </li>
+              );
+            })}
           </ul>
         )}
       </section>
+
+      {cobrando && (
+        <ModalCobro cliente={cobrando} tasaGlobal={tasa} onCerrar={() => setCobrando(null)} onListo={(m) => { setCobrando(null); setMsg(m); recargar(); }} />
+      )}
+    </div>
+  );
+}
+
+// Modal para registrar un cobro (pago) de un cliente.
+function ModalCobro({ cliente, tasaGlobal, onCerrar, onListo }: { cliente: ClienteCXC; tasaGlobal: number; onCerrar: () => void; onListo: (msg: string) => void }) {
+  const saldoUsd = cliente.saldo_usd;
+  const saldoEur = tasaGlobal > 0 ? saldoUsd / tasaGlobal : 0;
+  const [moneda, setMoneda] = useState<"EUR" | "USD" | "Bs">("EUR");
+  const [montoStr, setMontoStr] = useState(saldoEur.toFixed(2).replace(".", ","));
+  const [tasaStr, setTasaStr] = useState(String(tasaGlobal).replace(".", ","));
+  const [metodo, setMetodo] = useState("Efectivo");
+  const [fecha, setFecha] = useState(hoyISO());
+  const [referencia, setReferencia] = useState("");
+  const [guardando, setGuardando] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const monto = parseTasa(montoStr) ?? 0;
+  const tasaCobro = moneda === "USD" ? 1 : (parseTasa(tasaStr) ?? 0);
+  const montoUsd = moneda === "USD" ? monto : moneda === "EUR" ? monto * tasaCobro : (tasaCobro > 0 ? monto / tasaCobro : 0);
+  const supera = montoUsd > saldoUsd + 0.01;
+
+  async function cobrar() {
+    if (monto <= 0) { setError("Pon un monto mayor que 0."); return; }
+    if (supera) { setError(`El cobro (≈ ${fmtMonto(montoUsd, "USD")}) supera el saldo pendiente (≈ ${fmtMonto(saldoUsd, "USD")}).`); return; }
+    setGuardando(true); setError(null);
+    try {
+      const r = await fetch("/api/admin/cuentas-cobrar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accion: "cobro", cliente: cliente.cliente, monto, moneda, tasa: tasaCobro, metodo, fecha, referencia: referencia || null }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "No se pudo cobrar.");
+      onListo(`Cobro registrado: ${fmtMonto(monto, moneda)} de ${cliente.cliente} (${metodo}). Se creó el ingreso del ${fmtFecha(fecha)}.`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo cobrar.");
+    } finally {
+      setGuardando(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30" onClick={onCerrar}>
+      <div className="w-full max-w-md rounded-2xl bg-white ring-1 ring-marfil p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="font-display text-lg text-cacao">Cobrar a {cliente.cliente}</h3>
+            <p className="text-sm text-cacao-soft">Saldo pendiente: <strong>{fmtMonto(saldoEur, "EUR")}</strong> (≈ {fmtMonto(saldoUsd, "USD")})</p>
+          </div>
+          <button type="button" onClick={onCerrar} className="text-cacao-soft hover:text-cacao text-lg" aria-label="Cerrar">✕</button>
+        </div>
+
+        {error && <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419]">{error}</div>}
+
+        <div className="grid grid-cols-2 gap-3">
+          <Campo label="Monto a cobrar">
+            <div className="flex items-center gap-1">
+              <input inputMode="decimal" value={montoStr} onChange={(e) => setMontoStr(e.target.value)} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao text-right" />
+            </div>
+          </Campo>
+          <Campo label="Moneda">
+            <select value={moneda} onChange={(e) => setMoneda(e.target.value as "EUR" | "USD" | "Bs")} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
+              <option value="EUR">€ Euro</option>
+              <option value="USD">$ Dólar</option>
+              <option value="Bs">Bs</option>
+            </select>
+          </Campo>
+        </div>
+
+        {moneda !== "USD" && (
+          <Campo label={moneda === "EUR" ? "Tasa € → $" : "Tasa Bs → $"}>
+            <input inputMode="decimal" value={tasaStr} onChange={(e) => setTasaStr(e.target.value)} placeholder={moneda === "EUR" ? "1,17" : "ej. 40"} className="w-40 border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
+          </Campo>
+        )}
+
+        <div className="grid grid-cols-2 gap-3">
+          <Campo label="Método de pago">
+            <select value={metodo} onChange={(e) => setMetodo(e.target.value)} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
+              {METODOS_COBRO.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </Campo>
+          <Campo label="Fecha del cobro">
+            <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
+          </Campo>
+        </div>
+
+        <Campo label="Referencia (opcional)">
+          <input value={referencia} onChange={(e) => setReferencia(e.target.value)} placeholder="nº de recibo / operación" className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
+        </Campo>
+
+        <div className={`rounded-lg p-3 text-sm ${supera ? "bg-[#F9EBE7] text-[#7A2419]" : "bg-marfil-soft text-cacao-soft"}`}>
+          {supera
+            ? `El monto supera el saldo pendiente (≈ ${fmtMonto(saldoUsd, "USD")}).`
+            : <>Se registrará un ingreso de <strong>{fmtMonto(monto, moneda)}</strong> (≈ {fmtMonto(montoUsd, "USD")}) el {fmtFecha(fecha)} · método {metodo}. Saldo restante: {fmtMonto(saldoEur - (tasaGlobal > 0 ? montoUsd / tasaGlobal : 0), "EUR")}.</>}
+        </div>
+
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={onCerrar} className="rounded-lg ring-1 ring-marfil text-cacao px-4 py-2 text-xs uppercase tracking-widest hover:bg-marfil-soft">Cancelar</button>
+          <button type="button" onClick={cobrar} disabled={guardando || supera || monto <= 0} className="rounded-lg bg-cacao text-white px-5 py-2 text-xs uppercase tracking-widest hover:bg-terracotta disabled:bg-marfil disabled:text-cacao-mute">{guardando ? "Registrando…" : "Registrar cobro"}</button>
+        </div>
+      </div>
     </div>
   );
 }
 
 // ── Importador de cuentas por cobrar por cliente (PDF Estado de Cuentas) ──
-type ClienteCxCUI = { codigo: string; nombre: string; saldo: number; incluir: boolean };
+type DocCxCUI = { fecha: string | null; ref: string; monto: number };
+type ClienteCxCUI = { codigo: string; nombre: string; saldo: number; documentos: DocCxCUI[]; incluir: boolean };
 
-function ImportarCxC({ onListo }: { onListo: () => void }) {
+function ImportarCxC({ onListo }: { onListo: (msg: string) => void }) {
   const [cargando, setCargando] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -2818,15 +2924,10 @@ function ImportarCxC({ onListo }: { onListo: () => void }) {
   const [clientes, setClientes] = useState<ClienteCxCUI[]>([]);
   const [leido, setLeido] = useState(false);
 
-  function limpiar() {
-    setClientes([]);
-    setFecha("");
-    setLeido(false);
-  }
+  function limpiar() { setClientes([]); setFecha(""); setLeido(false); }
 
   async function subir(file: File) {
-    setError(null);
-    setCargando(true);
+    setError(null); setCargando(true);
     try {
       const b64 = await new Promise<string>((resolve, reject) => {
         const fr = new FileReader();
@@ -2834,51 +2935,40 @@ function ImportarCxC({ onListo }: { onListo: () => void }) {
         fr.onerror = () => reject(new Error("no se pudo leer"));
         fr.readAsDataURL(file);
       });
-      const r = await fetch("/api/admin/importar-cxc", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pdf_base64: b64 }),
-      });
+      const r = await fetch("/api/admin/importar-cxc", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pdf_base64: b64 }) });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || "No se pudo leer el PDF.");
-      const rep = d.reporte as { fecha: string | null; clientes: { codigo: string; nombre: string; saldo: number }[] };
+      const rep = d.reporte as { fecha: string | null; clientes: { codigo: string; nombre: string; saldo: number; documentos: DocCxCUI[] }[] };
       setFecha(rep.fecha ?? hoyISO());
-      // Solo se muestran/guardan los saldos != 0 (deudores y a favor).
-      setClientes(rep.clientes.filter((c) => c.saldo !== 0).map((c) => ({ ...c, incluir: true })));
+      setClientes(rep.clientes.map((c) => ({ ...c, incluir: true })));
       setLeido(true);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Error");
-      limpiar();
-    } finally {
-      setCargando(false);
-    }
+      setError(e instanceof Error ? e.message : "Error"); limpiar();
+    } finally { setCargando(false); }
   }
 
   const incluidos = clientes.filter((c) => c.incluir);
-  const totalDeben = incluidos.filter((c) => c.saldo > 0).reduce((s, c) => s + c.saldo, 0);
-  const totalFavor = incluidos.filter((c) => c.saldo < 0).reduce((s, c) => s + c.saldo, 0);
+  const totalDeben = incluidos.reduce((s, c) => s + (c.saldo > 0 ? c.saldo : 0), 0);
+  const totalFavor = incluidos.reduce((s, c) => s + (c.saldo < 0 ? c.saldo : 0), 0);
+  const totalDocs = incluidos.reduce((s, c) => s + c.documentos.length, 0);
 
   async function guardar() {
     if (incluidos.length === 0) { setError("Marca al menos un cliente."); return; }
-    setGuardando(true);
-    setError(null);
+    setGuardando(true); setError(null);
     try {
       const r = await fetch("/api/admin/importar-cxc", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          fecha: fecha || hoyISO(),
-          clientes: incluidos.map((c) => ({ nombre: c.nombre, saldo: c.saldo })),
-        }),
+        body: JSON.stringify({ fecha: fecha || hoyISO(), clientes: incluidos.map((c) => ({ nombre: c.nombre, documentos: c.documentos })) }),
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || "No se pudo guardar.");
-      onListo();
+      const partes = [`${d.creados} cuenta${d.creados === 1 ? "" : "s"} nueva${d.creados === 1 ? "" : "s"}`];
+      if (d.duplicadas > 0) partes.push(`${d.duplicadas} ya estaba${d.duplicadas === 1 ? "" : "n"} (no se duplicó)`);
+      onListo(`Importado: ${partes.join(", ")}.`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error");
-    } finally {
-      setGuardando(false);
-    }
+    } finally { setGuardando(false); }
   }
 
   return (
@@ -2888,7 +2978,7 @@ function ImportarCxC({ onListo }: { onListo: () => void }) {
       {!leido ? (
         <div className="text-center py-4">
           <p className="font-display text-[11px] tracking-[0.3em] uppercase text-cacao-mute mb-1">Importar por cliente</p>
-          <p className="text-sm text-cacao-soft mb-4 font-serif italic">Sube el PDF “Estado de Cuentas Clientes”. Reemplaza las cuentas por cobrar abiertas con el saldo actual por cliente (en $).</p>
+          <p className="text-sm text-cacao-soft mb-4 font-serif italic">Sube el PDF “Estado de Cuentas Clientes” de Zetux. Acumula las cuentas por cliente (sin duplicar lo ya importado).</p>
           <label className="inline-block rounded-lg bg-cacao text-white px-5 py-2.5 text-xs uppercase tracking-widest hover:bg-terracotta cursor-pointer">
             {cargando ? "Leyendo…" : "Elegir PDF"}
             <input type="file" accept="application/pdf,.pdf" className="hidden" disabled={cargando} onChange={(e) => { const f = e.target.files?.[0]; if (f) subir(f); e.target.value = ""; }} />
@@ -2897,20 +2987,23 @@ function ImportarCxC({ onListo }: { onListo: () => void }) {
       ) : (
         <div className="space-y-3">
           <div className="flex items-center justify-between gap-3">
-            <span className="font-display text-[10px] tracking-[0.25em] uppercase text-cacao-mute">Vista previa · {incluidos.length} cliente{incluidos.length === 1 ? "" : "s"}</span>
+            <span className="font-display text-[10px] tracking-[0.25em] uppercase text-cacao-mute">Vista previa · {incluidos.length} cliente{incluidos.length === 1 ? "" : "s"} · {totalDocs} cuenta{totalDocs === 1 ? "" : "s"}</span>
             <button type="button" onClick={limpiar} className="text-xs uppercase tracking-widest text-cacao-soft hover:text-cacao">Cambiar PDF</button>
           </div>
           <Campo label="Fecha del reporte"><input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} className="w-full max-w-[12rem] border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" /></Campo>
 
-          <div className="rounded-xl ring-1 ring-marfil overflow-hidden max-h-80 overflow-y-auto">
+          <div className="rounded-xl ring-1 ring-marfil overflow-hidden max-h-96 overflow-y-auto">
             <ul className="divide-y divide-marfil">
               {clientes.map((c, i) => (
-                <li key={`${c.codigo}-${i}`} className={`px-3 py-2 grid grid-cols-[auto_1fr_auto] gap-3 items-center ${c.incluir ? "" : "opacity-40"}`}>
-                  <input type="checkbox" checked={c.incluir} onChange={() => setClientes((cs) => cs.map((x, j) => (j === i ? { ...x, incluir: !x.incluir } : x)))} className="accent-[#0F0F0F]" />
-                  <span className="text-cacao text-sm min-w-0 truncate">{c.nombre}
-                    {c.saldo < 0 && <span className="ml-2 inline-block rounded-full bg-[#F1F4ED] text-[#2F4A1F] text-[9px] uppercase tracking-widest px-2 py-0.5 align-middle">A favor</span>}
-                  </span>
-                  <span className={`text-sm text-right tabular-nums ${c.saldo < 0 ? "text-[#2F4A1F]" : "text-cacao"}`}>{fmtMonto(c.saldo, "USD")}</span>
+                <li key={`${c.codigo}-${i}`} className={`px-3 py-2 ${c.incluir ? "" : "opacity-40"}`}>
+                  <div className="grid grid-cols-[auto_1fr_auto] gap-3 items-center">
+                    <input type="checkbox" checked={c.incluir} onChange={() => setClientes((cs) => cs.map((x, j) => (j === i ? { ...x, incluir: !x.incluir } : x)))} className="accent-[#0F0F0F]" />
+                    <span className="text-cacao text-sm min-w-0 truncate">{c.nombre}
+                      {c.saldo < 0 && <span className="ml-2 inline-block rounded-full bg-[#F1F4ED] text-[#2F4A1F] text-[9px] uppercase tracking-widest px-2 py-0.5 align-middle">A favor</span>}
+                      <span className="ml-2 text-[11px] text-cacao-mute">{c.documentos.length} cuenta{c.documentos.length === 1 ? "" : "s"}</span>
+                    </span>
+                    <span className={`text-sm text-right tabular-nums ${c.saldo < 0 ? "text-[#2F4A1F]" : "text-cacao"}`}>{fmtMonto(c.saldo, "EUR")}</span>
+                  </div>
                 </li>
               ))}
             </ul>
@@ -2919,19 +3012,19 @@ function ImportarCxC({ onListo }: { onListo: () => void }) {
           <div className="text-sm space-y-1">
             <div className="grid grid-cols-[1fr_auto] gap-3">
               <span className="font-medium text-cacao">Por cobrar (deudores)</span>
-              <span className="text-right font-medium text-cacao tabular-nums">{fmtMonto(totalDeben, "USD")}</span>
+              <span className="text-right font-medium text-cacao tabular-nums">{fmtMonto(totalDeben, "EUR")}</span>
             </div>
             {totalFavor < 0 && (
               <div className="grid grid-cols-[1fr_auto] gap-3 text-[#2F4A1F]">
                 <span>A favor de clientes</span>
-                <span className="text-right tabular-nums">{fmtMonto(totalFavor, "USD")}</span>
+                <span className="text-right tabular-nums">{fmtMonto(totalFavor, "EUR")}</span>
               </div>
             )}
-            <p className="text-[11px] text-cacao-mute pt-1">Se toma la columna “Saldo Divisas” (lo que aún deben en $ tras abonos). Al guardar se reemplazan las cuentas por cobrar abiertas importadas; no toca las ya cobradas ni las manuales.</p>
+            <p className="text-[11px] text-cacao-mute pt-1">Cada cuenta se guarda con su fecha y referencia (columna “Saldo Divisas”, en euros). Al reimportar el mismo reporte no se duplica nada. Los pagos y las cuentas manuales no se tocan.</p>
           </div>
 
           <button type="button" onClick={guardar} disabled={guardando} className="rounded-lg bg-cacao text-white px-5 py-2.5 text-xs uppercase tracking-widest hover:bg-terracotta disabled:bg-marfil disabled:text-cacao-mute">
-            {guardando ? "Guardando…" : `Reemplazar con ${incluidos.length} cliente${incluidos.length === 1 ? "" : "s"}`}
+            {guardando ? "Guardando…" : `Importar ${totalDocs} cuenta${totalDocs === 1 ? "" : "s"}`}
           </button>
         </div>
       )}

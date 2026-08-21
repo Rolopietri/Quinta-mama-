@@ -15,14 +15,14 @@ function autorizado(req: NextRequest): boolean {
 // Clasifica cada método del reporte:
 //  - 'egreso' : RPP (cortesías, no son ingreso pero sí un costo)
 //  - 'excluir': notas de crédito (no cuentan)
-//  - 'cobrar' : CXC (ventas a crédito → cuentas por cobrar)
+//  - 'detalle': CXC → se importa por el reporte DETALLADO por cliente, no aquí
 //  - 'ingreso': el resto (ventas del día)
-type Destino = "ingreso" | "cobrar" | "excluir" | "egreso";
+type Destino = "ingreso" | "detalle" | "excluir" | "egreso";
 function destinoDe(metodo: string): Destino {
   const k = metodo.trim().toUpperCase();
   if (k === "RPP") return "egreso";
   if (k.includes("NOTA DE CREDITO") || k.includes("NOTA DE CRÉDITO")) return "excluir";
-  if (k.startsWith("CXC")) return "cobrar";
+  if (k.startsWith("CXC")) return "detalle";
   return "ingreso";
 }
 
@@ -94,9 +94,9 @@ export async function PUT(req: NextRequest) {
     await sb.from("admin_egreso").delete().eq("fuente", "setux").eq("fecha", fecha);
   }
 
-  // Separar según destino. RPP = cortesía → egreso; CXC → cuentas por cobrar.
+  // Separar según destino. RPP = cortesía → egreso; CXC → NO se toca aquí (se
+  // importa por el reporte detallado por cliente).
   const ingresos: Record<string, unknown>[] = [];
-  const cobrar: Record<string, unknown>[] = [];
   const egresos: Record<string, unknown>[] = [];
   // La propina total la decide el cliente (editable, para quitar errores).
   const propinaTotal = typeof b.propina === "number" && isFinite(b.propina) && b.propina > 0
@@ -107,7 +107,7 @@ export async function PUT(req: NextRequest) {
     if (!isFinite(total)) continue;
     const metodo = typeof l.metodo === "string" ? l.metodo : "";
     const destino = destinoDe(metodo);
-    if (destino === "excluir") continue;
+    if (destino === "excluir" || destino === "detalle") continue; // CXC → reporte detallado
     const cantidad = typeof l.cantidad === "number" ? l.cantidad : null;
     if (destino === "egreso") {
       // RPP: cortesías. Es un costo (no ingreso). Se guarda el total en euros.
@@ -126,16 +126,6 @@ export async function PUT(req: NextRequest) {
         metodo: "RPP",
         factura: null,
         nota: cantidad != null ? `${cantidad} cortesías (Setux)` : "Setux",
-        fuente: "setux",
-      });
-    } else if (destino === "cobrar") {
-      cobrar.push({
-        fecha,
-        descripcion: `Ventas a crédito (CXC) del ${fecha}`,
-        monto: total,
-        moneda: "EUR",
-        tasa,
-        monto_usd: usdDe(total),
         fuente: "setux",
       });
     } else {
@@ -160,15 +150,11 @@ export async function PUT(req: NextRequest) {
     }
   }
 
-  if (ingresos.length === 0 && cobrar.length === 0 && egresos.length === 0) {
+  if (ingresos.length === 0 && egresos.length === 0) {
     return NextResponse.json({ error: "No hay montos válidos." }, { status: 400 });
   }
   if (ingresos.length) {
     const { error } = await sb.from("admin_ingreso").insert(ingresos);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  }
-  if (cobrar.length) {
-    const { error } = await sb.from("admin_cuenta_cobrar").insert(cobrar);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   }
   if (egresos.length) {
@@ -184,5 +170,5 @@ export async function PUT(req: NextRequest) {
       nota: "Propina del reporte (no es ingreso)",
     });
   }
-  return NextResponse.json({ ok: true, creados: ingresos.length, porCobrar: cobrar.length, egresos: egresos.length, propina: Math.round(propinaTotal * 100) / 100 });
+  return NextResponse.json({ ok: true, creados: ingresos.length, egresos: egresos.length, propina: Math.round(propinaTotal * 100) / 100 });
 }

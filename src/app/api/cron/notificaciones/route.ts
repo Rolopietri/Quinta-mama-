@@ -96,20 +96,24 @@ export async function GET(request: Request) {
     const ultimoDia = new Date(Date.UTC(y, m, 0)).getUTCDate();
     const faltan = ultimoDia - d; // días hasta el cierre del mes
     if (faltan >= 0 && faltan <= 5) {
-      const cxcR = await sb.from("admin_cuenta_cobrar").select("monto_usd, monto, moneda").eq("cobrada", false);
-      const abiertas = cxcR.data ?? [];
-      if (abiertas.length > 0) {
-        const usd = abiertas.reduce((s, c) => s + (Number(c.monto_usd) || 0), 0);
-        const eur = abiertas
-          .filter((c) => c.moneda === "EUR")
-          .reduce((s, c) => s + (Number(c.monto) || 0), 0);
-        const subject = `Cuentas por cobrar antes del cierre · ${abiertas.length} pendiente${abiertas.length === 1 ? "" : "s"}`;
+      // Saldo neto por cliente = Σ cuentas abiertas − Σ pagos.
+      const [cxcR, pagoR] = await Promise.all([
+        sb.from("admin_cuenta_cobrar").select("deudor, monto_usd").eq("cobrada", false),
+        sb.from("admin_cxc_pago").select("cliente, monto_usd"),
+      ]);
+      const norm = (s: string | null) => (s ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
+      const saldos = new Map<string, number>();
+      for (const c of cxcR.data ?? []) saldos.set(norm(c.deudor), (saldos.get(norm(c.deudor)) ?? 0) + (Number(c.monto_usd) || 0));
+      for (const p of pagoR.data ?? []) saldos.set(norm(p.cliente), (saldos.get(norm(p.cliente)) ?? 0) - (Number(p.monto_usd) || 0));
+      const clientesConSaldo = [...saldos.values()].filter((v) => v > 0.01);
+      if (clientesConSaldo.length > 0) {
+        const usd = clientesConSaldo.reduce((s, v) => s + v, 0);
+        const subject = `Cuentas por cobrar antes del cierre · ${clientesConSaldo.length} cliente${clientesConSaldo.length === 1 ? "" : "s"}`;
         const text = [
-          `Faltan ${faltan} día${faltan === 1 ? "" : "s"} para que cierre el mes y hay cuentas por cobrar abiertas.`,
+          `Faltan ${faltan} día${faltan === 1 ? "" : "s"} para que cierre el mes y hay clientes con saldo pendiente.`,
           "",
-          `Cuentas abiertas: ${abiertas.length}`,
+          `Clientes con saldo: ${clientesConSaldo.length}`,
           usd ? `Total aproximado: $${usd.toFixed(2)}` : "",
-          eur ? `(${eur.toFixed(2)} € en Setux)` : "",
           "",
           "Entra al Panel de Administración → Cuentas por cobrar para cobrarlas.",
           "",
