@@ -273,20 +273,29 @@ export async function createVentasBatch(
     swap_from_insumo_id: v.swapFromInsumoId ?? null,
     swap_to_insumo_id: v.swapToInsumoId ?? null,
   }));
-  const { data, error } = await sb.from("ventas").insert(rows).select("*");
-  if (error) {
-    // Throw a more descriptive Error
-    const msg = [
-      error.message,
-      error.details ? `Detalles: ${error.details}` : null,
-      error.hint ? `Hint: ${error.hint}` : null,
-      error.code ? `Código: ${error.code}` : null,
-    ]
-      .filter(Boolean)
-      .join(" · ");
-    throw new Error(msg || "Error desconocido al insertar ventas");
+  // Insertar por LOTES pequeños. Un solo insert con cientos de filas (cada una
+  // dispara el descuento de stock) puede cortarse por límite/tiempo del servidor
+  // y dejar una carga parcial. Lotes de 100 entran de forma confiable y completa.
+  const CHUNK = 100;
+  const creados: Row[] = [];
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    const lote = rows.slice(i, i + CHUNK);
+    const { data, error } = await sb.from("ventas").insert(lote).select("*");
+    if (error) {
+      const msg = [
+        error.message,
+        error.details ? `Detalles: ${error.details}` : null,
+        error.hint ? `Hint: ${error.hint}` : null,
+        error.code ? `Código: ${error.code}` : null,
+        `(se insertaron ${creados.length} de ${rows.length} filas antes del error)`,
+      ]
+        .filter(Boolean)
+        .join(" · ");
+      throw new Error(msg || "Error desconocido al insertar ventas");
+    }
+    if (data) creados.push(...(data as Row[]));
   }
-  return (data as Row[]).map(rowToVenta);
+  return creados.map(rowToVenta);
 }
 
 export async function deleteVenta(id: string): Promise<void> {
