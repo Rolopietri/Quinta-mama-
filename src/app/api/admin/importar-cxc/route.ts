@@ -37,11 +37,12 @@ export async function POST(req: NextRequest) {
   }
   // Solo clientes con al menos un documento (saldo != 0).
   const clientes = reporte.clientes.filter((c) => c.documentos.length > 0);
-  if (!clientes.length) {
-    const pista = esOle ? "¿Es el reporte de CXC de Xetux (Excel)?" : esPdf ? "¿Es el Estado de Cuentas por cliente?" : "Sube el PDF de Estado de Cuentas o el Excel .xls de CXC.";
-    return NextResponse.json({ error: `No encontré cuentas por cobrar. ${pista}` }, { status: 422 });
+  const cortesias = (reporte.cortesias ?? []).filter((c) => Math.abs(c.monto) > 0.005);
+  if (!clientes.length && !cortesias.length) {
+    const pista = esOle ? "¿Es el detallado por forma de pago (CXC/RPP) de Xetux?" : esPdf ? "¿Es el Estado de Cuentas por cliente?" : "Sube el PDF de Estado de Cuentas o el Excel .xls detallado.";
+    return NextResponse.json({ error: `No encontré cuentas por cobrar ni cortesías. ${pista}` }, { status: 422 });
   }
-  return NextResponse.json({ reporte: { fecha: reporte.fecha, clientes } });
+  return NextResponse.json({ reporte: { fecha: reporte.fecha, clientes, cortesias } });
 }
 
 // PUT { fecha, clientes:[{nombre, documentos:[{fecha,ref,monto}]}] }
@@ -56,6 +57,7 @@ export async function PUT(req: NextRequest) {
   const b = (await req.json().catch(() => ({}))) as Record<string, unknown>;
   const fechaReporte = typeof b.fecha === "string" && b.fecha ? b.fecha : new Date().toISOString().slice(0, 10);
   const clientes = Array.isArray(b.clientes) ? (b.clientes as Record<string, unknown>[]) : [];
+  const cortesias = Array.isArray(b.cortesias) ? (b.cortesias as Record<string, unknown>[]) : [];
   const tasa = await getTasaEurUsd(sb);
   const usdDe = (eur: number) => Math.round(eur * tasa * 100) / 100;
 
@@ -96,47 +98,74 @@ export async function PUT(req: NextRequest) {
       });
     }
   }
-  if (filas.length === 0) return NextResponse.json({ error: "No hay cuentas que registrar." }, { status: 400 });
+  // Cortesías (RPP) → egresos. Se registran por su fecha real.
+  const egresosRpp = cortesias
+    .map((c) => {
+      const monto = typeof c.monto === "number" ? c.monto : Number(c.monto);
+      if (!isFinite(monto) || Math.abs(monto) < 0.005) return null;
+      const fdoc = typeof c.fecha === "string" && c.fecha ? c.fecha : fechaReporte;
+      const ref = typeof c.ref === "string" && c.ref.trim() ? c.ref.trim() : null;
+      return {
+        fecha: fdoc,
+        concepto: `Cortesías (RPP)${ref ? ` ${ref}` : ""}`,
+        categoria_id: null,
+        categoria_nombre: "Cortesías",
+        clasificacion: "variable",
+        proveedor_id: null,
+        proveedor_nombre: null,
+        monto: Math.round(monto * 100) / 100,
+        moneda: "EUR",
+        tasa,
+        monto_usd: usdDe(monto),
+        metodo: "RPP",
+        factura: ref,
+        nota: typeof c.cliente === "string" && c.cliente ? `Cortesía a ${c.cliente}` : "Cortesía",
+        fuente: "detallado-fp",
+      };
+    })
+    .filter((e): e is NonNullable<typeof e> => e !== null);
+  const fechasRpp = [...new Set(egresosRpp.map((e) => e.fecha))];
 
-  // Autolimpieza del modelo viejo: borra las CXC agregadas sin detalle (un solo
-  // monto por cliente, sin referencia) que creaba el flujo anterior. Las nuevas
-  // cuentas detalladas SIEMPRE traen referencia, así que no se tocan; tampoco las
-  // manuales ni las ya cobradas. Así la reimportación deja el saldo correcto.
-  await sb
-    .from("admin_cuenta_cobrar")
-    .delete()
-    .eq("cobrada", false)
-    .is("ref", null)
-    .in("fuente", ["estado-cuenta", "setux"]);
-
-  // Migración: borra las cuentas cargadas antes con el número de control viejo
-  // (NDE…, la columna "Nro de factura / NE"). Este mismo archivo las reinserta
-  // con la referencia correcta (NE-<Nro. de Orden>). Solo las abiertas.
-  if (refsViejos.length) {
-    await sb.from("admin_cuenta_cobrar").delete().eq("cobrada", false).in("ref", refsViejos);
+  if (filas.length === 0 && egresosRpp.length === 0) {
+    return NextResponse.json({ error: "No hay cuentas ni cortesías que registrar." }, { status: 400 });
   }
 
-  // Dedupe contra lo ya importado: descarta las cuentas cuyo hash ya existe.
-  const hashes = filas.map((f) => f.import_hash);
-  const { data: prev, error: ePrev } = await sb
-    .from("admin_cuenta_cobrar")
-    .select("import_hash")
-    .in("import_hash", hashes);
-  if (ePrev) return NextResponse.json({ error: ePrev.message }, { status: 500 });
-  const existentes = new Set((prev ?? []).map((r) => r.import_hash as string));
-  // Dedupe también dentro del mismo lote (por si el PDF repite una referencia).
-  const vistos = new Set<string>();
-  const nuevas = filas.filter((f) => {
-    if (existentes.has(f.import_hash) || vistos.has(f.import_hash)) return false;
-    vistos.add(f.import_hash);
-    return true;
-  });
-  const duplicadas = filas.length - nuevas.length;
-
-  if (nuevas.length === 0) {
-    return NextResponse.json({ ok: true, creados: 0, duplicadas, mensaje: "Todo ya estaba importado; no se duplicó nada." });
+  // ── CXC → cuentas por cobrar ──
+  let creados = 0, duplicadas = 0;
+  if (filas.length > 0) {
+    // Autolimpieza del modelo viejo (montos agregados sin referencia) + migración
+    // de referencias con el control viejo (NDE…). No toca cobradas ni manuales.
+    await sb.from("admin_cuenta_cobrar").delete().eq("cobrada", false).is("ref", null).in("fuente", ["estado-cuenta", "setux"]);
+    if (refsViejos.length) await sb.from("admin_cuenta_cobrar").delete().eq("cobrada", false).in("ref", refsViejos);
+    // Dedupe contra lo ya importado (por hash cliente+referencia).
+    const hashes = filas.map((f) => f.import_hash);
+    const { data: prev, error: ePrev } = await sb.from("admin_cuenta_cobrar").select("import_hash").in("import_hash", hashes);
+    if (ePrev) return NextResponse.json({ error: ePrev.message }, { status: 500 });
+    const existentes = new Set((prev ?? []).map((r) => r.import_hash as string));
+    const vistos = new Set<string>();
+    const nuevas = filas.filter((f) => { if (existentes.has(f.import_hash) || vistos.has(f.import_hash)) return false; vistos.add(f.import_hash); return true; });
+    duplicadas = filas.length - nuevas.length;
+    if (nuevas.length > 0) {
+      const { data, error } = await sb.from("admin_cuenta_cobrar").insert(nuevas).select("id");
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      creados = data?.length ?? 0;
+    }
   }
-  const { data, error } = await sb.from("admin_cuenta_cobrar").insert(nuevas).select("id");
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ ok: true, creados: data?.length ?? 0, duplicadas });
+
+  // ── RPP → egresos (cortesías) ──
+  let cortesiasGuardadas = 0;
+  if (egresosRpp.length > 0) {
+    // Reemplaza las cortesías ya cargadas de esas fechas (evita duplicar al reimportar).
+    if (fechasRpp.length) {
+      await sb.from("admin_egreso").delete().eq("fuente", "detallado-fp").eq("categoria_nombre", "Cortesías").in("fecha", fechasRpp);
+    }
+    const { data, error } = await sb.from("admin_egreso").insert(egresosRpp).select("id");
+    if (error) {
+      const falta = (error as { code?: string }).code === "42703" || /fuente|schema cache|column/i.test(error.message);
+      return NextResponse.json({ error: falta ? "Falta la columna 'fuente' en admin_egreso. Corre 'supabase/admin-egreso-fuente.sql'." : error.message }, { status: 500 });
+    }
+    cortesiasGuardadas = data?.length ?? 0;
+  }
+
+  return NextResponse.json({ ok: true, creados, duplicadas, cortesias: cortesiasGuardadas });
 }

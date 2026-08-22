@@ -3,7 +3,7 @@
 // registros BIFF. Leemos el contenedor OLE2 y los registros necesarios sin
 // dependencias externas, y devolvemos la MISMA forma que el lector del PDF
 // (ReporteCxC), para reutilizar toda la lógica de importación.
-import type { ReporteCxC, ClienteCxC, DocumentoCxC } from "@/lib/admin/cxc";
+import type { ReporteCxC, ClienteCxC, DocumentoCxC, CortesiaCxC } from "@/lib/admin/cxc";
 
 // ── OLE2 (Compound File) ────────────────────────────────────────────
 function leerOle(buf: Buffer): { entries: { name: string; type: number; startSect: number; streamSize: number }[]; readEntry: (e: { startSect: number; streamSize: number }) => Buffer } {
@@ -183,20 +183,25 @@ export function parseReporteCxCXls(buf: Buffer): ReporteCxC {
   const cFecha = grid[hRow].findIndex((v) => /fecha de la factura/.test(norm(v)));
 
   const mapa = new Map<string, ClienteCxC>();
+  const cortesias: CortesiaCxC[] = [];
   let fechaRep: string | null = null;
   for (let r = hRow + 1; r < grid.length; r++) {
     const row = grid[r];
     const forma = String(row[cForma] ?? "").trim().toUpperCase();
-    if (forma !== "CXC") continue; // solo ventas a crédito (ignora notas de crédito, etc.)
-    const nombre = String(row[cCliente] ?? "").trim();
-    if (!nombre || nombre === "---") continue;
+    if (forma !== "CXC" && forma !== "RPP") continue; // CXC (crédito) y RPP (cortesías); ignora el resto
     const monto = aNumero(row[cTotal] ?? "");
     if (monto == null || Math.abs(monto) < 0.005) continue;
     const orden = cOrden >= 0 ? String(row[cOrden] ?? "").trim() : "";
     const ref = orden ? `NE-${orden}` : "";
-    const refAlt = cRefAlt >= 0 ? String(row[cRefAlt] ?? "").trim() : "";
     const fecha = cFecha >= 0 ? fechaIso(String(row[cFecha] ?? "")) : null;
     if (fecha && !fechaRep) fechaRep = fecha;
+    if (forma === "RPP") {
+      cortesias.push({ fecha, ref, monto: Math.round(monto * 100) / 100, cliente: String(row[cCliente] ?? "").trim() || null });
+      continue;
+    }
+    const nombre = String(row[cCliente] ?? "").trim();
+    if (!nombre || nombre === "---") continue;
+    const refAlt = cRefAlt >= 0 ? String(row[cRefAlt] ?? "").trim() : "";
     const doc: DocumentoCxC = { fecha, ref, monto: Math.round(monto * 100) / 100, ...(refAlt ? { refAlt } : {}) };
     const key = nombre.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, " ");
     if (!mapa.has(key)) mapa.set(key, { codigo: "", nombre, saldo: 0, documentos: [] });
@@ -204,5 +209,5 @@ export function parseReporteCxCXls(buf: Buffer): ReporteCxC {
     cli.documentos.push(doc);
     cli.saldo = Math.round((cli.saldo + monto) * 100) / 100;
   }
-  return { fecha: fechaRep, clientes: [...mapa.values()] };
+  return { fecha: fechaRep, clientes: [...mapa.values()], cortesias };
 }

@@ -3029,9 +3029,10 @@ function ImportarCxC({ onListo }: { onListo: (msg: string) => void }) {
   const [error, setError] = useState<string | null>(null);
   const [fecha, setFecha] = useState("");
   const [clientes, setClientes] = useState<ClienteCxCUI[]>([]);
+  const [cortesias, setCortesias] = useState<{ fecha: string | null; ref: string; monto: number; cliente: string | null }[]>([]);
   const [leido, setLeido] = useState(false);
 
-  function limpiar() { setClientes([]); setFecha(""); setLeido(false); }
+  function limpiar() { setClientes([]); setCortesias([]); setFecha(""); setLeido(false); }
 
   async function subir(file: File) {
     setError(null); setCargando(true);
@@ -3045,9 +3046,10 @@ function ImportarCxC({ onListo }: { onListo: (msg: string) => void }) {
       const r = await fetch("/api/admin/importar-cxc", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pdf_base64: b64 }) });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || "No se pudo leer el PDF.");
-      const rep = d.reporte as { fecha: string | null; clientes: { codigo: string; nombre: string; saldo: number; documentos: DocCxCUI[] }[] };
+      const rep = d.reporte as { fecha: string | null; clientes: { codigo: string; nombre: string; saldo: number; documentos: DocCxCUI[] }[]; cortesias?: { fecha: string | null; ref: string; monto: number; cliente: string | null }[] };
       setFecha(rep.fecha ?? hoyISO());
       setClientes(rep.clientes.map((c) => ({ ...c, incluir: true })));
+      setCortesias(rep.cortesias ?? []);
       setLeido(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error"); limpiar();
@@ -3058,21 +3060,24 @@ function ImportarCxC({ onListo }: { onListo: (msg: string) => void }) {
   const totalDeben = incluidos.reduce((s, c) => s + (c.saldo > 0 ? c.saldo : 0), 0);
   const totalFavor = incluidos.reduce((s, c) => s + (c.saldo < 0 ? c.saldo : 0), 0);
   const totalDocs = incluidos.reduce((s, c) => s + c.documentos.length, 0);
+  const totalRpp = cortesias.reduce((s, c) => s + (c.monto || 0), 0);
 
   async function guardar() {
-    if (incluidos.length === 0) { setError("Marca al menos un cliente."); return; }
+    if (incluidos.length === 0 && cortesias.length === 0) { setError("No hay cuentas ni cortesías que registrar."); return; }
     setGuardando(true); setError(null);
     try {
       const r = await fetch("/api/admin/importar-cxc", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fecha: fecha || hoyISO(), clientes: incluidos.map((c) => ({ nombre: c.nombre, documentos: c.documentos })) }),
+        body: JSON.stringify({ fecha: fecha || hoyISO(), clientes: incluidos.map((c) => ({ nombre: c.nombre, documentos: c.documentos })), cortesias }),
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || "No se pudo guardar.");
-      const partes = [`${d.creados} cuenta${d.creados === 1 ? "" : "s"} nueva${d.creados === 1 ? "" : "s"}`];
-      if (d.duplicadas > 0) partes.push(`${d.duplicadas} ya estaba${d.duplicadas === 1 ? "" : "n"} (no se duplicó)`);
-      onListo(`Importado: ${partes.join(", ")}.`);
+      const partes: string[] = [];
+      if (d.creados > 0 || incluidos.length > 0) partes.push(`${d.creados} cuenta${d.creados === 1 ? "" : "s"} nueva${d.creados === 1 ? "" : "s"}`);
+      if (d.duplicadas > 0) partes.push(`${d.duplicadas} ya estaba${d.duplicadas === 1 ? "" : "n"}`);
+      if (d.cortesias > 0) partes.push(`${d.cortesias} cortesía${d.cortesias === 1 ? "" : "s"} (egreso)`);
+      onListo(`Importado: ${partes.join(", ") || "sin cambios"}.`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error");
     } finally { setGuardando(false); }
@@ -3085,7 +3090,7 @@ function ImportarCxC({ onListo }: { onListo: (msg: string) => void }) {
       {!leido ? (
         <div className="text-center py-4">
           <p className="font-display text-[11px] tracking-[0.3em] uppercase text-cacao-mute mb-1">Importar por cliente</p>
-          <p className="text-sm text-cacao-soft mb-4 font-serif italic">Sube el PDF “Estado de Cuentas Clientes” o el Excel (.xls) del reporte diario de CXC de Xetux. Acumula las cuentas por cliente (sin duplicar lo ya importado).</p>
+          <p className="text-sm text-cacao-soft mb-4 font-serif italic">Sube el “detallado por forma de pago” (Excel .xls) filtrado a <strong>CXC y RPP</strong>, o el PDF “Estado de Cuentas Clientes”. Las CXC entran como cuentas por cobrar (por cliente) y las RPP como egresos (cortesías), con su fecha real.</p>
           <label className="inline-block rounded-lg bg-cacao text-white px-5 py-2.5 text-xs uppercase tracking-widest hover:bg-terracotta cursor-pointer">
             {cargando ? "Leyendo…" : "Elegir archivo (PDF o Excel)"}
             <input type="file" accept="application/pdf,.pdf,.xls,.xlsx,application/vnd.ms-excel" className="hidden" disabled={cargando} onChange={(e) => { const f = e.target.files?.[0]; if (f) subir(f); e.target.value = ""; }} />
@@ -3127,11 +3132,17 @@ function ImportarCxC({ onListo }: { onListo: (msg: string) => void }) {
                 <span className="text-right tabular-nums">{fmtMonto(totalFavor, "EUR")}</span>
               </div>
             )}
-            <p className="text-[11px] text-cacao-mute pt-1">Cada cuenta se guarda con su fecha y referencia (columna “Saldo Divisas”, en euros). Al reimportar el mismo reporte no se duplica nada. Los pagos y las cuentas manuales no se tocan.</p>
+            {cortesias.length > 0 && (
+              <div className="grid grid-cols-[1fr_auto] gap-3 text-[#7A2419]">
+                <span>Cortesías (RPP) → egreso · {cortesias.length}</span>
+                <span className="text-right tabular-nums">{fmtMonto(totalRpp, "EUR")}</span>
+              </div>
+            )}
+            <p className="text-[11px] text-cacao-mute pt-1">Las CXC se guardan como cuentas por cobrar (por cliente, con su fecha y referencia; no se duplican al reimportar). Las cortesías (RPP) se guardan como egresos con su fecha; al reimportar reemplazan las de esas fechas. Pagos y cuentas manuales no se tocan.</p>
           </div>
 
           <button type="button" onClick={guardar} disabled={guardando} className="rounded-lg bg-cacao text-white px-5 py-2.5 text-xs uppercase tracking-widest hover:bg-terracotta disabled:bg-marfil disabled:text-cacao-mute">
-            {guardando ? "Guardando…" : `Importar ${totalDocs} cuenta${totalDocs === 1 ? "" : "s"}`}
+            {guardando ? "Guardando…" : `Importar ${totalDocs} cuenta${totalDocs === 1 ? "" : "s"}${cortesias.length ? ` + ${cortesias.length} cortesía${cortesias.length === 1 ? "" : "s"}` : ""}`}
           </button>
         </div>
       )}

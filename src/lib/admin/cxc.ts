@@ -8,7 +8,9 @@ import zlib from "node:zlib";
 // "Nro de factura / NE" del Excel), para migrar/limpiar cargas anteriores.
 export type DocumentoCxC = { fecha: string | null; ref: string; monto: number; refAlt?: string };
 export type ClienteCxC = { codigo: string; nombre: string; saldo: number; documentos: DocumentoCxC[] };
-export type ReporteCxC = { fecha: string | null; clientes: ClienteCxC[] };
+// Cortesías (RPP) del reporte detallado por forma de pago → van a egresos.
+export type CortesiaCxC = { fecha: string | null; ref: string; monto: number; cliente: string | null };
+export type ReporteCxC = { fecha: string | null; clientes: ClienteCxC[]; cortesias?: CortesiaCxC[] };
 
 type Tok = { x: number; y: number; text: string };
 
