@@ -22,12 +22,29 @@ export async function GET(req: NextRequest) {
   const sb = createServiceClient();
   if (!sb) return NextResponse.json({ error: "servidor no configurado" }, { status: 500 });
 
-  const [ingR, egrR] = await Promise.all([
-    sb.from("admin_ingreso").select("fecha, moneda, monto, monto_usd, metodo, categoria_nombre"),
-    sb.from("admin_egreso").select("fecha, moneda, monto"),
-  ]);
-  if (ingR.error || egrR.error) {
-    return NextResponse.json({ error: (ingR.error || egrR.error)!.message }, { status: 500 });
+  // Paginar: Supabase devuelve máx. 1000 filas por request; con más de 1000
+  // ingresos/egresos, un select "a secas" recortaba los totales del histórico.
+  async function traerTodo<T>(tabla: string, cols: string): Promise<T[]> {
+    const PAGE = 1000;
+    const out: T[] = [];
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await sb!.from(tabla).select(cols).range(from, from + PAGE - 1);
+      if (error) throw new Error(error.message);
+      const rows = (data as T[]) ?? [];
+      out.push(...rows);
+      if (rows.length < PAGE) break;
+    }
+    return out;
+  }
+  let ingresosData: FilaIng[];
+  let egresosData: Fila[];
+  try {
+    [ingresosData, egresosData] = await Promise.all([
+      traerTodo<FilaIng>("admin_ingreso", "fecha, moneda, monto, monto_usd, metodo, categoria_nombre"),
+      traerTodo<Fila>("admin_egreso", "fecha, moneda, monto"),
+    ]);
+  } catch (e) {
+    return NextResponse.json({ error: e instanceof Error ? e.message : "error" }, { status: 500 });
   }
 
   const meses = new Map<string, { mes: string; ingresos: Record<string, number>; egresos: Record<string, number> }>();
@@ -43,9 +60,9 @@ export async function GET(req: NextRequest) {
       registro[lado][moneda] = (registro[lado][moneda] ?? 0) + (f.monto ?? 0);
     }
   };
-  const ingresos = (ingR.data as FilaIng[]) ?? [];
+  const ingresos = ingresosData;
   acumular(ingresos, "ingresos");
-  acumular((egrR.data as Fila[]) ?? [], "egresos");
+  acumular(egresosData, "egresos");
 
   // Desglose de ingresos por (mes, método) y (mes, categoría), en USD.
   const acumClave = (campo: "metodo" | "categoria_nombre", etiquetaVacia: string) => {
