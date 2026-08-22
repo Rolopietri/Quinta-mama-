@@ -2233,7 +2233,7 @@ function DesglosePorMoneda({ titulo, filas, orden }: { titulo: string; filas: [s
 // Beatriz sube el PDF diario de Setux; el servidor lo lee y muestra la vista
 // previa; confirma → crea un ingreso por método (en euros; el USD sale con la
 // tasa fija del panel).
-type LineaSetuxUI = { metodo: string; metodoBonito: string; cantidad: number | null; total: number; propina: number | null; incluir: boolean; destino: "ingreso" | "detalle" | "excluir" | "egreso" };
+type LineaSetuxUI = { metodo: string; metodoBonito: string; cantidad: number | null; total: number; propina: number | null; incluir: boolean; destino: "ingreso" | "detalle" | "excluir" };
 type ReporteSetuxUI = { fecha: string | null; desde: string | null; hasta: string | null; usuario: string | null; total: number | null };
 
 function ImportarSetux() {
@@ -2311,9 +2311,8 @@ function ImportarSetux() {
     }
   }
 
-  const incluidas = lineas.filter((l) => l.incluir && l.destino !== "excluir" && l.destino !== "detalle");
+  const incluidas = lineas.filter((l) => l.incluir && l.destino === "ingreso");
   const ingresoEUR = incluidas.filter((l) => l.destino === "ingreso").reduce((s, l) => s + l.total, 0);
-  const egresoEUR = incluidas.filter((l) => l.destino === "egreso").reduce((s, l) => s + l.total, 0);
   // Propina: aparte (no es ingreso). El total lo controlas tú (editable).
   const propinaTotal = parseTasa(propinaEdit) ?? 0;
   // Métodos con propina para mostrar el desglose de referencia.
@@ -2342,7 +2341,6 @@ function ImportarSetux() {
       if (r.status === 409 && d.yaExiste) { setConflicto(d.cuantos ?? 0); setGuardando(false); return; }
       if (!r.ok) throw new Error(d.error || "No se pudo registrar.");
       const partes = [`${d.creados} ingreso${d.creados === 1 ? "" : "s"}`];
-      if (d.egresos > 0) partes.push(`${d.egresos} egreso${d.egresos === 1 ? "" : "s"} (cortesías)`);
       let extra = "";
       if (d.propina > 0) extra = ` Propina registrada aparte: ${fmtMonto(d.propina, "EUR")}.`;
       setMsg(`Listo (${fmtFecha(fecha)}): ${partes.join(" y ")}.${extra}`);
@@ -2397,8 +2395,7 @@ function ImportarSetux() {
                   <input type="checkbox" checked={l.incluir} disabled={l.destino === "excluir"} onChange={() => setLineas((ls) => ls.map((x, j) => (j === i ? { ...x, incluir: !x.incluir } : x)))} className="accent-[#0F0F0F]" />
                   <span className="text-cacao text-sm">
                     {l.metodoBonito}
-                    {l.destino === "detalle" && <span className="ml-2 inline-block rounded-full bg-[#FBF3E2] text-[#7A5A18] text-[9px] uppercase tracking-widest px-2 py-0.5 align-middle">→ Reporte detallado</span>}
-                    {l.destino === "egreso" && <span className="ml-2 inline-block rounded-full bg-[#F9EBE7] text-[#7A2419] text-[9px] uppercase tracking-widest px-2 py-0.5 align-middle">→ Egreso · cortesía</span>}
+                    {l.destino === "detalle" && <span className="ml-2 inline-block rounded-full bg-[#FBF3E2] text-[#7A5A18] text-[9px] uppercase tracking-widest px-2 py-0.5 align-middle">→ Archivo aparte (CXC/RPP)</span>}
                     {l.destino === "excluir" && <span className="ml-2 inline-block rounded-full bg-marfil-soft text-cacao-mute text-[9px] uppercase tracking-widest px-2 py-0.5 align-middle">No cuenta</span>}
                   </span>
                   <span className="text-cacao-mute text-sm text-right tabular-nums">{l.cantidad ?? "—"}</span>
@@ -2416,14 +2413,8 @@ function ImportarSetux() {
               <div className="text-[11px] text-cacao-mute">Al guardar se registra el NETO (sin IVA) y el IVA queda aparte. Zelle y Dólar no llevan IVA.</div>
               {lineas.some((l) => l.destino === "detalle") && (
                 <div className="grid grid-cols-[1fr_auto] gap-3 text-[#7A5A18]">
-                  <span>CXC (ventas a crédito)</span>
-                  <span className="text-right text-[11px]">Impórtalas por el reporte detallado por cliente</span>
-                </div>
-              )}
-              {egresoEUR > 0 && (
-                <div className="grid grid-cols-[1fr_auto] gap-3 text-[#7A2419]">
-                  <span>Cortesías (RPP) → egreso</span>
-                  <span className="text-right tabular-nums">{fmtMonto(egresoEUR, "EUR")}</span>
+                  <span>CXC y RPP (no son ingreso de contado)</span>
+                  <span className="text-right text-[11px]">Se importan por su archivo aparte (CXC → cuentas por cobrar, RPP → egresos)</span>
                 </div>
               )}
               {propinasPorMetodo.length > 0 && (

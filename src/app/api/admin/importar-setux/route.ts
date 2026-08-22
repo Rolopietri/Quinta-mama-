@@ -12,17 +12,17 @@ function autorizado(req: NextRequest): boolean {
   return tokenValido(req.cookies.get(ADMIN_COOKIE)?.value);
 }
 
-// Clasifica cada método del reporte:
-//  - 'egreso' : RPP (cortesías, no son ingreso pero sí un costo)
+// Clasifica cada método del reporte de INGRESOS (este importador es solo para
+// dinero de contado):
 //  - 'excluir': notas de crédito (no cuentan)
-//  - 'detalle': CXC → se importa por el reporte DETALLADO por cliente, no aquí
-//  - 'ingreso': el resto (ventas del día)
-type Destino = "ingreso" | "detalle" | "excluir" | "egreso";
+//  - 'detalle': CXC y RPP → se importan por su propio archivo (CXC a cuentas por
+//               cobrar, RPP a egresos/cortesías); aquí se IGNORAN.
+//  - 'ingreso': el resto (Pto Venta, Pago Móvil, Dólar, Zelle, Efectivo…)
+type Destino = "ingreso" | "detalle" | "excluir";
 function destinoDe(metodo: string): Destino {
   const k = metodo.trim().toUpperCase();
-  if (k === "RPP") return "egreso";
   if (k.includes("NOTA DE CREDITO") || k.includes("NOTA DE CRÉDITO")) return "excluir";
-  if (k.startsWith("CXC")) return "detalle";
+  if (k.startsWith("CXC") || k === "RPP") return "detalle";
   return "ingreso";
 }
 
@@ -87,17 +87,14 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ yaExiste: true, cuantos: yaCuantos }, { status: 409 });
   }
   if (yaCuantos > 0 && b.reemplazar === true) {
+    // Solo reemplaza los ingresos de contado y la propina de ese día. NO toca
+    // egresos (RPP) ni cuentas por cobrar (CXC): esos se manejan por su archivo.
     await sb.from("admin_ingreso").delete().eq("fuente", "setux").eq("fecha", fecha);
-    // no borra cuentas por cobrar ya cobradas (tienen ingreso enlazado)
-    await sb.from("admin_cuenta_cobrar").delete().eq("fuente", "setux").eq("fecha", fecha).eq("cobrada", false);
     await sb.from("admin_propina").delete().eq("fuente", "setux").eq("fecha", fecha);
-    await sb.from("admin_egreso").delete().eq("fuente", "setux").eq("fecha", fecha);
   }
 
-  // Separar según destino. RPP = cortesía → egreso; CXC → NO se toca aquí (se
-  // importa por el reporte detallado por cliente).
+  // Solo ingresos de contado. CXC y RPP se ignoran (van por su propio archivo).
   const ingresos: Record<string, unknown>[] = [];
-  const egresos: Record<string, unknown>[] = [];
   // La propina total la decide el cliente (editable, para quitar errores).
   const propinaTotal = typeof b.propina === "number" && isFinite(b.propina) && b.propina > 0
     ? Math.round(b.propina * 100) / 100
@@ -106,59 +103,33 @@ export async function PUT(req: NextRequest) {
     const total = typeof l.total === "number" ? l.total : Number(l.total);
     if (!isFinite(total)) continue;
     const metodo = typeof l.metodo === "string" ? l.metodo : "";
-    const destino = destinoDe(metodo);
-    if (destino === "excluir" || destino === "detalle") continue; // CXC → reporte detallado
+    if (destinoDe(metodo) !== "ingreso") continue; // CXC/RPP/notas → aparte
     const cantidad = typeof l.cantidad === "number" ? l.cantidad : null;
-    if (destino === "egreso") {
-      // RPP: cortesías. Es un costo (no ingreso). Se guarda el total en euros.
-      egresos.push({
-        fecha,
-        concepto: `Cortesías (RPP) del ${fecha}`,
-        categoria_id: null,
-        categoria_nombre: "Cortesías",
-        clasificacion: "variable",
-        proveedor_id: null,
-        proveedor_nombre: null,
-        monto: total,
-        moneda: "EUR",
-        tasa,
-        monto_usd: usdDe(total),
-        metodo: "RPP",
-        factura: null,
-        nota: cantidad != null ? `${cantidad} cortesías (Setux)` : "Setux",
-        fuente: "setux",
-      });
-    } else {
-      // Separa el IVA: el ingreso es el NETO; el IVA va aparte.
-      const { net, iva } = separaIva(total, metodo, ivaCfg);
-      ingresos.push({
-        fecha,
-        concepto: `Ventas ${metodo}`.trim(),
-        categoria_id: categoriaId,
-        categoria_nombre: categoriaNombre,
-        pagador: null,
-        monto: net,
-        iva,
-        moneda: "EUR",
-        tasa,
-        monto_usd: usdDe(net),
-        metodo,
-        factura: null,
-        nota: cantidad != null ? `${cantidad} transacciones (Setux)` : "Setux",
-        fuente: "setux",
-      });
-    }
+    // Separa el IVA: el ingreso es el NETO; el IVA va aparte.
+    const { net, iva } = separaIva(total, metodo, ivaCfg);
+    ingresos.push({
+      fecha,
+      concepto: `Ventas ${metodo}`.trim(),
+      categoria_id: categoriaId,
+      categoria_nombre: categoriaNombre,
+      pagador: null,
+      monto: net,
+      iva,
+      moneda: "EUR",
+      tasa,
+      monto_usd: usdDe(net),
+      metodo,
+      factura: null,
+      nota: cantidad != null ? `${cantidad} transacciones (Setux)` : "Setux",
+      fuente: "setux",
+    });
   }
 
-  if (ingresos.length === 0 && egresos.length === 0) {
-    return NextResponse.json({ error: "No hay montos válidos." }, { status: 400 });
+  if (ingresos.length === 0) {
+    return NextResponse.json({ error: "No hay ingresos de contado que registrar." }, { status: 400 });
   }
-  if (ingresos.length) {
+  {
     const { error } = await sb.from("admin_ingreso").insert(ingresos);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  }
-  if (egresos.length) {
-    const { error } = await sb.from("admin_egreso").insert(egresos);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   }
   if (propinaTotal > 0) {
@@ -170,5 +141,5 @@ export async function PUT(req: NextRequest) {
       nota: "Propina del reporte (no es ingreso)",
     });
   }
-  return NextResponse.json({ ok: true, creados: ingresos.length, egresos: egresos.length, propina: Math.round(propinaTotal * 100) / 100 });
+  return NextResponse.json({ ok: true, creados: ingresos.length, propina: Math.round(propinaTotal * 100) / 100 });
 }
