@@ -118,15 +118,24 @@ export async function listVentasDiasCompletos(dias = 30): Promise<Venta[]> {
   if (fechas.length === 0) return [];
   // La fecha de corte es la n-ésima más reciente; traemos todo desde ahí.
   const corte = fechas[Math.min(dias, fechas.length) - 1];
-  const { data, error } = await sb
-    .from("ventas")
-    .select("*")
-    .eq("es_merma", false)
-    .gte("fecha", corte)
-    .order("fecha", { ascending: false })
-    .order("created_at", { ascending: false });
-  if (error) throw error;
-  return (data as Row[]).map(rowToVenta);
+  // Paginar: un día con muchas líneas puede superar el tope de 1000 por request.
+  const PAGE = 1000;
+  const filas: Row[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await sb
+      .from("ventas")
+      .select("*")
+      .eq("es_merma", false)
+      .gte("fecha", corte)
+      .order("fecha", { ascending: false })
+      .order("created_at", { ascending: false })
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    const rows = (data as Row[]) ?? [];
+    filas.push(...rows);
+    if (rows.length < PAGE) break;
+  }
+  return filas.map(rowToVenta);
 }
 
 /**
@@ -136,16 +145,26 @@ export async function listVentasDiasCompletos(dias = 30): Promise<Venta[]> {
  */
 export async function totalesVentasPorMes(): Promise<Record<string, number>> {
   const sb = createSupabaseBrowserClient();
-  const { data, error } = await sb
-    .from("ventas")
-    .select("fecha, total_usd")
-    .eq("es_merma", false);
-  if (error) throw error;
   const out: Record<string, number> = {};
-  for (const r of (data as { fecha: string | null; total_usd: number | string | null }[]) ?? []) {
-    if (!r.fecha) continue;
-    const mes = String(r.fecha).slice(0, 7);
-    out[mes] = (out[mes] ?? 0) + (r.total_usd === null ? 0 : Number(r.total_usd));
+  // Supabase/PostgREST devuelve máx. 1000 filas por request. Con más de 1000
+  // ventas en total, un select "a secas" sumaba solo una parte (total recortado).
+  // Paginamos con .range() hasta traerlas TODAS.
+  const PAGE = 1000;
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await sb
+      .from("ventas")
+      .select("fecha, total_usd")
+      .eq("es_merma", false)
+      .order("fecha", { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    const rows = (data as { fecha: string | null; total_usd: number | string | null }[]) ?? [];
+    for (const r of rows) {
+      if (!r.fecha) continue;
+      const mes = String(r.fecha).slice(0, 7);
+      out[mes] = (out[mes] ?? 0) + (r.total_usd === null ? 0 : Number(r.total_usd));
+    }
+    if (rows.length < PAGE) break;
   }
   return out;
 }
@@ -160,16 +179,26 @@ export async function listVentasRango(
   hasta: string,
 ): Promise<Venta[]> {
   const sb = createSupabaseBrowserClient();
-  const { data, error } = await sb
-    .from("ventas")
-    .select("*")
-    .eq("es_merma", false)
-    .gte("fecha", desde)
-    .lte("fecha", hasta)
-    .order("fecha", { ascending: true })
-    .order("created_at", { ascending: true });
-  if (error) throw error;
-  return (data as Row[]).map(rowToVenta);
+  // Paginar para no toparse con el tope de 1000 filas por request (un rango
+  // amplio o un mes con muchas líneas sumaría de menos).
+  const PAGE = 1000;
+  const filas: Row[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await sb
+      .from("ventas")
+      .select("*")
+      .eq("es_merma", false)
+      .gte("fecha", desde)
+      .lte("fecha", hasta)
+      .order("fecha", { ascending: true })
+      .order("created_at", { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    const rows = (data as Row[]) ?? [];
+    filas.push(...rows);
+    if (rows.length < PAGE) break;
+  }
+  return filas.map(rowToVenta);
 }
 
 /** Solo mermas de producción (pérdidas internas de algo pre-producido). */
