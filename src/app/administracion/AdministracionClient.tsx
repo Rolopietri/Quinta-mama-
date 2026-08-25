@@ -1523,17 +1523,180 @@ type Ingreso = {
 };
 
 function SeccionIngresos() {
-  const [vista, setVista] = useState<"ingresos" | "importar" | "categorias">("ingresos");
+  const [vista, setVista] = useState<"ingresos" | "importar" | "factura" | "categorias">("ingresos");
   return (
     <div className="space-y-4">
-      <div className="flex gap-1 rounded-lg ring-1 ring-marfil p-1 w-fit">
-        {([["ingresos", "Ingresos"], ["importar", "Importar (Setux)"], ["categorias", "Categorías"]] as const).map(([k, label]) => (
+      <div className="flex flex-wrap gap-1 rounded-lg ring-1 ring-marfil p-1 w-fit">
+        {([["ingresos", "Ingresos"], ["importar", "Importar (Setux)"], ["factura", "Por factura (cuadre)"], ["categorias", "Categorías"]] as const).map(([k, label]) => (
           <button key={k} type="button" onClick={() => setVista(k)} className={`rounded-md px-3 py-1.5 text-xs uppercase tracking-widest ${vista === k ? "bg-cacao text-white" : "text-cacao hover:bg-marfil-soft"}`}>
             {label}
           </button>
         ))}
       </div>
-      {vista === "ingresos" ? <IngresosMes /> : vista === "importar" ? <ImportarSetux /> : <CategoriasIngresoCatalogo />}
+      {vista === "ingresos" ? <IngresosMes /> : vista === "importar" ? <ImportarSetux /> : vista === "factura" ? <CuadreFacturas /> : <CategoriasIngresoCatalogo />}
+    </div>
+  );
+}
+
+// ── Cuadre del "Reporte Detallado por Factura" ──────────────────────────────
+// Lee el reporte por factura (Excel/CSV), calcula Ingresos/CXC/RPP y ticket
+// promedio, y los COMPARA con lo ya cargado en Administración — sin guardar.
+type DiaFacturaUI = { fecha: string; ingresoNeto: number; ingresoBruto: number; cxcNeto: number; cxcBruto: number; rppNeto: number; rppBruto: number; propina: number; tickets: number };
+type TotalesFacturaUI = { ingresoNeto: number; ingresoBruto: number; cxcNeto: number; cxcBruto: number; rppNeto: number; rppBruto: number; totalNeto: number; totalBruto: number; propina: number; tickets: number; ticketPromedioBruto: number; ticketPromedioNeto: number };
+type CargadoUI = { porDia: Record<string, { ingreso: number; cxc: number; rpp: number }>; totales: { ingreso: number; cxc: number; rpp: number } };
+
+function CuadreFacturas() {
+  const [cargando, setCargando] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [rep, setRep] = useState<{ desde: string; hasta: string; dias: DiaFacturaUI[]; totales: TotalesFacturaUI } | null>(null);
+  const [cargado, setCargado] = useState<CargadoUI | null>(null);
+  const [base, setBase] = useState<"neto" | "bruto">("bruto");
+
+  const fEUR = (v: number) => `${(v ?? 0).toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
+  const dif = (a: number, b: number) => Math.round((a - b) * 100) / 100;
+
+  async function subir(file: File) {
+    setError(null); setCargando(true); setRep(null); setCargado(null);
+    try {
+      const b64 = await new Promise<string>((resolve, reject) => {
+        const fr = new FileReader();
+        fr.onload = () => resolve(String(fr.result));
+        fr.onerror = () => reject(new Error("no se pudo leer"));
+        fr.readAsDataURL(file);
+      });
+      const r = await fetch("/api/admin/importar-facturas", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ file_base64: b64 }) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "No se pudo leer el archivo.");
+      setRep(d.reporte);
+      setCargado(d.cargado ?? null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error");
+    } finally { setCargando(false); }
+  }
+
+  // Ingreso del reporte según base; CXC/RPP se comparan en BRUTO (así se guardan).
+  const repIngreso = (t: TotalesFacturaUI) => (base === "neto" ? t.ingresoNeto : t.ingresoBruto);
+  const diaIngreso = (d: DiaFacturaUI) => (base === "neto" ? d.ingresoNeto : d.ingresoBruto);
+
+  return (
+    <div className="rounded-2xl bg-white ring-1 ring-marfil p-4 space-y-4">
+      {error && <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419]">{error}</div>}
+
+      {!rep ? (
+        <div className="text-center py-4">
+          <p className="font-display text-[11px] tracking-[0.3em] uppercase text-cacao-mute mb-1">Cuadre por factura</p>
+          <p className="text-sm text-cacao-soft mb-4 font-serif italic max-w-xl mx-auto">Sube el <strong>“Reporte Detallado por Factura”</strong> (Excel .xlsx/.xls o CSV). De un solo archivo salen Ingresos, CXC, RPP y el ticket promedio, fechados por la <strong>fecha de orden</strong>. Aquí solo se <strong>compara</strong> con lo ya cargado — no se guarda nada.</p>
+          <p className="text-[11px] text-cacao-mute mb-3">En iOS: en Numbers usa Compartir → Exportar → Excel (o CSV). En Windows: Excel directo.</p>
+          <label className="inline-block rounded-lg bg-cacao text-white px-5 py-2.5 text-xs uppercase tracking-widest hover:bg-terracotta cursor-pointer">
+            {cargando ? "Leyendo…" : "Elegir archivo (Excel o CSV)"}
+            <input type="file" accept=".xls,.xlsx,.csv,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" className="hidden" disabled={cargando} onChange={(e) => { const f = e.target.files?.[0]; if (f) subir(f); e.target.value = ""; }} />
+          </label>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <span className="font-display text-[10px] tracking-[0.25em] uppercase text-cacao-mute">Período {rep.desde} → {rep.hasta} · {rep.totales.tickets} facturas</span>
+            <button type="button" onClick={() => { setRep(null); setCargado(null); }} className="text-xs uppercase tracking-widest text-cacao-soft hover:text-cacao">Cambiar archivo</button>
+          </div>
+
+          {/* KPIs del reporte */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <MiniKpi titulo="Ticket promedio" valor={fEUR(rep.totales.ticketPromedioBruto)} sub={`${rep.totales.tickets} tickets · neto ${fEUR(rep.totales.ticketPromedioNeto)}`} />
+            <MiniKpi titulo="Ingresos (dinero real)" valor={fEUR(rep.totales.ingresoBruto)} sub={`neto ${fEUR(rep.totales.ingresoNeto)}`} />
+            <MiniKpi titulo="CXC (crédito)" valor={fEUR(rep.totales.cxcBruto)} sub={`neto ${fEUR(rep.totales.cxcNeto)}`} />
+            <MiniKpi titulo="RPP (cortesías)" valor={fEUR(rep.totales.rppBruto)} sub={`neto ${fEUR(rep.totales.rppNeto)}`} />
+          </div>
+
+          {/* Cuadre vs cargado */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[11px] uppercase tracking-widest text-cacao-mute">Comparar ingreso en</span>
+            {(["bruto", "neto"] as const).map((b) => (
+              <button key={b} type="button" onClick={() => setBase(b)} className={`rounded-full px-3 py-1 text-[11px] uppercase tracking-widest ring-1 ${base === b ? "bg-cacao text-white ring-cacao" : "bg-white text-cacao-soft ring-marfil"}`}>{b === "bruto" ? "Con IVA" : "Neto"}</button>
+            ))}
+            <span className="text-[11px] text-cacao-mute">CXC y RPP se comparan con IVA (así se guardan hoy).</span>
+          </div>
+
+          {cargado ? (() => {
+            const dT = { ing: dif(repIngreso(rep.totales), cargado.totales.ingreso), cxc: dif(rep.totales.cxcBruto, cargado.totales.cxc), rpp: dif(rep.totales.rppBruto, cargado.totales.rpp) };
+            const fechas = Array.from(new Set([...rep.dias.map((d) => d.fecha), ...Object.keys(cargado.porDia)])).sort();
+            const chip = (n: number) => n === 0 ? "text-cacao-mute" : Math.abs(n) < 0.005 ? "text-cacao-mute" : "text-[#7A2419]";
+            return (
+              <div className="space-y-3">
+                <div className="rounded-xl bg-marfil-soft ring-1 ring-marfil p-3">
+                  <p className="text-[11px] uppercase tracking-widest text-cacao-mute mb-2">Totales del período — reporte vs cargado</p>
+                  <div className="grid grid-cols-3 gap-3 text-sm">
+                    <CuadreTot label="Ingresos" rep={repIngreso(rep.totales)} car={cargado.totales.ingreso} d={dT.ing} fEUR={fEUR} />
+                    <CuadreTot label="CXC" rep={rep.totales.cxcBruto} car={cargado.totales.cxc} d={dT.cxc} fEUR={fEUR} />
+                    <CuadreTot label="RPP" rep={rep.totales.rppBruto} car={cargado.totales.rpp} d={dT.rpp} fEUR={fEUR} />
+                  </div>
+                </div>
+
+                <div className="rounded-xl ring-1 ring-marfil overflow-hidden max-h-[26rem] overflow-y-auto">
+                  <table className="w-full text-xs">
+                    <thead className="sticky top-0 bg-white">
+                      <tr className="text-cacao-mute uppercase tracking-widest text-left">
+                        <th className="py-1.5 px-2 font-normal">Día</th>
+                        <th className="py-1.5 px-2 font-normal text-right">Ingreso rep.</th>
+                        <th className="py-1.5 px-2 font-normal text-right">Ingreso carg.</th>
+                        <th className="py-1.5 px-2 font-normal text-right">Δ Ing</th>
+                        <th className="py-1.5 px-2 font-normal text-right">Δ CXC</th>
+                        <th className="py-1.5 px-2 font-normal text-right">Δ RPP</th>
+                        <th className="py-1.5 px-2 font-normal text-right">Tickets</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {fechas.map((f) => {
+                        const dd = rep.dias.find((x) => x.fecha === f);
+                        const cc = cargado.porDia[f] ?? { ingreso: 0, cxc: 0, rpp: 0 };
+                        const ingRep = dd ? diaIngreso(dd) : 0;
+                        const dIng = dif(ingRep, cc.ingreso);
+                        const dCxc = dif(dd?.cxcBruto ?? 0, cc.cxc);
+                        const dRpp = dif(dd?.rppBruto ?? 0, cc.rpp);
+                        return (
+                          <tr key={f} className="border-t border-marfil">
+                            <td className="py-1 px-2 text-cacao whitespace-nowrap">{f}</td>
+                            <td className="py-1 px-2 text-right tabular-nums text-cacao">{fEUR(ingRep)}</td>
+                            <td className="py-1 px-2 text-right tabular-nums text-cacao-soft">{fEUR(cc.ingreso)}</td>
+                            <td className={`py-1 px-2 text-right tabular-nums ${chip(dIng)}`}>{dIng === 0 ? "—" : fEUR(dIng)}</td>
+                            <td className={`py-1 px-2 text-right tabular-nums ${chip(dCxc)}`}>{dCxc === 0 ? "—" : fEUR(dCxc)}</td>
+                            <td className={`py-1 px-2 text-right tabular-nums ${chip(dRpp)}`}>{dRpp === 0 ? "—" : fEUR(dRpp)}</td>
+                            <td className="py-1 px-2 text-right tabular-nums text-cacao-soft">{dd?.tickets ?? 0}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="text-[11px] text-cacao-soft">Δ = reporte − cargado. En rojo lo que cambiaría si aplicáramos este reporte. Nada se ha guardado. Cuando revises el cuadre y me digas, hago el importe definitivo (reemplazando por rango).</p>
+              </div>
+            );
+          })() : (
+            <p className="text-sm text-cacao-soft italic">No pude leer lo ya cargado para comparar (¿servidor sin configurar?). Igual tienes arriba los totales del reporte.</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MiniKpi({ titulo, valor, sub }: { titulo: string; valor: string; sub?: string }) {
+  return (
+    <div className="rounded-xl ring-1 ring-marfil p-3">
+      <div className="text-[10px] uppercase tracking-widest text-cacao-mute">{titulo}</div>
+      <div className="mt-1 font-cinzel text-base text-cacao leading-tight">{valor}</div>
+      {sub && <div className="text-[11px] text-cacao-soft mt-0.5">{sub}</div>}
+    </div>
+  );
+}
+
+function CuadreTot({ label, rep, car, d, fEUR }: { label: string; rep: number; car: number; d: number; fEUR: (n: number) => string }) {
+  const col = Math.abs(d) < 0.005 ? "text-[#2F4A1F]" : "text-[#7A2419]";
+  return (
+    <div>
+      <div className="text-[10px] uppercase tracking-widest text-cacao-mute">{label}</div>
+      <div className="text-cacao tabular-nums">{fEUR(rep)}</div>
+      <div className="text-[11px] text-cacao-soft tabular-nums">cargado {fEUR(car)}</div>
+      <div className={`text-[11px] tabular-nums ${col}`}>{Math.abs(d) < 0.005 ? "cuadra ✓" : `Δ ${fEUR(d)}`}</div>
     </div>
   );
 }
