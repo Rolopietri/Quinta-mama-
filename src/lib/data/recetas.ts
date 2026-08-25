@@ -341,6 +341,17 @@ export async function setRecetaActivo(
   if (error) throw error;
 }
 
+/** Cambia SOLO la categoría de una receta (para clasificar desde Análisis de
+ *  ventas sin abrir el formulario completo). No toca ingredientes ni lo demás. */
+export async function setRecetaCategoria(
+  id: string,
+  categoria: string | null,
+): Promise<void> {
+  const sb = createSupabaseBrowserClient();
+  const { error } = await sb.from("recetas").update({ categoria }).eq("id", id);
+  if (error) throw error;
+}
+
 // ─── Cálculo de costo (cliente) ──────────────────────────────────
 
 /**

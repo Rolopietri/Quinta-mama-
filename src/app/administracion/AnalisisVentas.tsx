@@ -7,9 +7,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { Venta, Receta, Insumo } from "@/lib/types";
-import { categoriaRecetaLabel, categoriaInsumoLabel } from "@/lib/types";
+import { categoriaRecetaLabel, categoriaInsumoLabel, CATEGORIAS_RECETA } from "@/lib/types";
 import { listVentasRango } from "@/lib/data/ventas";
-import { listRecetas } from "@/lib/data/recetas";
+import { listRecetas, setRecetaCategoria } from "@/lib/data/recetas";
 import { listInsumos } from "@/lib/data/cocina";
 import { hoyISO } from "@/lib/ui";
 import { ErrorBanner } from "@/components/ErrorBanner";
@@ -137,6 +137,10 @@ export function AnalisisVentas() {
   const [error, setError] = useState<string | null>(null);
   // Conciliación con Administración (componentes del rango, en euros).
   const [conc, setConc] = useState<{ setuxNeto: number; ivaSetux: number; cxc: number; rpp: number; cxcNeto: number; rppNeto: number; cobrosEur: number; otrosEur: number } | null>(null);
+  // Panel de clasificación de productos (asigna la categoría de la receta desde Admin).
+  const [mostrarClasif, setMostrarClasif] = useState(false);
+  const [busquedaClasif, setBusquedaClasif] = useState("");
+  const [guardandoCat, setGuardandoCat] = useState<string | null>(null);
 
   // Recetas + insumos una sola vez (para los mapas de categoría: las ventas de
   // receta usan la categoría de la receta; las de reventa (insumo_directo) usan
@@ -379,6 +383,39 @@ export function AnalisisVentas() {
 
   const hayDatos = filtradas.length > 0;
 
+  // Ventas (unidades) por receta en el rango, para ordenar el clasificador por
+  // relevancia (los más vendidos primero).
+  const unidadesPorReceta = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const v of ventas) if (v.recetaId) m.set(v.recetaId, (m.get(v.recetaId) ?? 0) + (v.cantidad || 0));
+    return m;
+  }, [ventas]);
+
+  // Productos a clasificar: recetas vendibles (no subrecetas). Sin categoría
+  // primero, luego por ventas del rango.
+  const productosClasif = useMemo(() => {
+    const q = normCat(busquedaClasif);
+    return recetas
+      .filter((r) => !r.esSubreceta)
+      .filter((r) => !q || normCat(r.nombre).includes(q))
+      // "por clasificar" = todavía no tiene una categoría FINA (vacía o legacy).
+      .map((r) => ({ r, ventas: unidadesPorReceta.get(r.id) ?? 0, sinCat: !CATEGORIAS_RECETA.some((c) => c.value === r.categoria) }))
+      .sort((a, b) => (a.sinCat !== b.sinCat ? (a.sinCat ? -1 : 1) : b.ventas - a.ventas || a.r.nombre.localeCompare(b.r.nombre)));
+  }, [recetas, unidadesPorReceta, busquedaClasif]);
+  const sinCategoria = productosClasif.filter((p) => p.sinCat).length;
+
+  async function cambiarCategoria(recetaId: string, categoria: string) {
+    setGuardandoCat(recetaId);
+    try {
+      await setRecetaCategoria(recetaId, categoria || null);
+      setRecetas((prev) => prev.map((r) => (r.id === recetaId ? { ...r, categoria: categoria || undefined } : r)));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo guardar la categoría");
+    } finally {
+      setGuardandoCat(null);
+    }
+  }
+
   const pill = (active: boolean) =>
     `px-3 py-1 rounded-full text-[11px] uppercase tracking-widest ring-1 ${
       active
@@ -480,6 +517,45 @@ export function AnalisisVentas() {
       </section>
 
       {error && <ErrorBanner>{error}</ErrorBanner>}
+
+      {/* ── Clasificar productos (asigna la categoría desde aquí) ── */}
+      <section className="rounded-2xl bg-white ring-1 ring-marfil p-4">
+        <button type="button" onClick={() => setMostrarClasif((v) => !v)} className="w-full flex items-center justify-between gap-2 text-left">
+          <span className="font-cinzel text-base text-cacao">Clasificar productos</span>
+          <span className="flex items-center gap-2">
+            {sinCategoria > 0 && <span className="rounded-full bg-amber-50 text-amber-800 ring-1 ring-amber-300 px-2 py-0.5 text-[10px] uppercase tracking-widest">{sinCategoria} por clasificar</span>}
+            <span className={`text-cacao-mute transition-transform ${mostrarClasif ? "rotate-90" : ""}`}>›</span>
+          </span>
+        </button>
+        {mostrarClasif && (
+          <div className="mt-3 space-y-3">
+            <p className="text-[12px] text-cacao-soft">Asigna la categoría fina de cada producto. Se guarda en la receta (misma que ve Cocina) y el análisis de abajo se reagrupa al instante. Ordenados: sin categoría primero, luego los más vendidos del período.</p>
+            <input value={busquedaClasif} onChange={(e) => setBusquedaClasif(e.target.value)} placeholder="Buscar producto…" className="w-full sm:w-72 rounded-lg ring-1 ring-marfil px-3 py-2 text-sm" />
+            <div className="rounded-xl ring-1 ring-marfil overflow-hidden max-h-[28rem] overflow-y-auto">
+              <ul className="divide-y divide-marfil">
+                {productosClasif.map(({ r, ventas: uds, sinCat }) => (
+                  <li key={r.id} className={`px-3 py-2 grid grid-cols-[1fr_auto] gap-3 items-center ${sinCat ? "bg-amber-50/50" : ""}`}>
+                    <div className="min-w-0">
+                      <div className="text-sm text-cacao truncate">{r.nombre}</div>
+                      <div className="text-[11px] text-cacao-mute">{uds > 0 ? `${fUnid(uds)} vendidos en el período` : "sin ventas en el período"}{!r.activo ? " · inactiva" : ""}</div>
+                    </div>
+                    <select
+                      value={CATEGORIAS_RECETA.some((c) => c.value === r.categoria) ? (r.categoria as string) : ""}
+                      disabled={guardandoCat === r.id}
+                      onChange={(e) => cambiarCategoria(r.id, e.target.value)}
+                      className={`rounded-lg ring-1 px-2 py-1.5 text-sm bg-white ${sinCat ? "ring-amber-300 text-amber-800" : "ring-marfil text-cacao"} disabled:opacity-50`}
+                    >
+                      <option value="">— Sin categoría{r.categoria && !CATEGORIAS_RECETA.some((c) => c.value === r.categoria) ? ` (${categoriaRecetaLabel(r.categoria)})` : ""} —</option>
+                      {CATEGORIAS_RECETA.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+                    </select>
+                  </li>
+                ))}
+                {productosClasif.length === 0 && <li className="px-3 py-4 text-center text-sm text-cacao-soft italic">Sin productos que coincidan.</li>}
+              </ul>
+            </div>
+          </div>
+        )}
+      </section>
 
       {/* ── Conciliación con Administración ─────────────────────── */}
       {conc && (cocinaTotalRango > 0.005 || conc.setuxNeto > 0.005) && (() => {
