@@ -144,7 +144,7 @@ export function AnalisisVentas() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   // Conciliación con Administración (componentes del rango, en euros).
-  const [conc, setConc] = useState<{ setuxNeto: number; ivaSetux: number; cxc: number; rpp: number; cobrosEur: number; otrosEur: number } | null>(null);
+  const [conc, setConc] = useState<{ setuxNeto: number; ivaSetux: number; cxc: number; rpp: number; cxcNeto: number; rppNeto: number; cobrosEur: number; otrosEur: number } | null>(null);
 
   // Recetas + insumos una sola vez (para los mapas de categoría: las ventas de
   // receta usan la categoría de la receta; las de reventa (insumo_directo) usan
@@ -493,9 +493,12 @@ export function AnalisisVentas() {
       {conc && (cocinaTotalRango > 0.005 || conc.setuxNeto > 0.005) && (() => {
         // La idea simple: Ventas en Cocina − Ingresos = lo vendido a crédito (CXC) + cortesías.
         const diferencia = Math.round((cocinaTotalRango - conc.setuxNeto) * 100) / 100;
-        const creditoYCortesias = Math.round((conc.cxc + conc.rpp) * 100) / 100;
+        // CXC y RPP en NETO (sin IVA), para comparar con Cocina que va en neto.
+        const cxcN = conc.cxcNeto ?? conc.cxc;
+        const rppN = conc.rppNeto ?? conc.rpp;
+        const creditoYCortesias = Math.round((cxcN + rppN) * 100) / 100;
         const sinExplicar = Math.round((diferencia - creditoYCortesias) * 100) / 100;
-        const cuadra = Math.abs(sinExplicar) <= 1;
+        const cuadra = Math.abs(sinExplicar) <= 50; // tolerancia de 50 € (redondeos/IVA)
         const fEUR = (n: number) => `${n.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
         return (
           <section className="rounded-2xl bg-white ring-1 ring-marfil p-4">
@@ -513,9 +516,9 @@ export function AnalisisVentas() {
               <div className="border-t border-marfil pt-1"><Fila label="Diferencia" val={fEUR(diferencia)} fuerte /></div>
             </div>
             <div className="text-sm max-w-md space-y-1 mt-3 rounded-xl bg-marfil-soft p-3">
-              <p className="text-[11px] uppercase tracking-widest text-cacao-mute mb-1">Esa diferencia debería ser:</p>
-              <Fila label="Ventas a crédito (CXC)" val={fEUR(conc.cxc)} />
-              <Fila label="Cortesías (RPP)" val={fEUR(conc.rpp)} />
+              <p className="text-[11px] uppercase tracking-widest text-cacao-mute mb-1">Esa diferencia debería ser (neto, sin IVA):</p>
+              <Fila label="Ventas a crédito (CXC)" val={fEUR(cxcN)} />
+              <Fila label="Cortesías (RPP)" val={fEUR(rppN)} />
               <div className="border-t border-marfil pt-1"><Fila label="Juntas" val={fEUR(creditoYCortesias)} fuerte /></div>
               <div className="border-t border-marfil pt-1">
                 <Fila label={cuadra ? "Todo explicado ✓" : "Sin explicar"} val={`${sinExplicar < 0 ? "− " : ""}${fEUR(Math.abs(sinExplicar))}`} fuerte />

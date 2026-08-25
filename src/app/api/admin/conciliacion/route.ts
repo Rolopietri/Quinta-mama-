@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { tokenValido, ADMIN_COOKIE } from "@/lib/admin-auth";
 import { createServiceClient } from "@/lib/supabase/admin-service";
+import { getIvaConfig } from "@/lib/admin/iva";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -51,6 +52,10 @@ export async function GET(req: NextRequest) {
   // Ventas a crédito (CXC) del mes: cuentas por cobrar con fecha en el mes.
   const cxc = (cxcR.data ?? []).filter((c) => (c.moneda ?? "EUR") === "EUR").reduce((s, c) => s + n(c.monto), 0);
 
+  // CXC y RPP se guardan en BRUTO (con IVA, como el "Total Venta" del reporte).
+  // Para conciliar con Cocina —que va en NETO— se pasan a neto (÷ 1+IVA).
+  const ivaCfg = await getIvaConfig(sb);
+  const factor = 1 + (ivaCfg.ivaPct ?? 16) / 100;
   const r2 = (x: number) => Math.round(x * 100) / 100;
   return NextResponse.json({
     desde, hasta,
@@ -58,6 +63,8 @@ export async function GET(req: NextRequest) {
     ivaSetux: r2(ivaSetux),
     cxc: r2(cxc),
     rpp: r2(rpp),
+    cxcNeto: r2(factor > 0 ? cxc / factor : cxc),
+    rppNeto: r2(factor > 0 ? rpp / factor : rpp),
     cobrosEur: r2(cobrosEur),
     otrosEur: r2(otrosEur),
   });
