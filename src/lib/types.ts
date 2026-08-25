@@ -456,6 +456,11 @@ export type Compra = {
   tasaBcvUsada?: number;
   modalidadPago?: ModalidadPago;
   notas?: string;
+  /** Estado de pago al proveedor. true = ya pagada (default). false = cuenta por
+   *  pagar (pago diferido). */
+  pagada: boolean;
+  /** Fecha en que se pagó (null mientras está por pagar). */
+  fechaPago?: string;
 };
 
 export type TasaBcv = {
