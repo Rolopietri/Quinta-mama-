@@ -491,12 +491,14 @@ export const CATEGORIAS_INSUMO_SUGERIDAS: string[] = CATEGORIAS_INSUMO.map(
   (c) => c.label,
 );
 
-/** Muestra la categoría: si es un slug viejo conocido devuelve su etiqueta;
- *  si es texto libre (categoría nueva) lo devuelve tal cual. */
+/** Muestra la categoría de un insumo. Primero busca en las categorías de insumo;
+ *  si no, intenta con las categorías FINAS de venta (para ítems de reventa
+ *  clasificados desde Análisis de ventas); si tampoco, lo devuelve tal cual. */
 export function categoriaInsumoLabel(categoria: string): string {
-  return (
-    CATEGORIAS_INSUMO.find((c) => c.value === categoria)?.label ?? categoria
-  );
+  const cat = CATEGORIAS_INSUMO.find((c) => c.value === categoria)?.label;
+  if (cat) return cat;
+  const fina = CATEGORIAS_RECETA.find((c) => c.value === categoria)?.label;
+  return fina ?? categoria;
 }
 
 export const MODALIDADES_PAGO: { value: ModalidadPago; label: string }[] = [

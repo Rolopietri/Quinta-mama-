@@ -312,6 +312,17 @@ export async function deleteInsumo(id: string): Promise<void> {
  *  Recalcula el precio por unidad base y estampa `precio_actualizado` con la
  *  fecha de hoy, para que el costeo deje de marcarlo como viejo. Pensado para
  *  cuando conoces el precio de mercado actual pero no compraste todavía. */
+/** Cambia SOLO la categoría de un insumo (para clasificar ítems de reventa
+ *  desde Análisis de ventas). No toca precio ni lo demás. */
+export async function setInsumoCategoria(
+  id: string,
+  categoria: string | null,
+): Promise<void> {
+  const sb = createSupabaseBrowserClient();
+  const { error } = await sb.from("insumos").update({ categoria }).eq("id", id);
+  if (error) throw error;
+}
+
 export async function actualizarPrecioInsumo(
   id: string,
   precioCompraUsd: number,

@@ -10,7 +10,7 @@ import type { Venta, Receta, Insumo } from "@/lib/types";
 import { categoriaRecetaLabel, categoriaInsumoLabel, CATEGORIAS_RECETA } from "@/lib/types";
 import { listVentasRango } from "@/lib/data/ventas";
 import { listRecetas, setRecetaCategoria } from "@/lib/data/recetas";
-import { listInsumos } from "@/lib/data/cocina";
+import { listInsumos, setInsumoCategoria } from "@/lib/data/cocina";
 import { hoyISO } from "@/lib/ui";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import {
@@ -383,32 +383,48 @@ export function AnalisisVentas() {
 
   const hayDatos = filtradas.length > 0;
 
-  // Ventas (unidades) por receta en el rango, para ordenar el clasificador por
-  // relevancia (los más vendidos primero).
+  // Ventas (unidades) por receta / por insumo en el rango, para ordenar el
+  // clasificador por relevancia (los más vendidos primero).
   const unidadesPorReceta = useMemo(() => {
     const m = new Map<string, number>();
     for (const v of ventas) if (v.recetaId) m.set(v.recetaId, (m.get(v.recetaId) ?? 0) + (v.cantidad || 0));
     return m;
   }, [ventas]);
+  const unidadesPorInsumo = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const v of ventas) if (!v.recetaId && v.insumoId) m.set(v.insumoId, (m.get(v.insumoId) ?? 0) + (v.cantidad || 0));
+    return m;
+  }, [ventas]);
 
-  // Productos a clasificar: recetas vendibles (no subrecetas). Sin categoría
-  // primero, luego por ventas del rango.
+  // Productos a clasificar: recetas vendibles + ítems de reventa (insumos que se
+  // vendieron directo en el rango). "Por clasificar" primero, luego más vendidos.
   const productosClasif = useMemo(() => {
     const q = normCat(busquedaClasif);
-    return recetas
+    const esFina = (cat?: string) => CATEGORIAS_RECETA.some((c) => c.value === cat);
+    const recs = recetas
       .filter((r) => !r.esSubreceta)
-      .filter((r) => !q || normCat(r.nombre).includes(q))
-      // "por clasificar" = todavía no tiene una categoría FINA (vacía o legacy).
-      .map((r) => ({ r, ventas: unidadesPorReceta.get(r.id) ?? 0, sinCat: !CATEGORIAS_RECETA.some((c) => c.value === r.categoria) }))
-      .sort((a, b) => (a.sinCat !== b.sinCat ? (a.sinCat ? -1 : 1) : b.ventas - a.ventas || a.r.nombre.localeCompare(b.r.nombre)));
-  }, [recetas, unidadesPorReceta, busquedaClasif]);
+      .map((r) => ({ tipo: "receta" as const, id: r.id, nombre: r.nombre, categoria: r.categoria, activo: r.activo, ventas: unidadesPorReceta.get(r.id) ?? 0, sinCat: !esFina(r.categoria) }));
+    const insById = new Map(insumos.map((i) => [i.id, i]));
+    const revs = [...unidadesPorInsumo.keys()]
+      .map((id) => insById.get(id))
+      .filter((i): i is Insumo => !!i)
+      .map((i) => ({ tipo: "insumo" as const, id: i.id, nombre: `${i.nombre} · reventa`, categoria: i.categoria, activo: true, ventas: unidadesPorInsumo.get(i.id) ?? 0, sinCat: !esFina(i.categoria) }));
+    return [...recs, ...revs]
+      .filter((p) => !q || normCat(p.nombre).includes(q))
+      .sort((a, b) => (a.sinCat !== b.sinCat ? (a.sinCat ? -1 : 1) : b.ventas - a.ventas || a.nombre.localeCompare(b.nombre)));
+  }, [recetas, insumos, unidadesPorReceta, unidadesPorInsumo, busquedaClasif]);
   const sinCategoria = productosClasif.filter((p) => p.sinCat).length;
 
-  async function cambiarCategoria(recetaId: string, categoria: string) {
-    setGuardandoCat(recetaId);
+  async function cambiarCategoria(tipo: "receta" | "insumo", id: string, categoria: string) {
+    setGuardandoCat(id);
     try {
-      await setRecetaCategoria(recetaId, categoria || null);
-      setRecetas((prev) => prev.map((r) => (r.id === recetaId ? { ...r, categoria: categoria || undefined } : r)));
+      if (tipo === "receta") {
+        await setRecetaCategoria(id, categoria || null);
+        setRecetas((prev) => prev.map((r) => (r.id === id ? { ...r, categoria: categoria || undefined } : r)));
+      } else {
+        await setInsumoCategoria(id, categoria || null);
+        setInsumos((prev) => prev.map((i) => (i.id === id ? { ...i, categoria: categoria || "" } : i)));
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "No se pudo guardar la categoría");
     } finally {
@@ -533,19 +549,19 @@ export function AnalisisVentas() {
             <input value={busquedaClasif} onChange={(e) => setBusquedaClasif(e.target.value)} placeholder="Buscar producto…" className="w-full sm:w-72 rounded-lg ring-1 ring-marfil px-3 py-2 text-sm" />
             <div className="rounded-xl ring-1 ring-marfil overflow-hidden max-h-[28rem] overflow-y-auto">
               <ul className="divide-y divide-marfil">
-                {productosClasif.map(({ r, ventas: uds, sinCat }) => (
-                  <li key={r.id} className={`px-3 py-2 grid grid-cols-[1fr_auto] gap-3 items-center ${sinCat ? "bg-amber-50/50" : ""}`}>
+                {productosClasif.map((p) => (
+                  <li key={`${p.tipo}-${p.id}`} className={`px-3 py-2 grid grid-cols-[1fr_auto] gap-3 items-center ${p.sinCat ? "bg-amber-50/50" : ""}`}>
                     <div className="min-w-0">
-                      <div className="text-sm text-cacao truncate">{r.nombre}</div>
-                      <div className="text-[11px] text-cacao-mute">{uds > 0 ? `${fUnid(uds)} vendidos en el período` : "sin ventas en el período"}{!r.activo ? " · inactiva" : ""}</div>
+                      <div className="text-sm text-cacao truncate">{p.nombre}</div>
+                      <div className="text-[11px] text-cacao-mute">{p.ventas > 0 ? `${fUnid(p.ventas)} vendidos en el período` : "sin ventas en el período"}{!p.activo ? " · inactiva" : ""}</div>
                     </div>
                     <select
-                      value={CATEGORIAS_RECETA.some((c) => c.value === r.categoria) ? (r.categoria as string) : ""}
-                      disabled={guardandoCat === r.id}
-                      onChange={(e) => cambiarCategoria(r.id, e.target.value)}
-                      className={`rounded-lg ring-1 px-2 py-1.5 text-sm bg-white ${sinCat ? "ring-amber-300 text-amber-800" : "ring-marfil text-cacao"} disabled:opacity-50`}
+                      value={CATEGORIAS_RECETA.some((c) => c.value === p.categoria) ? (p.categoria as string) : ""}
+                      disabled={guardandoCat === p.id}
+                      onChange={(e) => cambiarCategoria(p.tipo, p.id, e.target.value)}
+                      className={`rounded-lg ring-1 px-2 py-1.5 text-sm bg-white ${p.sinCat ? "ring-amber-300 text-amber-800" : "ring-marfil text-cacao"} disabled:opacity-50`}
                     >
-                      <option value="">— Sin categoría{r.categoria && !CATEGORIAS_RECETA.some((c) => c.value === r.categoria) ? ` (${categoriaRecetaLabel(r.categoria)})` : ""} —</option>
+                      <option value="">— Sin categoría{p.categoria && !CATEGORIAS_RECETA.some((c) => c.value === p.categoria) ? ` (${categoriaInsumoLabel(p.categoria)})` : ""} —</option>
                       {CATEGORIAS_RECETA.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
                     </select>
                   </li>
