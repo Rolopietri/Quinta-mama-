@@ -80,22 +80,14 @@ function normCat(s: string): string {
 // categorías de insumo de reventa) en una sola etiqueta canónica, para que el
 // análisis no muestre categorías repetidas. Solo toca la VISTA del dashboard;
 // no cambia los datos de recetas ni insumos. Clave = nombre normalizado.
+// Ya NO se colapsan las categorías en unas pocas genéricas: cada categoría fina
+// se muestra por separado. Solo se dejan un par de normalizaciones inofensivas
+// (miscelánea → "Otros") para no ensuciar el análisis.
 const CANON_CATEGORIA: Record<string, string> = {
   otros: "Otros",
   // "Leche de Almendras" vendida como extra: el insumo está en "Lácteos", pero
   // no es una categoría de venta propia → va a Otros.
   lacteos: "Otros",
-  snack: "Snacks",
-  snacks: "Snacks",
-  bebidas: "Bebidas",
-  "bebida fria": "Bebidas",
-  "bebida alcoholica": "Bebidas Alcohólicas",
-  "bebidas alcoholicas": "Bebidas Alcohólicas",
-  "cafe & bebida caliente": "Café",
-  "cafe & te": "Café",
-  cafe: "Café",
-  smoothie: "Smoothie",
-  sandwich: "Sandwich",
 };
 
 // Categoría de una venta (usa datos existentes, no inventa):

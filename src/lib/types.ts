@@ -593,16 +593,26 @@ export const ESPECIALIDADES_CONTRATISTA_SUGERIDAS = [
 // ────────────────────────────────────────────────────────────────
 
 export type CategoriaReceta =
+  // Finas (actuales)
+  | "cafe_espresso"
+  | "cafe_leche"
+  | "te"
+  | "limonadas"
+  | "jugos"
+  | "refrescos"
   | "smoothie"
-  | "cafe"
-  | "bebida"
+  | "desayuno"
   | "sandwich"
   | "bowl"
-  | "desayuno"
   | "plato"
-  | "snack"
+  | "pasapalos"
   | "postre"
-  | "otros";
+  | "reposteria"
+  | "otros"
+  // Anteriores (legacy): se conservan para no romper recetas ya clasificadas.
+  | "cafe"
+  | "bebida"
+  | "snack";
 
 export type RecetaIngrediente = {
   id: string;
@@ -658,29 +668,45 @@ export type Receta = {
   createdAt: string;
 };
 
+// Categorías FINAS (un nivel). Son las que se sugieren al clasificar una receta.
 export const CATEGORIAS_RECETA: { value: CategoriaReceta; label: string }[] = [
-  { value: "smoothie", label: "Smoothie" },
-  { value: "cafe", label: "Café & Bebida caliente" },
-  { value: "bebida", label: "Bebida fría" },
-  { value: "sandwich", label: "Sandwich" },
-  { value: "bowl", label: "Bowl" },
-  { value: "desayuno", label: "Desayuno" },
-  { value: "plato", label: "Plato fuerte" },
-  { value: "snack", label: "Snack" },
-  { value: "postre", label: "Postre" },
+  { value: "cafe_espresso", label: "Café espresso" },
+  { value: "cafe_leche", label: "Café con leche" },
+  { value: "te", label: "Té e infusiones" },
+  { value: "limonadas", label: "Limonadas" },
+  { value: "jugos", label: "Jugos y frutales" },
+  { value: "refrescos", label: "Refrescos y sodas" },
+  { value: "smoothie", label: "Smoothies" },
+  { value: "desayuno", label: "Desayunos" },
+  { value: "sandwich", label: "Sándwiches" },
+  { value: "bowl", label: "Bowls" },
+  { value: "plato", label: "Platos fuertes" },
+  { value: "pasapalos", label: "Pasapalos / Tequeños" },
+  { value: "postre", label: "Postres" },
+  { value: "reposteria", label: "Repostería" },
   { value: "otros", label: "Otros" },
 ];
+
+// Etiquetas de las categorías anteriores, para que las recetas ya clasificadas
+// sigan mostrando un nombre bonito hasta que se reasignen a las finas.
+const CATEGORIAS_RECETA_LEGACY: Record<string, string> = {
+  cafe: "Café & Bebida caliente",
+  bebida: "Bebida fría",
+  snack: "Snack",
+};
 
 /** Etiquetas sugeridas de categoría de receta (para el desplegable del form). */
 export const CATEGORIAS_RECETA_SUGERIDAS: string[] = CATEGORIAS_RECETA.map(
   (c) => c.label,
 );
 
-/** Muestra la categoría de receta: si es una de las conocidas devuelve su
- *  etiqueta; si es texto libre (categoría nueva) lo devuelve tal cual. */
+/** Muestra la categoría de receta: si es una de las conocidas (fina o legacy)
+ *  devuelve su etiqueta; si es texto libre (categoría nueva) lo devuelve tal cual. */
 export function categoriaRecetaLabel(categoria: string): string {
   return (
-    CATEGORIAS_RECETA.find((c) => c.value === categoria)?.label ?? categoria
+    CATEGORIAS_RECETA.find((c) => c.value === categoria)?.label ??
+    CATEGORIAS_RECETA_LEGACY[categoria] ??
+    categoria
   );
 }
 
