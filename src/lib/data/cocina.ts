@@ -361,6 +361,8 @@ type CompraRow = {
   tasa_bcv_usada: number | string | null;
   modalidad_pago: string | null;
   notas: string | null;
+  pagada: boolean | null;
+  fecha_pago: string | null;
 };
 
 function rowToCompra(r: CompraRow): Compra {
@@ -376,6 +378,8 @@ function rowToCompra(r: CompraRow): Compra {
       r.tasa_bcv_usada === null ? undefined : Number(r.tasa_bcv_usada),
     modalidadPago: (r.modalidad_pago as ModalidadPago) ?? undefined,
     notas: r.notas ?? undefined,
+    pagada: r.pagada ?? true,
+    fechaPago: r.fecha_pago ?? undefined,
   };
 }
 
@@ -426,11 +430,43 @@ export async function createCompra(input: CompraInput): Promise<Compra> {
       tasa_bcv_usada: input.tasaBcvUsada ?? null,
       modalidad_pago: input.modalidadPago ?? null,
       notas: input.notas ?? null,
+      pagada: input.pagada ?? true,
+      fecha_pago:
+        input.pagada === false ? null : (input.fechaPago ?? input.fecha),
     })
     .select("*")
     .single();
   if (error) throw error;
   return rowToCompra(data as CompraRow);
+}
+
+/**
+ * Edita una compra. Se implementa como BORRAR + RECREAR para reutilizar los
+ * triggers ya probados: al borrar, la base revierte el stock (y el precio si era
+ * la última compra); al recrear con los datos nuevos, los vuelve a aplicar. Así
+ * corregir la cantidad o el precio ajusta el inventario por la diferencia sin
+ * lógica nueva. Devuelve la compra recreada (nuevo id).
+ */
+export async function updateCompra(
+  id: string,
+  input: CompraInput,
+): Promise<Compra> {
+  await deleteCompra(id);
+  return createCompra(input);
+}
+
+/** Marca una compra como pagada / por pagar (no toca stock ni precio). Al pagar
+ *  guarda la fecha de pago; al volver a "por pagar" la limpia. */
+export async function marcarCompraPagada(
+  id: string,
+  pagada: boolean,
+): Promise<void> {
+  const sb = createSupabaseBrowserClient();
+  const { error } = await sb
+    .from("compras")
+    .update({ pagada, fecha_pago: pagada ? hoyISO() : null })
+    .eq("id", id);
+  if (error) throw error;
 }
 
 export async function deleteCompra(id: string): Promise<void> {

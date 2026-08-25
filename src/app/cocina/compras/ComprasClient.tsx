@@ -12,7 +12,10 @@ import {
 import {
   listCompras,
   createCompra,
+  updateCompra,
   deleteCompra,
+  marcarCompraPagada,
+  createProveedor,
   listInsumos,
   listProveedores,
   getTasaBcvActual,
@@ -41,6 +44,8 @@ type FormState = {
   ivaModo: "con" | "sin";
   ivaPorc: string;
   notas: string;
+  /** true = la factura se paga después (cuenta por pagar). */
+  pagarDespues: boolean;
 };
 
 function todayISO() {
@@ -82,6 +87,7 @@ const emptyForm: FormState = {
   ivaModo: "con",
   ivaPorc: "16",
   notas: "",
+  pagarDespues: false,
 };
 
 export function ComprasClient() {
@@ -94,6 +100,12 @@ export function ComprasClient() {
   const [adding, setAdding] = useState(false);
   const [form, setForm] = useState<FormState>({ ...emptyForm });
   const [pendienteBorrar, setPendienteBorrar] = useState<string | null>(null);
+  // Edición de una compra existente (null = alta nueva).
+  const [editingId, setEditingId] = useState<string | null>(null);
+  // Alta de proveedor en línea desde el desplegable.
+  const [creandoProveedor, setCreandoProveedor] = useState(false);
+  const [nuevoProveedor, setNuevoProveedor] = useState("");
+  const [guardandoProveedor, setGuardandoProveedor] = useState(false);
   // Estado de los colapsables del historial (por fecha). Guardamos solo las
   // fechas que el usuario abrió/cerró a mano; por defecto se abre la más
   // reciente (índice 0) y el resto queda colapsado.
@@ -132,6 +144,83 @@ export function ComprasClient() {
   function resetForm() {
     setForm({ ...emptyForm, fecha: todayISO() });
     setAdding(false);
+    setEditingId(null);
+    setCreandoProveedor(false);
+    setNuevoProveedor("");
+  }
+
+  // Alta rápida de proveedor (solo nombre) desde el desplegable; queda guardado
+  // en la lista de proveedores y seleccionado en la compra.
+  async function agregarProveedor() {
+    const nombre = nuevoProveedor.trim();
+    if (!nombre) return;
+    setGuardandoProveedor(true);
+    setError(null);
+    try {
+      const nuevo = await createProveedor({
+        nombre,
+        aceptaBsBcvDolar: false,
+        aceptaBsBcvEuro: false,
+        aceptaBsParalela: false,
+        aceptaUsdEfectivo: false,
+        aceptaUsdDivisa: false,
+        activo: true,
+      });
+      setProveedores((prev) =>
+        [...prev, nuevo].sort((a, b) => a.nombre.localeCompare(b.nombre)),
+      );
+      setForm((f) => ({ ...f, proveedorId: nuevo.id }));
+      setCreandoProveedor(false);
+      setNuevoProveedor("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error creando proveedor");
+    } finally {
+      setGuardandoProveedor(false);
+    }
+  }
+
+  // Abre el formulario para editar una compra existente. Se precarga el total
+  // en USD (que es el canónico ya con IVA) con ivaModo="con", así al guardar
+  // queda igual salvo lo que cambies.
+  function startEdit(c: Compra) {
+    setEditingId(c.id);
+    setAdding(true);
+    setError(null);
+    setCreandoProveedor(false);
+    setForm({
+      insumoId: c.insumoId,
+      proveedorId: c.proveedorId ?? "",
+      fecha: c.fecha,
+      cantidad: String(c.cantidad),
+      cantidadBase: "",
+      modalidadPago: c.modalidadPago ?? "divisa",
+      precioTotalUsd: fmtMoney(c.precioTotalUsd),
+      precioTotalBs: c.precioTotalBs ? fmtMoney(c.precioTotalBs) : "",
+      tasaBcvUsada: c.tasaBcvUsada ? String(c.tasaBcvUsada) : "",
+      montoAnchor: "usd",
+      ivaModo: "con",
+      ivaPorc: "16",
+      notas: c.notas ?? "",
+      pagarDespues: !c.pagada,
+    });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  // Marca una compra como pagada / por pagar (no toca stock ni precio).
+  async function marcarPagada(id: string, pagada: boolean) {
+    setError(null);
+    try {
+      await marcarCompraPagada(id, pagada);
+      setCompras((prev) =>
+        prev.map((c) =>
+          c.id === id
+            ? { ...c, pagada, fechaPago: pagada ? todayISO() : undefined }
+            : c,
+        ),
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error actualizando el pago");
+    }
   }
 
   const insumoSeleccionado = useMemo(
@@ -349,11 +438,22 @@ export function ComprasClient() {
       tasaBcvUsada: tasaUsada,
       modalidadPago: form.modalidadPago,
       notas: notasFinal || undefined,
+      pagada: !form.pagarDespues,
     };
     try {
-      const nueva = await createCompra(input);
-      setCompras((prev) => [nueva, ...prev]);
-      // Recargar insumos para reflejar nuevo stock y precio
+      if (editingId) {
+        // Editar = borrar + recrear: el trigger revierte el stock/precio de la
+        // vieja y aplica los de la nueva (ajuste por la diferencia). Cambia el id.
+        const upd = await updateCompra(editingId, input);
+        setCompras((prev) => [
+          upd,
+          ...prev.filter((c) => c.id !== editingId),
+        ]);
+      } else {
+        const nueva = await createCompra(input);
+        setCompras((prev) => [nueva, ...prev]);
+      }
+      // Recargar insumos para reflejar el stock y precio actualizados.
       const fresh = await listInsumos();
       setInsumos(fresh);
       resetForm();
@@ -420,7 +520,7 @@ export function ComprasClient() {
           className="mb-5 rounded-2xl bg-white ring-1 ring-marfil p-5 space-y-3"
         >
           <h2 className="font-display text-sm tracking-[0.2em] uppercase text-cacao">
-            Nueva compra
+            {editingId ? "Editar compra" : "Nueva compra"}
           </h2>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -456,10 +556,17 @@ export function ComprasClient() {
             <label className="text-sm text-cacao">
               Proveedor
               <select
-                value={form.proveedorId}
-                onChange={(e) =>
-                  setForm({ ...form, proveedorId: e.target.value })
-                }
+                value={creandoProveedor ? "__nuevo__" : form.proveedorId}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === "__nuevo__") {
+                    setCreandoProveedor(true);
+                    setNuevoProveedor("");
+                  } else {
+                    setCreandoProveedor(false);
+                    setForm({ ...form, proveedorId: v });
+                  }
+                }}
                 className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2 bg-white"
               >
                 <option value="">— Ninguno —</option>
@@ -468,7 +575,36 @@ export function ComprasClient() {
                     {p.nombre}
                   </option>
                 ))}
+                <option value="__nuevo__">+ Nuevo proveedor…</option>
               </select>
+              {creandoProveedor && (
+                <div className="mt-2 flex gap-2">
+                  <input
+                    type="text"
+                    value={nuevoProveedor}
+                    onChange={(e) => setNuevoProveedor(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        agregarProveedor();
+                      }
+                    }}
+                    placeholder="Nombre del proveedor nuevo"
+                    autoFocus
+                    autoCapitalize="words"
+                    spellCheck={false}
+                    className="flex-1 rounded-lg ring-1 ring-marfil px-3 py-2"
+                  />
+                  <button
+                    type="button"
+                    onClick={agregarProveedor}
+                    disabled={guardandoProveedor || !nuevoProveedor.trim()}
+                    className="shrink-0 rounded-lg bg-cacao text-white px-3 py-2 text-sm font-medium hover:bg-terracotta transition-colors disabled:opacity-50"
+                  >
+                    {guardandoProveedor ? "Guardando…" : "Agregar"}
+                  </button>
+                </div>
+              )}
             </label>
           </div>
 
@@ -700,12 +836,30 @@ export function ComprasClient() {
             className="w-full rounded-lg ring-1 ring-marfil px-3 py-2"
           />
 
+          <label className="flex items-start gap-2 rounded-lg bg-marfil-soft ring-1 ring-marfil p-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={form.pagarDespues}
+              onChange={(e) =>
+                setForm({ ...form, pagarDespues: e.target.checked })
+              }
+              className="mt-0.5 accent-cacao"
+            />
+            <span className="text-sm text-cacao">
+              Pagar después{" "}
+              <span className="text-cacao-soft">
+                (cuenta por pagar — la factura queda pendiente de pago al
+                proveedor)
+              </span>
+            </span>
+          </label>
+
           <div className="flex gap-2 pt-2">
             <button
               type="submit"
               className="flex-1 rounded-lg bg-cacao text-white py-2 font-medium hover:bg-terracotta"
             >
-              Registrar compra
+              {editingId ? "Guardar cambios" : "Registrar compra"}
             </button>
             <button
               type="button"
@@ -778,6 +932,11 @@ export function ComprasClient() {
                           <div className="min-w-0 flex-1">
                             <div className="font-medium text-cacao">
                               {insumo?.nombre ?? "Insumo eliminado"}
+                              {!c.pagada && (
+                                <span className="ml-2 text-[10px] uppercase tracking-widest px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 ring-1 ring-amber-200">
+                                  Por pagar
+                                </span>
+                              )}
                             </div>
                             {meta && (
                               <div className="text-xs text-cacao-soft mt-0.5">
@@ -820,12 +979,28 @@ export function ComprasClient() {
                                   </>
                                 )}
                             </div>
-                            <button
-                              onClick={() => setPendienteBorrar(c.id)}
-                              className="mt-1 text-[10px] uppercase tracking-widest text-cacao-mute hover:text-terracotta"
-                            >
-                              Borrar
-                            </button>
+                            <div className="mt-1 flex items-center justify-end gap-3 text-[10px] uppercase tracking-widest">
+                              <button
+                                onClick={() => startEdit(c)}
+                                className="text-cacao-mute hover:text-cacao"
+                              >
+                                Editar
+                              </button>
+                              {!c.pagada && (
+                                <button
+                                  onClick={() => marcarPagada(c.id, true)}
+                                  className="text-cacao-mute hover:text-cacao"
+                                >
+                                  Marcar pagada
+                                </button>
+                              )}
+                              <button
+                                onClick={() => setPendienteBorrar(c.id)}
+                                className="text-cacao-mute hover:text-terracotta"
+                              >
+                                Borrar
+                              </button>
+                            </div>
                           </div>
                         </li>
                       );
