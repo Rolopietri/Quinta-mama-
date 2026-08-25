@@ -8,10 +8,11 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Venta, Receta, Insumo } from "@/lib/types";
 import { categoriaRecetaLabel, categoriaInsumoLabel } from "@/lib/types";
-import { listVentasRango } from "@/lib/data/ventas";
+import { listVentasRango, normPos } from "@/lib/data/ventas";
 import { listRecetas, setRecetaCategoria } from "@/lib/data/recetas";
 import { listInsumos, setInsumoCategoria } from "@/lib/data/cocina";
 import { listCategoriasProducto, createCategoriaProducto, renameCategoriaProducto, deleteCategoriaProducto, type CategoriaProducto } from "@/lib/data/categorias";
+import { listCategoriasPorNombre, setCategoriaPorNombre } from "@/lib/data/categoriasNombre";
 import { hoyISO } from "@/lib/ui";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import {
@@ -102,6 +103,7 @@ function categoriaDeVenta(
   v: Venta,
   catPorReceta: Map<string, string>,
   catPorInsumo: Map<string, string>,
+  catPorNombre: Map<string, string>,
 ): { key: string; label: string } {
   let label: string | null = null;
   if (v.recetaId) {
@@ -111,6 +113,12 @@ function categoriaDeVenta(
   if (!label && v.insumoId) {
     const cat = catPorInsumo.get(v.insumoId);
     if (cat && cat.trim()) label = categoriaInsumoLabel(cat);
+  }
+  // Sin categoría de receta/insumo: última vía → asignación manual por nombre
+  // (consignación, servicios, ítems sueltos del POS).
+  if (!label) {
+    const ov = catPorNombre.get(normPos(v.recetaNombre || ""));
+    if (ov && ov.trim()) label = ov;
   }
   if (!label && v.tipoItem === "consignacion") label = "Consignación";
   if (!label && v.tipoItem === "servicio") label = "Servicio";
@@ -147,6 +155,8 @@ export function AnalisisVentas() {
   const [nuevaCat, setNuevaCat] = useState("");
   const [editCat, setEditCat] = useState<{ id: string; nombre: string } | null>(null);
   const [gestionCat, setGestionCat] = useState(false);
+  // Categoría asignada por NOMBRE del ítem (consignación, servicios, sueltos).
+  const [catNombre, setCatNombre] = useState<Map<string, string>>(new Map());
 
   // Recetas + insumos una sola vez (para los mapas de categoría: las ventas de
   // receta usan la categoría de la receta; las de reventa (insumo_directo) usan
@@ -161,6 +171,9 @@ export function AnalisisVentas() {
       .catch(() => {});
     listCategoriasProducto()
       .then((c) => !cancel && setCategorias(c))
+      .catch(() => {});
+    listCategoriasPorNombre()
+      .then((rows) => !cancel && setCatNombre(new Map(rows.map((r) => [r.nombreNorm, r.categoria]))))
       .catch(() => {});
     return () => {
       cancel = true;
@@ -227,7 +240,7 @@ export function AnalisisVentas() {
   const enriquecidas = useMemo(
     () =>
       ventas.map((v) => {
-        const cat = categoriaDeVenta(v, catPorReceta, catPorInsumo);
+        const cat = categoriaDeVenta(v, catPorReceta, catPorInsumo, catNombre);
         return {
           fecha: v.fecha,
           producto: v.recetaNombre.trim() || "—",
@@ -237,7 +250,7 @@ export function AnalisisVentas() {
           monto: v.totalUsd ?? 0,
         };
       }),
-    [ventas, catPorReceta, catPorInsumo],
+    [ventas, catPorReceta, catPorInsumo, catNombre],
   );
 
   // Opciones de los filtros (según lo que existe en el rango cargado).
@@ -420,8 +433,25 @@ export function AnalisisVentas() {
     return catPorNombre.get(normCat(label)) ?? null;
   }
 
+  // Ítems del POS que NO son receta ni insumo de reventa (consignación,
+  // servicios, sueltos): agrupados por nombre para clasificarlos por nombre.
+  const itemsPorNombre = useMemo(() => {
+    const m = new Map<string, { nombre: string; tipoItem?: string; unidades: number }>();
+    for (const v of ventas) {
+      if (v.recetaId || v.insumoId) continue;
+      const nombre = (v.recetaNombre || "").trim();
+      if (!nombre) continue;
+      const key = normPos(nombre);
+      const cur = m.get(key) ?? { nombre, tipoItem: v.tipoItem, unidades: 0 };
+      cur.unidades += v.cantidad || 0;
+      m.set(key, cur);
+    }
+    return m;
+  }, [ventas]);
+
   // Productos a clasificar: recetas vendibles + ítems de reventa (insumos
-  // vendidos directo en el rango). "Por clasificar" primero, luego más vendidos.
+  // vendidos directo en el rango) + ítems del POS por nombre (consignación /
+  // servicios). "Por clasificar" primero, luego más vendidos.
   const productosClasif = useMemo(() => {
     const q = normCat(busquedaClasif);
     const recs = recetas
@@ -432,21 +462,30 @@ export function AnalisisVentas() {
       .map((id) => insById.get(id))
       .filter((i): i is Insumo => !!i)
       .map((i) => { const cur = categoriaActual(i.categoria, "insumo"); return { tipo: "insumo" as const, id: i.id, nombre: `${i.nombre} · reventa`, cur, activo: true, ventas: unidadesPorInsumo.get(i.id) ?? 0, sinCat: !cur }; });
-    return [...recs, ...revs]
+    const noms = [...itemsPorNombre.entries()].map(([key, it]) => {
+      const cur = categoriaActual(catNombre.get(key), "insumo");
+      const suf = it.tipoItem === "consignacion" ? " · consignación" : it.tipoItem === "servicio" ? " · servicio" : " · POS";
+      return { tipo: "nombre" as const, id: it.nombre, nombre: `${it.nombre}${suf}`, cur, activo: true, ventas: it.unidades, sinCat: !cur };
+    });
+    return [...recs, ...revs, ...noms]
       .filter((p) => !q || normCat(p.nombre).includes(q))
       .sort((a, b) => (a.sinCat !== b.sinCat ? (a.sinCat ? -1 : 1) : b.ventas - a.ventas || a.nombre.localeCompare(b.nombre)));
-  }, [recetas, insumos, unidadesPorReceta, unidadesPorInsumo, busquedaClasif, catPorNombre]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [recetas, insumos, unidadesPorReceta, unidadesPorInsumo, itemsPorNombre, catNombre, busquedaClasif, catPorNombre]); // eslint-disable-line react-hooks/exhaustive-deps
   const sinCategoria = productosClasif.filter((p) => p.sinCat).length;
 
-  async function cambiarCategoria(tipo: "receta" | "insumo", id: string, categoria: string) {
+  async function cambiarCategoria(tipo: "receta" | "insumo" | "nombre", id: string, categoria: string) {
     setGuardandoCat(id);
     try {
       if (tipo === "receta") {
         await setRecetaCategoria(id, categoria || null);
         setRecetas((prev) => prev.map((r) => (r.id === id ? { ...r, categoria: categoria || undefined } : r)));
-      } else {
+      } else if (tipo === "insumo") {
         await setInsumoCategoria(id, categoria || null);
         setInsumos((prev) => prev.map((i) => (i.id === id ? { ...i, categoria: categoria || "" } : i)));
+      } else {
+        // tipo "nombre": id es el nombre original del ítem del POS.
+        await setCategoriaPorNombre(id, categoria || null);
+        setCatNombre((prev) => { const m = new Map(prev); if (categoria) m.set(normPos(id), categoria); else m.delete(normPos(id)); return m; });
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "No se pudo guardar la categoría");
