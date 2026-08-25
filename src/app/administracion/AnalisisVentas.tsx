@@ -11,7 +11,7 @@ import { categoriaRecetaLabel, categoriaInsumoLabel } from "@/lib/types";
 import { listVentasRango, normPos } from "@/lib/data/ventas";
 import { listRecetas, setRecetaCategoria } from "@/lib/data/recetas";
 import { listInsumos, setInsumoCategoria } from "@/lib/data/cocina";
-import { listCategoriasProducto, createCategoriaProducto, renameCategoriaProducto, deleteCategoriaProducto, type CategoriaProducto } from "@/lib/data/categorias";
+import { listCategoriasProducto, createCategoriaProducto, renameCategoriaProducto, deleteCategoriaProducto, setCategoriaExcluirRanking, type CategoriaProducto } from "@/lib/data/categorias";
 import { listCategoriasPorNombre, setCategoriaPorNombre } from "@/lib/data/categoriasNombre";
 import { hoyISO } from "@/lib/ui";
 import { ErrorBanner } from "@/components/ErrorBanner";
@@ -148,6 +148,7 @@ export function AnalisisVentas() {
   const [conc, setConc] = useState<{ setuxNeto: number; ivaSetux: number; cxc: number; rpp: number; cxcNeto: number; rppNeto: number; cobrosEur: number; otrosEur: number } | null>(null);
   // Panel de clasificación de productos (asigna la categoría desde Admin).
   const [mostrarClasif, setMostrarClasif] = useState(false);
+  const [mostrarDetalle, setMostrarDetalle] = useState(false);
   const [busquedaClasif, setBusquedaClasif] = useState("");
   const [guardandoCat, setGuardandoCat] = useState<string | null>(null);
   // Categorías definidas por el usuario (se comparten con los demás módulos).
@@ -296,18 +297,34 @@ export function AnalisisVentas() {
   const porProducto = useMemo(() => {
     const m = new Map<
       string,
-      { producto: string; catLabel: string; unidades: number; monto: number }
+      { producto: string; catKey: string; catLabel: string; unidades: number; monto: number }
     >();
     filtradas.forEach((e) => {
       const cur =
         m.get(e.producto) ??
-        { producto: e.producto, catLabel: e.catLabel, unidades: 0, monto: 0 };
+        { producto: e.producto, catKey: e.catKey, catLabel: e.catLabel, unidades: 0, monto: 0 };
       cur.unidades += e.unidades;
       cur.monto += e.monto;
       m.set(e.producto, cur);
     });
     return Array.from(m.values());
   }, [filtradas]);
+
+  // Categorías excluidas de los rankings (alquileres fijos, eventos, etc.).
+  // Siguen contando en totales y "por categoría"; solo se quitan de los tops.
+  const catExcluidas = useMemo(
+    () => new Set(categorias.filter((c) => c.excluirRanking).map((c) => normCat(c.nombre))),
+    [categorias],
+  );
+  const nombresExcluidos = useMemo(
+    () => categorias.filter((c) => c.excluirRanking).map((c) => c.nombre),
+    [categorias],
+  );
+  // Base para los rankings: productos SIN las categorías excluidas.
+  const porProductoRank = useMemo(
+    () => porProducto.filter((p) => !catExcluidas.has(p.catKey)),
+    [porProducto, catExcluidas],
+  );
 
   const porCategoria = useMemo(() => {
     const m = new Map<
@@ -344,19 +361,19 @@ export function AnalisisVentas() {
 
   const masVendidoUnid = useMemo(
     () =>
-      porProducto.reduce<(typeof porProducto)[number] | null>(
+      porProductoRank.reduce<(typeof porProductoRank)[number] | null>(
         (best, p) => (!best || p.unidades > best.unidades ? p : best),
         null,
       ),
-    [porProducto],
+    [porProductoRank],
   );
   const masFactura = useMemo(
     () =>
-      porProducto.reduce<(typeof porProducto)[number] | null>(
+      porProductoRank.reduce<(typeof porProductoRank)[number] | null>(
         (best, p) => (!best || p.monto > best.monto ? p : best),
         null,
       ),
-    [porProducto],
+    [porProductoRank],
   );
 
   const tablaOrdenada = useMemo(() => {
@@ -368,17 +385,17 @@ export function AnalisisVentas() {
   }, [porProducto, orden]);
 
   const topUnidades = useMemo(
-    () => [...porProducto].sort((a, b) => b.unidades - a.unidades).slice(0, topN),
-    [porProducto, topN],
+    () => [...porProductoRank].sort((a, b) => b.unidades - a.unidades).slice(0, topN),
+    [porProductoRank, topN],
   );
   const topMonto = useMemo(
-    () => [...porProducto].sort((a, b) => b.monto - a.monto).slice(0, topN),
-    [porProducto, topN],
+    () => [...porProductoRank].sort((a, b) => b.monto - a.monto).slice(0, topN),
+    [porProductoRank, topN],
   );
   const menosVendidos = useMemo(
     () =>
-      [...porProducto].sort((a, b) => a.unidades - b.unidades).slice(0, topN),
-    [porProducto, topN],
+      [...porProductoRank].sort((a, b) => a.unidades - b.unidades).slice(0, topN),
+    [porProductoRank, topN],
   );
 
   const pct = (monto: number) => (totalMonto > 0 ? (monto / totalMonto) * 100 : 0);
@@ -524,6 +541,16 @@ export function AnalisisVentas() {
       setCategorias((prev) => prev.filter((c) => c.id !== id));
     } catch (e) { setError(e instanceof Error ? e.message : "No se pudo borrar"); }
   }
+  async function toggleExcluirRanking(id: string, excluir: boolean) {
+    // Optimista: refleja el cambio y revierte si falla.
+    setCategorias((prev) => prev.map((c) => (c.id === id ? { ...c, excluirRanking: excluir } : c)));
+    try {
+      await setCategoriaExcluirRanking(id, excluir);
+    } catch (e) {
+      setCategorias((prev) => prev.map((c) => (c.id === id ? { ...c, excluirRanking: !excluir } : c)));
+      setError(e instanceof Error ? e.message : "No se pudo actualizar. ¿Corriste el ALTER de excluir_ranking?");
+    }
+  }
 
   const pill = (active: boolean) =>
     `px-3 py-1 rounded-full text-[11px] uppercase tracking-widest ring-1 ${
@@ -662,6 +689,14 @@ export function AnalisisVentas() {
                         ) : (
                           <>
                             <span className="flex-1 min-w-0 truncate text-sm text-cacao">{c.nombre}</span>
+                            <button
+                              type="button"
+                              onClick={() => toggleExcluirRanking(c.id, !c.excluirRanking)}
+                              title={c.excluirRanking ? "Excluida de los rankings (clic para incluir)" : "Incluir/excluir de los rankings (más vendido, tops)"}
+                              className={`text-[10px] uppercase tracking-widest rounded-full px-2 py-0.5 ring-1 ${c.excluirRanking ? "bg-amber-50 text-amber-800 ring-amber-300" : "bg-white text-cacao-mute ring-marfil hover:text-cacao"}`}
+                            >
+                              {c.excluirRanking ? "Sin ranking" : "En ranking"}
+                            </button>
                             <button type="button" onClick={() => setEditCat({ id: c.id, nombre: c.nombre })} title="Renombrar" className="text-cacao-mute hover:text-terracotta text-sm">✎</button>
                             <button type="button" onClick={() => borrarCategoria(c.id)} title="Borrar" className="text-cacao-mute hover:text-terracotta text-sm">✕</button>
                           </>
@@ -669,6 +704,7 @@ export function AnalisisVentas() {
                       </li>
                     ))}
                   </ul>
+                  <p className="text-[11px] text-cacao-soft">Con <strong>“Sin ranking”</strong> la categoría no cuenta en los tops (más vendido, mayor facturación) pero sí en totales y en “por categoría”. Úsalo para alquileres fijos, eventos y alquileres por bloque.</p>
                   <div className="flex items-center gap-2">
                     <input value={nuevaCat} onChange={(e) => setNuevaCat(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") agregarCategoria(); }} placeholder="Nueva categoría…" className="flex-1 min-w-0 rounded-lg ring-1 ring-marfil px-3 py-2 text-sm" />
                     <button type="button" onClick={agregarCategoria} disabled={!nuevaCat.trim()} className="rounded-lg bg-terracotta text-white px-3 py-2 text-sm disabled:opacity-40">Agregar</button>
@@ -859,7 +895,7 @@ export function AnalisisVentas() {
           </div>
 
           {/* ── Top / menos vendidos ────────────────────────────── */}
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs uppercase tracking-widest text-cacao-mute">
               Mostrar
             </span>
@@ -873,6 +909,11 @@ export function AnalisisVentas() {
                 Top {n}
               </button>
             ))}
+            {nombresExcluidos.length > 0 && (
+              <span className="text-[11px] text-cacao-soft ml-auto">
+                Rankings sin: {nombresExcluidos.join(", ")}
+              </span>
+            )}
           </div>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <PanelCard titulo={`Top ${topN} más vendidos (unidades)`}>
@@ -896,9 +937,17 @@ export function AnalisisVentas() {
             />
           </PanelCard>
 
-          {/* ── Detalle por producto ────────────────────────────── */}
-          <PanelCard titulo="Detalle por producto">
-            <div className="overflow-x-auto">
+          {/* ── Detalle por producto (plegable) ─────────────────── */}
+          <section className="rounded-2xl bg-white ring-1 ring-marfil p-4">
+            <button type="button" onClick={() => setMostrarDetalle((v) => !v)} className="w-full flex items-center justify-between gap-2 text-left">
+              <span className="font-cinzel text-base text-cacao">Detalle por producto</span>
+              <span className="flex items-center gap-2">
+                <span className="text-[11px] text-cacao-mute">{porProducto.length} productos</span>
+                <span className={`text-cacao-mute transition-transform ${mostrarDetalle ? "rotate-90" : ""}`}>›</span>
+              </span>
+            </button>
+            {mostrarDetalle && (
+            <div className="mt-3 overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-cacao-mute uppercase tracking-widest text-[11px] text-left">
@@ -956,7 +1005,8 @@ export function AnalisisVentas() {
                 </tfoot>
               </table>
             </div>
-          </PanelCard>
+            )}
+          </section>
         </>
       )}
     </div>
