@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Compra, Insumo, Proveedor } from "@/lib/types";
 import { categoriaInsumoLabel } from "@/lib/types";
-import { listComprasRango, listInsumos, listProveedores } from "@/lib/data/cocina";
+import { listComprasRango, listInsumos, listProveedores, setCompraProveedor } from "@/lib/data/cocina";
 import { hoyISO } from "@/lib/ui";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { BarrasH, LineaEvolucion, Dona, PanelCard, colorPorIndice } from "@/components/charts/VentasCharts";
@@ -42,6 +42,7 @@ export function AnalisisCompras() {
   const [proveedores, setProveedores] = useState<Proveedor[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [asignando, setAsignando] = useState<string | null>(null);
 
   useEffect(() => {
     let cancel = false;
@@ -148,6 +149,29 @@ export function AnalisisCompras() {
   const pct = (m: number) => (total > 0 ? (m / total) * 100 : 0);
   const concentracion = porProveedor[0] ? pct(porProveedor[0].monto) : 0;
 
+  // Compras sin proveedor (para completarlas asignando uno).
+  const sinProveedor = useMemo(
+    () => compras
+      .filter((c) => !c.proveedorId)
+      .map((c) => ({ id: c.id, fecha: c.fecha, monto: c.precioTotalUsd || 0, insumo: insMap.get(c.insumoId)?.nombre ?? "—" }))
+      .sort((a, b) => b.fecha.localeCompare(a.fecha) || b.monto - a.monto),
+    [compras, insMap],
+  );
+  const totalSinProv = useMemo(() => sinProveedor.reduce((s, c) => s + c.monto, 0), [sinProveedor]);
+
+  async function asignarProveedor(compraId: string, proveedorId: string) {
+    if (!proveedorId) return;
+    setAsignando(compraId);
+    try {
+      await setCompraProveedor(compraId, proveedorId);
+      setCompras((prev) => prev.map((c) => (c.id === compraId ? { ...c, proveedorId } : c)));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo asignar el proveedor");
+    } finally {
+      setAsignando(null);
+    }
+  }
+
   function aplicarPreset(p: Preset) {
     setPreset(p);
     if (p !== "rango") { const r = rangoDePreset(p); setDesde(r.desde); setHasta(r.hasta); }
@@ -218,6 +242,45 @@ export function AnalisisCompras() {
               <BarrasH rows={porInsumo.slice(0, 10).map((p, i) => ({ key: p.id, label: p.nombre, value: p.monto, color: colorPorIndice(i), tip: `${p.nombre}: ${fUSD(p.monto)} · ${p.veces} compra(s)` }))} format={fUSD} />
             </PanelCard>
           </div>
+
+          {sinProveedor.length > 0 && (
+            <PanelCard titulo={`Compras sin proveedor (${sinProveedor.length})`}>
+              <p className="text-[11px] text-cacao-mute mb-2">{fUSD(totalSinProv)} sin proveedor asignado. Elige uno en cada fila para completarlas — se guarda al instante (no afecta stock ni precio).</p>
+              <div className="rounded-xl ring-1 ring-marfil overflow-hidden max-h-96 overflow-y-auto">
+                <table className="w-full text-xs">
+                  <thead className="sticky top-0 bg-white">
+                    <tr className="text-cacao-mute uppercase tracking-widest text-left">
+                      <th className="py-1.5 px-2 font-normal">Fecha</th>
+                      <th className="py-1.5 px-2 font-normal">Insumo</th>
+                      <th className="py-1.5 px-2 font-normal text-right">Monto</th>
+                      <th className="py-1.5 px-2 font-normal">Proveedor</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sinProveedor.map((c) => (
+                      <tr key={c.id} className="border-t border-marfil">
+                        <td className="py-1 px-2 text-cacao-soft whitespace-nowrap">{c.fecha}</td>
+                        <td className="py-1 px-2 text-cacao">{c.insumo}</td>
+                        <td className="py-1 px-2 text-right tabular-nums text-cacao">{fUSD(c.monto)}</td>
+                        <td className="py-1 px-2">
+                          <select
+                            defaultValue=""
+                            disabled={asignando === c.id || proveedores.length === 0}
+                            onChange={(e) => asignarProveedor(c.id, e.target.value)}
+                            className="rounded-lg ring-1 ring-marfil px-2 py-1 text-xs bg-white disabled:opacity-50"
+                          >
+                            <option value="">{asignando === c.id ? "Guardando…" : "Elegir…"}</option>
+                            {proveedores.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+                          </select>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {proveedores.length === 0 && <p className="text-[11px] text-[#7A5A18] mt-2">No hay proveedores cargados. Crea alguno en Cocina → Proveedores para poder asignarlo.</p>}
+            </PanelCard>
+          )}
 
           <PanelCard titulo="Por modalidad de pago">
             <BarrasH rows={porModalidad.map((m, i) => ({ key: m.key, label: m.label, value: m.monto, color: colorPorIndice(i), tip: `${m.label}: ${fUSD(m.monto)} · ${fPct(pct(m.monto))}` }))} format={fUSD} />

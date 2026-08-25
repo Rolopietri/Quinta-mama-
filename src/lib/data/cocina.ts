@@ -439,6 +439,14 @@ export async function deleteCompra(id: string): Promise<void> {
   if (error) throw error;
 }
 
+/** Asigna (o quita, con null) el proveedor de una compra. Solo toca ese campo;
+ *  no afecta stock ni precio. Útil para completar compras sin proveedor. */
+export async function setCompraProveedor(id: string, proveedorId: string | null): Promise<void> {
+  const sb = createSupabaseBrowserClient();
+  const { error } = await sb.from("compras").update({ proveedor_id: proveedorId }).eq("id", id);
+  if (error) throw error;
+}
+
 // ─── TASA BCV ────────────────────────────────────────────────────
 
 type TasaRow = {
