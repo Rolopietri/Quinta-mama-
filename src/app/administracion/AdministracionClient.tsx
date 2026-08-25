@@ -7,14 +7,14 @@
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { totalesVentasPorMes } from "@/lib/data/ventas";
-import { AnalisisVentas } from "./AnalisisVentas";
+import { AnalisisAdministrativo } from "./AnalisisAdministrativo";
 
 type Seccion = "proveedores" | "solicitudes" | "ingresos" | "analisis-ventas" | "cobrar" | "egresos" | "estado" | "historico";
 const SECCIONES: { id: Seccion; label: string; grupo?: string }[] = [
   { id: "proveedores", label: "Proveedores", grupo: "Proveedores" },
   { id: "solicitudes", label: "Generar solicitud de pagos", grupo: "Proveedores" },
   { id: "ingresos", label: "Ingresos" },
-  { id: "analisis-ventas", label: "Análisis de Ventas" },
+  { id: "analisis-ventas", label: "Análisis administrativo" },
   { id: "cobrar", label: "Cuentas por cobrar" },
   { id: "egresos", label: "Egresos" },
   { id: "estado", label: "Estado de Cuenta" },
@@ -173,7 +173,7 @@ function Panel({ onSalir }: { onSalir: () => void }) {
       ) : seccion === "ingresos" ? (
         <SeccionIngresos />
       ) : seccion === "analisis-ventas" ? (
-        <AnalisisVentas />
+        <AnalisisAdministrativo />
       ) : seccion === "estado" ? (
         <SeccionEstado />
       ) : seccion === "historico" ? (

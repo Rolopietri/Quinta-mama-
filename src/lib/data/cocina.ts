@@ -390,6 +390,28 @@ export async function listCompras(insumoId?: string): Promise<Compra[]> {
   return (data as CompraRow[]).map(rowToCompra);
 }
 
+/** Compras dentro de un rango de fechas [desde, hasta] (inclusive). Pagina para
+ *  esquivar el tope de 1000 filas de Supabase (igual que las ventas). */
+export async function listComprasRango(desde: string, hasta: string): Promise<Compra[]> {
+  const sb = createSupabaseBrowserClient();
+  const PAGE = 1000;
+  const out: Compra[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await sb
+      .from("compras")
+      .select("*")
+      .gte("fecha", desde)
+      .lte("fecha", hasta)
+      .order("fecha", { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    const rows = (data as CompraRow[]) ?? [];
+    out.push(...rows.map(rowToCompra));
+    if (rows.length < PAGE) break;
+  }
+  return out;
+}
+
 export async function createCompra(input: CompraInput): Promise<Compra> {
   const sb = createSupabaseBrowserClient();
   const { data, error } = await sb
