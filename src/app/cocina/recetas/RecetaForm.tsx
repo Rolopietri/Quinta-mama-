@@ -24,6 +24,7 @@ import {
 } from "@/lib/data/recetas";
 import { listInsumos } from "@/lib/data/cocina";
 import { getCocinaConfig } from "@/lib/data/cocinaConfig";
+import { listCategoriasProducto, createCategoriaProducto, type CategoriaProducto } from "@/lib/data/categorias";
 import { extractError } from "@/lib/data/error";
 import { normalizarBusqueda } from "@/lib/text";
 import { UnitCalculator } from "@/components/UnitCalculator";
@@ -78,6 +79,9 @@ export function RecetaForm({
   const router = useRouter();
   const [insumos, setInsumos] = useState<Insumo[]>([]);
   const [recetasContexto, setRecetasContexto] = useState<Receta[]>([]);
+  // Categorías definidas por el usuario (gestionadas en Administración). Se
+  // comparten entre módulos; aquí alimentan el desplegable de categoría.
+  const [categoriasUser, setCategoriasUser] = useState<CategoriaProducto[]>([]);
   const [loadingIns, setLoadingIns] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -138,15 +142,17 @@ export function RecetaForm({
     let cancelled = false;
     (async () => {
       try {
-        const [ins, recs, cfg] = await Promise.all([
+        const [ins, recs, cfg, cats] = await Promise.all([
           listInsumos(),
           listRecetas(),
           getCocinaConfig(),
+          listCategoriasProducto().catch(() => [] as CategoriaProducto[]),
         ]);
         if (!cancelled) {
           setInsumos(ins);
           setRecetasContexto(recs);
           setIvaPorc(cfg.ivaPorc);
+          setCategoriasUser(cats);
         }
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : "Error");
@@ -188,16 +194,26 @@ export function RecetaForm({
   // categoría nueva que ya exista en otras recetas. Cada opción se muestra con
   // su etiqueta legible vía categoriaRecetaLabel().
   const categoriasDisponibles = useMemo(() => {
-    const conocidas = CATEGORIAS_RECETA.map((c) => c.value as string);
+    // Base: las categorías definidas por el usuario (Administración). Si aún no
+    // hay ninguna (tabla vacía o sin migrar), caemos a la lista fija de código.
+    const conocidas =
+      categoriasUser.length > 0
+        ? categoriasUser.map((c) => c.nombre)
+        : CATEGORIAS_RECETA.map((c) => c.value as string);
+    const conocidasNorm = new Set(
+      conocidas.map((c) => c.trim().toLowerCase()),
+    );
+    // Cualquier categoría ya usada por otra receta que no esté en la lista.
     const set = new Set<string>();
     recetasContexto.forEach((r) => {
-      if (r.categoria && !conocidas.includes(r.categoria)) set.add(r.categoria);
+      if (r.categoria && !conocidasNorm.has(r.categoria.trim().toLowerCase()))
+        set.add(r.categoria);
     });
     const nuevas = Array.from(set).sort((a, b) =>
       categoriaRecetaLabel(a).localeCompare(categoriaRecetaLabel(b)),
     );
     return [...conocidas, ...nuevas];
-  }, [recetasContexto]);
+  }, [recetasContexto, categoriasUser]);
 
   // Agrupar insumos por categoría, ordenados según CATEGORIAS_INSUMO
   const insumosPorCategoria = useMemo(() => {
@@ -468,6 +484,22 @@ export function RecetaForm({
     setError(null);
     setSaving(true);
     try {
+      // Si el usuario tipeó una categoría nueva, la registramos en el catálogo
+      // compartido (Administración) para que quede disponible en todos lados.
+      const catNueva = categoria.trim();
+      if (
+        catNueva &&
+        !categoriasUser.some(
+          (c) => c.nombre.trim().toLowerCase() === catNueva.toLowerCase(),
+        )
+      ) {
+        try {
+          const c = await createCategoriaProducto(catNueva);
+          setCategoriasUser((prev) => [...prev, c]);
+        } catch {
+          /* si falla (tabla ausente, duplicada), la receta igual se guarda */
+        }
+      }
       const rendNum = Number(rendimiento);
       const input = {
         nombre: nombre.trim(),

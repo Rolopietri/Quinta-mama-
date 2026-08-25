@@ -7,10 +7,11 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { Venta, Receta, Insumo } from "@/lib/types";
-import { categoriaRecetaLabel, categoriaInsumoLabel, CATEGORIAS_RECETA } from "@/lib/types";
+import { categoriaRecetaLabel, categoriaInsumoLabel } from "@/lib/types";
 import { listVentasRango } from "@/lib/data/ventas";
 import { listRecetas, setRecetaCategoria } from "@/lib/data/recetas";
 import { listInsumos, setInsumoCategoria } from "@/lib/data/cocina";
+import { listCategoriasProducto, createCategoriaProducto, renameCategoriaProducto, deleteCategoriaProducto, type CategoriaProducto } from "@/lib/data/categorias";
 import { hoyISO } from "@/lib/ui";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import {
@@ -137,10 +138,15 @@ export function AnalisisVentas() {
   const [error, setError] = useState<string | null>(null);
   // Conciliación con Administración (componentes del rango, en euros).
   const [conc, setConc] = useState<{ setuxNeto: number; ivaSetux: number; cxc: number; rpp: number; cxcNeto: number; rppNeto: number; cobrosEur: number; otrosEur: number } | null>(null);
-  // Panel de clasificación de productos (asigna la categoría de la receta desde Admin).
+  // Panel de clasificación de productos (asigna la categoría desde Admin).
   const [mostrarClasif, setMostrarClasif] = useState(false);
   const [busquedaClasif, setBusquedaClasif] = useState("");
   const [guardandoCat, setGuardandoCat] = useState<string | null>(null);
+  // Categorías definidas por el usuario (se comparten con los demás módulos).
+  const [categorias, setCategorias] = useState<CategoriaProducto[]>([]);
+  const [nuevaCat, setNuevaCat] = useState("");
+  const [editCat, setEditCat] = useState<{ id: string; nombre: string } | null>(null);
+  const [gestionCat, setGestionCat] = useState(false);
 
   // Recetas + insumos una sola vez (para los mapas de categoría: las ventas de
   // receta usan la categoría de la receta; las de reventa (insumo_directo) usan
@@ -152,6 +158,9 @@ export function AnalisisVentas() {
       .catch(() => {});
     listInsumos()
       .then((i) => !cancel && setInsumos(i))
+      .catch(() => {});
+    listCategoriasProducto()
+      .then((c) => !cancel && setCategorias(c))
       .catch(() => {});
     return () => {
       cancel = true;
@@ -396,23 +405,37 @@ export function AnalisisVentas() {
     return m;
   }, [ventas]);
 
-  // Productos a clasificar: recetas vendibles + ítems de reventa (insumos que se
-  // vendieron directo en el rango). "Por clasificar" primero, luego más vendidos.
+  // Nombre de categoría actual de un producto (o null si no coincide con ninguna
+  // de las definidas). Acepta el nombre guardado o el slug/label viejo.
+  const catPorNombre = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const c of categorias) m.set(normCat(c.nombre), c.nombre);
+    return m;
+  }, [categorias]);
+  function categoriaActual(cat: string | undefined, tipo: "receta" | "insumo"): string | null {
+    if (!cat || !cat.trim()) return null;
+    const directa = catPorNombre.get(normCat(cat));
+    if (directa) return directa;
+    const label = tipo === "receta" ? categoriaRecetaLabel(cat) : categoriaInsumoLabel(cat);
+    return catPorNombre.get(normCat(label)) ?? null;
+  }
+
+  // Productos a clasificar: recetas vendibles + ítems de reventa (insumos
+  // vendidos directo en el rango). "Por clasificar" primero, luego más vendidos.
   const productosClasif = useMemo(() => {
     const q = normCat(busquedaClasif);
-    const esFina = (cat?: string) => CATEGORIAS_RECETA.some((c) => c.value === cat);
     const recs = recetas
       .filter((r) => !r.esSubreceta)
-      .map((r) => ({ tipo: "receta" as const, id: r.id, nombre: r.nombre, categoria: r.categoria, activo: r.activo, ventas: unidadesPorReceta.get(r.id) ?? 0, sinCat: !esFina(r.categoria) }));
+      .map((r) => { const cur = categoriaActual(r.categoria, "receta"); return { tipo: "receta" as const, id: r.id, nombre: r.nombre, cur, activo: r.activo, ventas: unidadesPorReceta.get(r.id) ?? 0, sinCat: !cur }; });
     const insById = new Map(insumos.map((i) => [i.id, i]));
     const revs = [...unidadesPorInsumo.keys()]
       .map((id) => insById.get(id))
       .filter((i): i is Insumo => !!i)
-      .map((i) => ({ tipo: "insumo" as const, id: i.id, nombre: `${i.nombre} · reventa`, categoria: i.categoria, activo: true, ventas: unidadesPorInsumo.get(i.id) ?? 0, sinCat: !esFina(i.categoria) }));
+      .map((i) => { const cur = categoriaActual(i.categoria, "insumo"); return { tipo: "insumo" as const, id: i.id, nombre: `${i.nombre} · reventa`, cur, activo: true, ventas: unidadesPorInsumo.get(i.id) ?? 0, sinCat: !cur }; });
     return [...recs, ...revs]
       .filter((p) => !q || normCat(p.nombre).includes(q))
       .sort((a, b) => (a.sinCat !== b.sinCat ? (a.sinCat ? -1 : 1) : b.ventas - a.ventas || a.nombre.localeCompare(b.nombre)));
-  }, [recetas, insumos, unidadesPorReceta, unidadesPorInsumo, busquedaClasif]);
+  }, [recetas, insumos, unidadesPorReceta, unidadesPorInsumo, busquedaClasif, catPorNombre]); // eslint-disable-line react-hooks/exhaustive-deps
   const sinCategoria = productosClasif.filter((p) => p.sinCat).length;
 
   async function cambiarCategoria(tipo: "receta" | "insumo", id: string, categoria: string) {
@@ -430,6 +453,37 @@ export function AnalisisVentas() {
     } finally {
       setGuardandoCat(null);
     }
+  }
+
+  // ── Gestión de categorías (crear / renombrar / borrar) ──
+  async function agregarCategoria() {
+    const nombre = nuevaCat.trim();
+    if (!nombre) return;
+    try {
+      const c = await createCategoriaProducto(nombre, (categorias.at(-1)?.orden ?? 0) + 10);
+      setCategorias((prev) => [...prev, c].sort((a, b) => a.orden - b.orden || a.nombre.localeCompare(b.nombre)));
+      setNuevaCat("");
+    } catch (e) { setError(e instanceof Error ? e.message : "No se pudo crear la categoría"); }
+  }
+  async function guardarRename() {
+    if (!editCat) return;
+    const nuevo = editCat.nombre.trim();
+    const cat = categorias.find((c) => c.id === editCat.id);
+    if (!cat || !nuevo || nuevo === cat.nombre) { setEditCat(null); return; }
+    try {
+      await renameCategoriaProducto(cat.id, cat.nombre, nuevo);
+      setCategorias((prev) => prev.map((c) => (c.id === cat.id ? { ...c, nombre: nuevo } : c)));
+      // Refleja el rename en los productos ya cargados.
+      setRecetas((prev) => prev.map((r) => (r.categoria === cat.nombre ? { ...r, categoria: nuevo } : r)));
+      setInsumos((prev) => prev.map((i) => (i.categoria === cat.nombre ? { ...i, categoria: nuevo } : i)));
+      setEditCat(null);
+    } catch (e) { setError(e instanceof Error ? e.message : "No se pudo renombrar"); }
+  }
+  async function borrarCategoria(id: string) {
+    try {
+      await deleteCategoriaProducto(id);
+      setCategorias((prev) => prev.filter((c) => c.id !== id));
+    } catch (e) { setError(e instanceof Error ? e.message : "No se pudo borrar"); }
   }
 
   const pill = (active: boolean) =>
@@ -545,7 +599,44 @@ export function AnalisisVentas() {
         </button>
         {mostrarClasif && (
           <div className="mt-3 space-y-3">
-            <p className="text-[12px] text-cacao-soft">Asigna la categoría fina de cada producto. Se guarda en la receta (misma que ve Cocina) y el análisis de abajo se reagrupa al instante. Ordenados: sin categoría primero, luego los más vendidos del período.</p>
+            <p className="text-[12px] text-cacao-soft">Asigna la categoría de cada producto. Se guarda en la receta (misma que ve Cocina) y el análisis de abajo se reagrupa al instante. Ordenados: sin categoría primero, luego los más vendidos del período.</p>
+
+            {/* Gestionar categorías: crear / renombrar / borrar (definidas por ti) */}
+            <div className="rounded-xl ring-1 ring-marfil bg-marfil/30 p-3">
+              <button type="button" onClick={() => setGestionCat((v) => !v)} className="w-full flex items-center justify-between gap-2 text-left">
+                <span className="text-[11px] uppercase tracking-widest text-cacao-soft">Categorías ({categorias.length})</span>
+                <span className={`text-cacao-mute transition-transform ${gestionCat ? "rotate-90" : ""}`}>›</span>
+              </button>
+              {gestionCat && (
+                <div className="mt-2 space-y-2">
+                  {categorias.length === 0 && <p className="text-[12px] text-cacao-soft italic">Aún no hay categorías. Crea la primera abajo (o corre el SQL de semilla).</p>}
+                  <ul className="divide-y divide-marfil rounded-lg ring-1 ring-marfil bg-white">
+                    {categorias.map((c) => (
+                      <li key={c.id} className="px-2.5 py-1.5 flex items-center gap-2">
+                        {editCat?.id === c.id ? (
+                          <>
+                            <input autoFocus value={editCat.nombre} onChange={(e) => setEditCat({ id: c.id, nombre: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter") guardarRename(); if (e.key === "Escape") setEditCat(null); }} className="flex-1 min-w-0 rounded-md ring-1 ring-marfil px-2 py-1 text-sm" />
+                            <button type="button" onClick={guardarRename} className="text-xs text-terracotta hover:underline">Guardar</button>
+                            <button type="button" onClick={() => setEditCat(null)} className="text-xs text-cacao-mute hover:underline">Cancelar</button>
+                          </>
+                        ) : (
+                          <>
+                            <span className="flex-1 min-w-0 truncate text-sm text-cacao">{c.nombre}</span>
+                            <button type="button" onClick={() => setEditCat({ id: c.id, nombre: c.nombre })} title="Renombrar" className="text-cacao-mute hover:text-terracotta text-sm">✎</button>
+                            <button type="button" onClick={() => borrarCategoria(c.id)} title="Borrar" className="text-cacao-mute hover:text-terracotta text-sm">✕</button>
+                          </>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="flex items-center gap-2">
+                    <input value={nuevaCat} onChange={(e) => setNuevaCat(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") agregarCategoria(); }} placeholder="Nueva categoría…" className="flex-1 min-w-0 rounded-lg ring-1 ring-marfil px-3 py-2 text-sm" />
+                    <button type="button" onClick={agregarCategoria} disabled={!nuevaCat.trim()} className="rounded-lg bg-terracotta text-white px-3 py-2 text-sm disabled:opacity-40">Agregar</button>
+                  </div>
+                </div>
+              )}
+            </div>
+
             <input value={busquedaClasif} onChange={(e) => setBusquedaClasif(e.target.value)} placeholder="Buscar producto…" className="w-full sm:w-72 rounded-lg ring-1 ring-marfil px-3 py-2 text-sm" />
             <div className="rounded-xl ring-1 ring-marfil overflow-hidden max-h-[28rem] overflow-y-auto">
               <ul className="divide-y divide-marfil">
@@ -556,13 +647,13 @@ export function AnalisisVentas() {
                       <div className="text-[11px] text-cacao-mute">{p.ventas > 0 ? `${fUnid(p.ventas)} vendidos en el período` : "sin ventas en el período"}{!p.activo ? " · inactiva" : ""}</div>
                     </div>
                     <select
-                      value={CATEGORIAS_RECETA.some((c) => c.value === p.categoria) ? (p.categoria as string) : ""}
+                      value={p.cur ?? ""}
                       disabled={guardandoCat === p.id}
                       onChange={(e) => cambiarCategoria(p.tipo, p.id, e.target.value)}
                       className={`rounded-lg ring-1 px-2 py-1.5 text-sm bg-white ${p.sinCat ? "ring-amber-300 text-amber-800" : "ring-marfil text-cacao"} disabled:opacity-50`}
                     >
-                      <option value="">— Sin categoría{p.categoria && !CATEGORIAS_RECETA.some((c) => c.value === p.categoria) ? ` (${categoriaInsumoLabel(p.categoria)})` : ""} —</option>
-                      {CATEGORIAS_RECETA.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+                      <option value="">— Sin categoría —</option>
+                      {categorias.map((c) => <option key={c.id} value={c.nombre}>{c.nombre}</option>)}
                     </select>
                   </li>
                 ))}
