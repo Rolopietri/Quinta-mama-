@@ -9,7 +9,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Venta, Receta, Insumo } from "@/lib/types";
 import { categoriaRecetaLabel, categoriaInsumoLabel } from "@/lib/types";
 import { listVentasRango, normPos } from "@/lib/data/ventas";
-import { listRecetas, setRecetaCategoria } from "@/lib/data/recetas";
+import { listRecetas, setRecetaCategoria, calcularCostoReceta } from "@/lib/data/recetas";
 import { listInsumos, setInsumoCategoria } from "@/lib/data/cocina";
 import { listCategoriasProducto, createCategoriaProducto, renameCategoriaProducto, deleteCategoriaProducto, setCategoriaExcluirRanking, type CategoriaProducto } from "@/lib/data/categorias";
 import { listCategoriasPorNombre, setCategoriaPorNombre } from "@/lib/data/categoriasNombre";
@@ -140,15 +140,19 @@ export function AnalisisVentas() {
   const [orden, setOrden] = useState<OrdenTabla>("monto");
 
   const [ventas, setVentas] = useState<Venta[]>([]);
+  const [ventasPrev, setVentasPrev] = useState<Venta[]>([]);
   const [recetas, setRecetas] = useState<Receta[]>([]);
   const [insumos, setInsumos] = useState<Insumo[]>([]);
   const [loading, setLoading] = useState(true);
+  // Categoría "abierta" para ver el desglose de sus ítems (drill-down).
+  const [catDrill, setCatDrill] = useState<{ key: string; label: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Conciliación con Administración (componentes del rango, en euros).
   const [conc, setConc] = useState<{ setuxNeto: number; ivaSetux: number; cxc: number; rpp: number; cxcNeto: number; rppNeto: number; cobrosEur: number; otrosEur: number } | null>(null);
   // Panel de clasificación de productos (asigna la categoría desde Admin).
   const [mostrarClasif, setMostrarClasif] = useState(false);
   const [mostrarDetalle, setMostrarDetalle] = useState(false);
+  const [mostrarSinVenta, setMostrarSinVenta] = useState(false);
   const [busquedaClasif, setBusquedaClasif] = useState("");
   const [guardandoCat, setGuardandoCat] = useState<string | null>(null);
   // Categorías definidas por el usuario (se comparten con los demás módulos).
@@ -218,8 +222,29 @@ export function AnalisisVentas() {
     return () => { cancel = true; };
   }, [desde, hasta]);
 
+  // Período anterior: mismo largo, justo antes de `desde`. Para comparar ▲▼.
+  const rangoPrev = useMemo(() => {
+    const d0 = new Date(desde + "T00:00");
+    const d1 = new Date(hasta + "T00:00");
+    const dias = Math.round((d1.getTime() - d0.getTime()) / 86400000) + 1;
+    const finPrev = new Date(d0);
+    finPrev.setDate(finPrev.getDate() - 1);
+    const iniPrev = new Date(finPrev);
+    iniPrev.setDate(iniPrev.getDate() - (dias - 1));
+    return { desde: isoLocal(iniPrev), hasta: isoLocal(finPrev), dias };
+  }, [desde, hasta]);
+
+  useEffect(() => {
+    let cancel = false;
+    listVentasRango(rangoPrev.desde, rangoPrev.hasta)
+      .then((v) => !cancel && setVentasPrev(v))
+      .catch(() => !cancel && setVentasPrev([]));
+    return () => { cancel = true; };
+  }, [rangoPrev.desde, rangoPrev.hasta]);
+
   // Total de Cocina del rango (todas las ventas, sin filtros de cat/producto).
   const cocinaTotalRango = useMemo(() => ventas.reduce((s, v) => s + (v.totalUsd ?? 0), 0), [ventas]);
+  const prevTotalMonto = useMemo(() => ventasPrev.reduce((s, v) => s + (v.totalUsd ?? 0), 0), [ventasPrev]);
 
   const catPorReceta = useMemo(() => {
     const m = new Map<string, string>();
@@ -237,21 +262,53 @@ export function AnalisisVentas() {
     return m;
   }, [insumos]);
 
-  // Enriquecer cada venta con producto/categoría/unidades/monto.
+  // Costo por unidad de cada receta vendible (para el margen). Usa el mismo
+  // motor de costos que Cocina (insumos + subrecetas), costo por porción.
+  const costoUnitPorReceta = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of recetas) {
+      if (r.esSubreceta) continue;
+      try {
+        const { porPorcion } = calcularCostoReceta(r, insumos, recetas);
+        if (porPorcion > 0) m.set(r.id, porPorcion);
+      } catch { /* receta sin costo calculable */ }
+    }
+    return m;
+  }, [recetas, insumos]);
+  // Precio base de cada insumo (para el costo de la reventa directa).
+  const precioBaseInsumo = useMemo(() => {
+    const m = new Map<string, number>();
+    insumos.forEach((i) => { if (i.precioBaseUsd != null) m.set(i.id, i.precioBaseUsd); });
+    return m;
+  }, [insumos]);
+
+  // Enriquecer cada venta con producto/categoría/unidades/monto/costo.
+  // costo = costo de la línea completa (todas las unidades); null si no se puede
+  // costear (consignación, servicios, receta sin costo).
   const enriquecidas = useMemo(
     () =>
       ventas.map((v) => {
         const cat = categoriaDeVenta(v, catPorReceta, catPorInsumo, catNombre);
+        const unidades = v.cantidad || 0;
+        let costo: number | null = null;
+        if (v.recetaId) {
+          const c = costoUnitPorReceta.get(v.recetaId);
+          if (c != null) costo = c * unidades;
+        } else if (v.insumoId) {
+          const p = precioBaseInsumo.get(v.insumoId);
+          if (p != null) costo = p * (v.insumoCantidad || 0) * unidades;
+        }
         return {
           fecha: v.fecha,
           producto: v.recetaNombre.trim() || "—",
           catKey: cat.key,
           catLabel: cat.label,
-          unidades: v.cantidad || 0,
+          unidades,
           monto: v.totalUsd ?? 0,
+          costo,
         };
       }),
-    [ventas, catPorReceta, catPorInsumo, catNombre],
+    [ventas, catPorReceta, catPorInsumo, catNombre, costoUnitPorReceta, precioBaseInsumo],
   );
 
   // Opciones de los filtros (según lo que existe en el rango cargado).
@@ -297,14 +354,15 @@ export function AnalisisVentas() {
   const porProducto = useMemo(() => {
     const m = new Map<
       string,
-      { producto: string; catKey: string; catLabel: string; unidades: number; monto: number }
+      { producto: string; catKey: string; catLabel: string; unidades: number; monto: number; costo: number; costeado: boolean }
     >();
     filtradas.forEach((e) => {
       const cur =
         m.get(e.producto) ??
-        { producto: e.producto, catKey: e.catKey, catLabel: e.catLabel, unidades: 0, monto: 0 };
+        { producto: e.producto, catKey: e.catKey, catLabel: e.catLabel, unidades: 0, monto: 0, costo: 0, costeado: true };
       cur.unidades += e.unidades;
       cur.monto += e.monto;
+      if (e.costo == null) cur.costeado = false; else cur.costo += e.costo;
       m.set(e.producto, cur);
     });
     return Array.from(m.values());
@@ -325,6 +383,103 @@ export function AnalisisVentas() {
     () => porProducto.filter((p) => !catExcluidas.has(p.catKey)),
     [porProducto, catExcluidas],
   );
+
+  // ── Nuevos parámetros de análisis ────────────────────────────────────
+  // Comparación vs período anterior (global, todas las ventas del rango).
+  const deltaMonto = useMemo(
+    () => (prevTotalMonto > 0 ? (cocinaTotalRango - prevTotalMonto) / prevTotalMonto : null),
+    [cocinaTotalRango, prevTotalMonto],
+  );
+
+  // Venta promedio por día con ventas (aprox: el POS no trae ticket ni hora).
+  const diasConVenta = useMemo(() => new Set(filtradas.map((e) => e.fecha)).size, [filtradas]);
+  const ventaPromedioDia = diasConVenta > 0 ? totalMonto / diasConVenta : 0;
+
+  // Ventas por día de la semana (Lun→Dom).
+  const porDiaSemana = useMemo(() => {
+    const nombres = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
+    const monto = new Array(7).fill(0);
+    filtradas.forEach((e) => {
+      const dow = (new Date(e.fecha + "T00:00").getDay() + 6) % 7; // 0=Lun
+      monto[dow] += e.monto;
+    });
+    return nombres.map((label, i) => ({ key: label, label, value: monto[i] }));
+  }, [filtradas]);
+
+  // Pareto 80/20: cuántos productos concentran el 80% de la facturación.
+  const pareto = useMemo(() => {
+    const arr = [...porProductoRank].sort((a, b) => b.monto - a.monto);
+    const total = arr.reduce((s, p) => s + p.monto, 0);
+    let acc = 0, n = 0;
+    for (const p of arr) { acc += p.monto; n++; if (total > 0 && acc / total >= 0.8) break; }
+    return { n, deTotal: arr.length, pctProd: arr.length > 0 ? n / arr.length : 0 };
+  }, [porProductoRank]);
+
+  // Margen / rentabilidad. Solo líneas con costo calculable (recetas + reventa).
+  const margen = useMemo(() => {
+    let ingreso = 0, costo = 0;
+    filtradas.forEach((e) => { if (e.costo != null) { ingreso += e.monto; costo += e.costo; } });
+    return { ingreso, costo, ganancia: ingreso - costo, cobertura: totalMonto > 0 ? ingreso / totalMonto : 0 };
+  }, [filtradas, totalMonto]);
+  const topMargen = useMemo(
+    () => porProductoRank
+      .filter((p) => p.costeado && p.monto > 0)
+      .map((p) => ({ ...p, ganancia: p.monto - p.costo, pct: (p.monto - p.costo) / p.monto }))
+      .sort((a, b) => b.ganancia - a.ganancia)
+      .slice(0, topN),
+    [porProductoRank, topN],
+  );
+  const margenPorCategoria = useMemo(() => {
+    const m = new Map<string, { key: string; label: string; monto: number; costo: number }>();
+    filtradas.forEach((e) => {
+      if (e.costo == null) return;
+      const cur = m.get(e.catKey) ?? { key: e.catKey, label: e.catLabel, monto: 0, costo: 0 };
+      cur.monto += e.monto; cur.costo += e.costo; m.set(e.catKey, cur);
+    });
+    return Array.from(m.values())
+      .map((c) => ({ ...c, ganancia: c.monto - c.costo, pct: c.monto > 0 ? (c.monto - c.costo) / c.monto : 0 }))
+      .sort((a, b) => b.ganancia - a.ganancia);
+  }, [filtradas]);
+
+  // Mix de ingreso: contado (dinero que entró) vs crédito (CXC) vs cortesías (RPP).
+  const mixIngreso = useMemo(() => {
+    if (!conc) return null;
+    const contado = Math.max(0, conc.setuxNeto);
+    const credito = Math.max(0, conc.cxc);
+    const cortesias = Math.max(0, conc.rpp);
+    const total = contado + credito + cortesias;
+    if (total <= 0.005) return null;
+    return { contado, credito, cortesias, total };
+  }, [conc]);
+
+  // Productos activos SIN ninguna venta en el período (menú "muerto").
+  const productosSinVenta = useMemo(() => {
+    const vendidas = new Set(ventas.filter((v) => v.recetaId).map((v) => v.recetaId));
+    return recetas
+      .filter((r) => !r.esSubreceta && r.activo && !vendidas.has(r.id))
+      .map((r) => r.nombre)
+      .sort((a, b) => a.localeCompare(b));
+  }, [recetas, ventas]);
+
+  // Alquileres/eventos y demás categorías excluidas, en panel aparte.
+  const categoriasExcluidasResumen = useMemo(() => {
+    const m = new Map<string, { key: string; label: string; unidades: number; monto: number }>();
+    porProducto.forEach((p) => {
+      if (!catExcluidas.has(p.catKey)) return;
+      const cur = m.get(p.catKey) ?? { key: p.catKey, label: p.catLabel, unidades: 0, monto: 0 };
+      cur.unidades += p.unidades; cur.monto += p.monto; m.set(p.catKey, cur);
+    });
+    return Array.from(m.values()).sort((a, b) => b.monto - a.monto);
+  }, [porProducto, catExcluidas]);
+
+  // Drill-down: ítems de la categoría abierta, con % dentro de la categoría.
+  const drill = useMemo(() => {
+    if (!catDrill) return null;
+    const items = porProducto.filter((p) => p.catKey === catDrill.key);
+    const total = items.reduce((s, p) => s + p.monto, 0);
+    const totalU = items.reduce((s, p) => s + p.unidades, 0);
+    return { items: [...items].sort((a, b) => b.monto - a.monto), total, totalU };
+  }, [catDrill, porProducto]);
 
   const porCategoria = useMemo(() => {
     const m = new Map<
@@ -820,6 +975,34 @@ export function AnalisisVentas() {
             />
           </div>
 
+          {/* ── KPIs adicionales ────────────────────────────────── */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+            <StatCard
+              titulo="vs período anterior"
+              valor={deltaMonto == null ? "—" : `${deltaMonto >= 0 ? "▲" : "▼"} ${fPct(Math.abs(deltaMonto) * 100)}`}
+              sub={prevTotalMonto > 0 ? `antes ${fUSD(prevTotalMonto)}` : "sin datos previos"}
+              tono={deltaMonto == null ? undefined : deltaMonto >= 0 ? "bien" : "alerta"}
+            />
+            <StatCard titulo="Venta prom./día" valor={fUSD(ventaPromedioDia)} sub={`${diasConVenta} días con venta`} />
+            <StatCard
+              titulo="Ganancia estimada"
+              valor={fUSD(margen.ganancia)}
+              sub={margen.ingreso > 0 ? `margen ${fPct((margen.ganancia / margen.ingreso) * 100)} · costeado ${fPct(margen.cobertura * 100)}` : "sin costo calculable"}
+              tono="bien"
+            />
+            <StatCard
+              titulo="Concentración 80/20"
+              valor={pareto.deTotal > 0 ? `${pareto.n} de ${pareto.deTotal}` : "—"}
+              sub={pareto.deTotal > 0 ? `${fPct(pareto.pctProd * 100)} de productos = 80% de ventas` : undefined}
+            />
+            <StatCard
+              titulo="Sin ventas"
+              valor={fUnid(productosSinVenta.length)}
+              sub="productos activos sin vender"
+              tono={productosSinVenta.length > 0 ? "alerta" : undefined}
+            />
+          </div>
+
           {/* Aviso: más vendido ≠ más factura */}
           {masVendidoUnid &&
             masFactura &&
@@ -851,7 +1034,8 @@ export function AnalisisVentas() {
                 }))}
                 format={fUSD}
               />
-              <div className="mt-4 overflow-x-auto">
+              <p className="mt-3 text-[11px] text-cacao-mute">Toca una categoría para ver el desglose de sus ítems.</p>
+              <div className="mt-1 overflow-x-auto">
                 <table className="w-full text-xs">
                   <thead>
                     <tr className="text-cacao-mute uppercase tracking-widest text-left">
@@ -863,8 +1047,14 @@ export function AnalisisVentas() {
                   </thead>
                   <tbody>
                     {porCategoria.map((c) => (
-                      <tr key={c.key} className="border-t border-marfil">
-                        <td className="py-1 text-cacao">{c.label}</td>
+                      <tr
+                        key={c.key}
+                        onClick={() => setCatDrill({ key: c.key, label: c.label })}
+                        className={`border-t border-marfil cursor-pointer hover:bg-marfil-soft ${catDrill?.key === c.key ? "bg-marfil-soft" : ""}`}
+                      >
+                        <td className="py-1 text-cacao">
+                          <span className="inline-flex items-center gap-1">{c.label}<span className="text-cacao-mute">›</span></span>
+                        </td>
                         <td className="py-1 text-right tabular-nums text-cacao-soft">
                           {fUnid(c.unidades)}
                         </td>
@@ -893,6 +1083,51 @@ export function AnalisisVentas() {
               />
             </PanelCard>
           </div>
+
+          {/* ── Desglose de la categoría seleccionada (drill-down) ── */}
+          {catDrill && drill && (
+            <section className="rounded-2xl bg-white ring-1 ring-terracotta/40 p-4">
+              <div className="flex items-center justify-between gap-2 mb-1">
+                <h3 className="font-cinzel text-base text-cacao">Desglose: {catDrill.label}</h3>
+                <button type="button" onClick={() => setCatDrill(null)} className="text-xs uppercase tracking-widest text-cacao-soft hover:text-terracotta">✕ Cerrar</button>
+              </div>
+              <p className="text-[11px] text-cacao-mute mb-3">{fUnid(drill.totalU)} unid · {fUSD(drill.total)} · {drill.items.length} ítems. El % es dentro de esta categoría.</p>
+              {drill.items.length === 0 ? (
+                <p className="text-sm text-cacao-soft italic">Sin ítems en esta categoría en el período.</p>
+              ) : (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  <Dona
+                    segmentos={drill.items.map((p, i) => ({ key: p.producto, label: p.producto, value: p.monto, color: colorPorIndice(i) }))}
+                    format={fUSD}
+                  />
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="text-cacao-mute uppercase tracking-widest text-left">
+                          <th className="py-1 font-normal">Ítem</th>
+                          <th className="py-1 font-normal text-right">Unid.</th>
+                          <th className="py-1 font-normal text-right">% unid.</th>
+                          <th className="py-1 font-normal text-right">Monto</th>
+                          <th className="py-1 font-normal text-right">% monto</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {drill.items.map((p) => (
+                          <tr key={p.producto} className="border-t border-marfil">
+                            <td className="py-1 text-cacao">{p.producto}</td>
+                            <td className="py-1 text-right tabular-nums text-cacao-soft">{fUnid(p.unidades)}</td>
+                            <td className="py-1 text-right tabular-nums text-cacao-soft">{fPct(drill.totalU > 0 ? (p.unidades / drill.totalU) * 100 : 0)}</td>
+                            <td className="py-1 text-right tabular-nums text-cacao">{fUSD(p.monto)}</td>
+                            <td className="py-1 text-right tabular-nums text-cacao-soft">{fPct(drill.total > 0 ? (p.monto / drill.total) * 100 : 0)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </section>
+          )}
 
           {/* ── Top / menos vendidos ────────────────────────────── */}
           <div className="flex flex-wrap items-center gap-2">
@@ -936,6 +1171,121 @@ export function AnalisisVentas() {
               format={fUnid}
             />
           </PanelCard>
+
+          {/* ── Ritmo y mezcla ──────────────────────────────────── */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <PanelCard titulo="Ventas por día de la semana">
+              <BarrasH
+                rows={porDiaSemana.map((d, i) => ({ key: d.key, label: d.label, value: d.value, color: colorPorIndice(i), tip: `${d.label}: ${fUSD(d.value)}` }))}
+                format={fUSD}
+              />
+            </PanelCard>
+            {mixIngreso && (
+              <PanelCard titulo="Mezcla de ingreso (contado / crédito / cortesías)">
+                <Dona
+                  segmentos={[
+                    { key: "contado", label: "Contado (entró)", value: mixIngreso.contado, color: "#4B7A2F" },
+                    { key: "credito", label: "Crédito (CXC)", value: mixIngreso.credito, color: "#C9A24B" },
+                    { key: "cortesias", label: "Cortesías (RPP)", value: mixIngreso.cortesias, color: "#B0784F" },
+                  ]}
+                  format={(n) => `${n.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`}
+                />
+                <p className="mt-2 text-[11px] text-cacao-mute">Del período completo (todas las ventas). Muestra cuánto de lo vendido fue dinero real vs crédito y cortesías.</p>
+              </PanelCard>
+            )}
+          </div>
+
+          {/* ── Rentabilidad ────────────────────────────────────── */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <PanelCard titulo={`Top ${topN} por ganancia (margen)`}>
+              <BarrasH
+                rows={topMargen.map((p, i) => ({ key: p.producto, label: p.producto, value: p.ganancia, color: colorPorIndice(i), tip: `${p.producto}: ${fUSD(p.ganancia)} de ganancia · margen ${fPct(p.pct * 100)} · ${fUSD(p.monto)} vendidos` }))}
+                format={fUSD}
+                emptyLabel="Sin productos con costo calculable en el período."
+              />
+              {margen.cobertura < 0.999 && (
+                <p className="mt-2 text-[11px] text-cacao-mute">Solo se incluyen productos con costo (recetas y reventa). Cubre {fPct(margen.cobertura * 100)} de la facturación; el resto (consignación, servicios) no tiene costo cargado.</p>
+              )}
+            </PanelCard>
+            <PanelCard titulo="Margen por categoría">
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-cacao-mute uppercase tracking-widest text-left">
+                      <th className="py-1 font-normal">Categoría</th>
+                      <th className="py-1 font-normal text-right">Vendido</th>
+                      <th className="py-1 font-normal text-right">Costo</th>
+                      <th className="py-1 font-normal text-right">Ganancia</th>
+                      <th className="py-1 font-normal text-right">Margen</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {margenPorCategoria.length === 0 && (
+                      <tr><td colSpan={5} className="py-3 text-center text-cacao-soft italic">Sin costo calculable en el período.</td></tr>
+                    )}
+                    {margenPorCategoria.map((c) => (
+                      <tr key={c.key} className="border-t border-marfil">
+                        <td className="py-1 text-cacao">{c.label}</td>
+                        <td className="py-1 text-right tabular-nums text-cacao-soft">{fUSD(c.monto)}</td>
+                        <td className="py-1 text-right tabular-nums text-cacao-soft">{fUSD(c.costo)}</td>
+                        <td className="py-1 text-right tabular-nums text-cacao">{fUSD(c.ganancia)}</td>
+                        <td className="py-1 text-right tabular-nums text-cacao-soft">{fPct(c.pct * 100)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </PanelCard>
+          </div>
+
+          {/* ── Alquileres / eventos (categorías fuera de rankings) ── */}
+          {categoriasExcluidasResumen.length > 0 && (
+            <PanelCard titulo="Alquileres, eventos y otras categorías fijas (aparte)">
+              <p className="text-[11px] text-cacao-mute mb-2">Estas categorías están fuera de los rankings por su valor, pero aquí las ves por separado. Sí cuentan en las ventas totales.</p>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-cacao-mute uppercase tracking-widest text-left">
+                      <th className="py-1 font-normal">Categoría</th>
+                      <th className="py-1 font-normal text-right">Unid.</th>
+                      <th className="py-1 font-normal text-right">Monto</th>
+                      <th className="py-1 font-normal text-right">% del total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {categoriasExcluidasResumen.map((c) => (
+                      <tr key={c.key} onClick={() => setCatDrill({ key: c.key, label: c.label })} className="border-t border-marfil cursor-pointer hover:bg-marfil-soft">
+                        <td className="py-1 text-cacao"><span className="inline-flex items-center gap-1">{c.label}<span className="text-cacao-mute">›</span></span></td>
+                        <td className="py-1 text-right tabular-nums text-cacao-soft">{fUnid(c.unidades)}</td>
+                        <td className="py-1 text-right tabular-nums text-cacao">{fUSD(c.monto)}</td>
+                        <td className="py-1 text-right tabular-nums text-cacao-soft">{fPct(pct(c.monto))}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </PanelCard>
+          )}
+
+          {/* ── Productos sin ventas (menú muerto) ───────────────── */}
+          {productosSinVenta.length > 0 && (
+            <section className="rounded-2xl bg-white ring-1 ring-marfil p-4">
+              <button type="button" onClick={() => setMostrarSinVenta((v) => !v)} className="w-full flex items-center justify-between gap-2 text-left">
+                <span className="font-cinzel text-base text-cacao">Productos sin ventas en el período</span>
+                <span className="flex items-center gap-2">
+                  <span className="rounded-full bg-amber-50 text-amber-800 ring-1 ring-amber-300 px-2 py-0.5 text-[10px] uppercase tracking-widest">{productosSinVenta.length}</span>
+                  <span className={`text-cacao-mute transition-transform ${mostrarSinVenta ? "rotate-90" : ""}`}>›</span>
+                </span>
+              </button>
+              {mostrarSinVenta && (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {productosSinVenta.map((n) => (
+                    <span key={n} className="rounded-full bg-marfil-soft ring-1 ring-marfil px-2.5 py-1 text-xs text-cacao-soft">{n}</span>
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
 
           {/* ── Detalle por producto (plegable) ─────────────────── */}
           <section className="rounded-2xl bg-white ring-1 ring-marfil p-4">
@@ -1042,17 +1392,20 @@ function StatCard({
   titulo,
   valor,
   sub,
+  tono,
 }: {
   titulo: string;
   valor: string;
   sub?: string;
+  tono?: "bien" | "alerta";
 }) {
+  const colorValor = tono === "bien" ? "text-[#2F4A1F]" : tono === "alerta" ? "text-[#7A5A18]" : "text-cacao";
   return (
     <div className="rounded-2xl bg-white ring-1 ring-marfil p-4">
       <div className="text-[10px] uppercase tracking-widest text-cacao-mute">
         {titulo}
       </div>
-      <div className="mt-1 font-cinzel text-lg text-cacao leading-tight break-words">
+      <div className={`mt-1 font-cinzel text-lg leading-tight break-words ${colorValor}`}>
         {valor}
       </div>
       {sub && <div className="text-xs text-cacao-soft mt-0.5">{sub}</div>}
