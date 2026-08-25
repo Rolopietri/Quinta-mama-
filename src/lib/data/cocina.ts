@@ -2,6 +2,7 @@
 
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { hoyISO } from "@/lib/ui";
+import { normalizarNombreCatalogo } from "@/lib/text";
 import type {
   Proveedor,
   Insumo,
@@ -235,7 +236,7 @@ export async function createInsumo(input: InsumoInput): Promise<Insumo> {
   const { data, error } = await sb
     .from("insumos")
     .insert({
-      nombre: input.nombre,
+      nombre: normalizarNombreCatalogo(input.nombre),
       categoria: input.categoria,
       seccion: input.seccion,
       unidad_compra: input.unidadCompra,
@@ -263,7 +264,8 @@ export async function updateInsumo(
 ): Promise<Insumo> {
   const sb = createSupabaseBrowserClient();
   const db: Record<string, unknown> = {};
-  if (patch.nombre !== undefined) db.nombre = patch.nombre;
+  if (patch.nombre !== undefined)
+    db.nombre = normalizarNombreCatalogo(patch.nombre);
   if (patch.categoria !== undefined) db.categoria = patch.categoria;
   if (patch.seccion !== undefined) db.seccion = patch.seccion;
   if (patch.unidadCompra !== undefined) db.unidad_compra = patch.unidadCompra;

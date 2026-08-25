@@ -8,6 +8,7 @@ import type {
   Insumo,
 } from "@/lib/types";
 import { convertirParaCosto } from "@/lib/units";
+import { normalizarNombreCatalogo } from "@/lib/text";
 
 type RecetaRow = {
   id: string;
@@ -197,7 +198,7 @@ export async function createReceta(input: RecetaInput): Promise<Receta> {
   const { data, error } = await sb
     .from("recetas")
     .insert({
-      nombre: input.nombre,
+      nombre: normalizarNombreCatalogo(input.nombre),
       seccion: input.seccion,
       categoria: input.categoria ?? null,
       perfil: input.perfil ?? null,
@@ -228,7 +229,7 @@ export async function createReceta(input: RecetaInput): Promise<Receta> {
       receta_id: recId,
       insumo_id: i.insumoId ?? null,
       subreceta_id: i.subrecetaId ?? null,
-      nombre: i.nombre,
+      nombre: normalizarNombreCatalogo(i.nombre),
       cantidad: i.cantidad,
       unidad: i.unidad,
       observaciones: i.observaciones ?? null,
@@ -252,7 +253,7 @@ export async function updateReceta(
   const { error } = await sb
     .from("recetas")
     .update({
-      nombre: input.nombre,
+      nombre: normalizarNombreCatalogo(input.nombre),
       seccion: input.seccion,
       categoria: input.categoria ?? null,
       perfil: input.perfil ?? null,
@@ -291,7 +292,7 @@ export async function updateReceta(
       // sub-recetas usadas como ingrediente se perdieran (quedaban como
       // líneas ad-hoc sin costo).
       subreceta_id: i.subrecetaId ?? null,
-      nombre: i.nombre,
+      nombre: normalizarNombreCatalogo(i.nombre),
       cantidad: i.cantidad,
       unidad: i.unidad,
       observaciones: i.observaciones ?? null,
