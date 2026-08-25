@@ -1551,12 +1551,15 @@ function CuadreFacturas() {
   const [rep, setRep] = useState<{ desde: string; hasta: string; dias: DiaFacturaUI[]; totales: TotalesFacturaUI } | null>(null);
   const [cargado, setCargado] = useState<CargadoUI | null>(null);
   const [base, setBase] = useState<"neto" | "bruto">("bruto");
+  const [archivoB64, setArchivoB64] = useState<string | null>(null);
+  const [guardando, setGuardando] = useState(false);
+  const [ok, setOk] = useState<string | null>(null);
 
   const fEUR = (v: number) => `${(v ?? 0).toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
   const dif = (a: number, b: number) => Math.round((a - b) * 100) / 100;
 
   async function subir(file: File) {
-    setError(null); setCargando(true); setRep(null); setCargado(null);
+    setError(null); setOk(null); setCargando(true); setRep(null); setCargado(null); setArchivoB64(null);
     try {
       const b64 = await new Promise<string>((resolve, reject) => {
         const fr = new FileReader();
@@ -1569,9 +1572,28 @@ function CuadreFacturas() {
       if (!r.ok) throw new Error(d.error || "No se pudo leer el archivo.");
       setRep(d.reporte);
       setCargado(d.cargado ?? null);
+      setArchivoB64(b64);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error");
     } finally { setCargando(false); }
+  }
+
+  async function guardar() {
+    if (!archivoB64 || !rep) return;
+    if (!confirm(`Se guardará el período ${rep.desde} → ${rep.hasta}, reemplazando lo que este importador haya cargado en ese rango (Ingresos, CXC, RPP, propina y tickets). ¿Continuar?`)) return;
+    setGuardando(true); setError(null); setOk(null);
+    try {
+      const r = await fetch("/api/admin/importar-facturas", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ file_base64: archivoB64 }) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "No se pudo guardar.");
+      setOk(`Guardado ${d.desde} → ${d.hasta}: ${d.ingresos} ingreso(s), ${d.cxc} CXC, ${d.rpp} RPP, ${d.dias} día(s) de tickets. Ticket promedio ${fEUR(d.ticketPromedio)}.`);
+      // Refresca el cuadre (ahora "cargado" debería igualar el reporte).
+      const rr = await fetch("/api/admin/importar-facturas", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ file_base64: archivoB64 }) });
+      const dd = await rr.json();
+      if (rr.ok) setCargado(dd.cargado ?? null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error");
+    } finally { setGuardando(false); }
   }
 
   // Ingreso del reporte según base; CXC/RPP se comparan en BRUTO (así se guardan).
@@ -1581,6 +1603,7 @@ function CuadreFacturas() {
   return (
     <div className="rounded-2xl bg-white ring-1 ring-marfil p-4 space-y-4">
       {error && <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419]">{error}</div>}
+      {ok && <div className="rounded-lg bg-[#F1F4ED] ring-1 ring-[#CBD9BC] p-3 text-sm text-[#2F4A1F]">{ok}</div>}
 
       {!rep ? (
         <div className="text-center py-4">
@@ -1596,7 +1619,12 @@ function CuadreFacturas() {
         <div className="space-y-4">
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <span className="font-display text-[10px] tracking-[0.25em] uppercase text-cacao-mute">Período {rep.desde} → {rep.hasta} · {rep.totales.tickets} facturas</span>
-            <button type="button" onClick={() => { setRep(null); setCargado(null); }} className="text-xs uppercase tracking-widest text-cacao-soft hover:text-cacao">Cambiar archivo</button>
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={guardar} disabled={guardando || !archivoB64} className="rounded-lg bg-terracotta text-white px-4 py-2 text-xs uppercase tracking-widest hover:opacity-90 disabled:opacity-40">
+                {guardando ? "Guardando…" : "Guardar (reemplaza el rango)"}
+              </button>
+              <button type="button" onClick={() => { setRep(null); setCargado(null); setArchivoB64(null); setOk(null); }} className="text-xs uppercase tracking-widest text-cacao-soft hover:text-cacao">Cambiar archivo</button>
+            </div>
           </div>
 
           {/* KPIs del reporte */}
@@ -1667,7 +1695,7 @@ function CuadreFacturas() {
                     </tbody>
                   </table>
                 </div>
-                <p className="text-[11px] text-cacao-soft">Δ = reporte − cargado. En rojo lo que cambiaría si aplicáramos este reporte. Nada se ha guardado. Cuando revises el cuadre y me digas, hago el importe definitivo (reemplazando por rango).</p>
+                <p className="text-[11px] text-cacao-soft">Δ = reporte − cargado. En rojo lo que cambiaría al guardar. Con <strong>“Guardar”</strong> se escribe este rango (Ingresos, CXC, RPP, propina y tickets) reemplazando solo lo que este importador haya cargado antes en esas fechas — no toca cargas hechas por otros medios (agosto queda intacto).</p>
               </div>
             );
           })() : (
