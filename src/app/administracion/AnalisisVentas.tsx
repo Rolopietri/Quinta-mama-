@@ -639,6 +639,7 @@ export function AnalisisVentas() {
         {mostrarClasif && (
           <div className="mt-3 space-y-3">
             <p className="text-[12px] text-cacao-soft">Asigna la categoría de cada producto. Se guarda en la receta (misma que ve Cocina) y el análisis de abajo se reagrupa al instante. Ordenados: sin categoría primero, luego los más vendidos del período.</p>
+            {error && <div className="rounded-lg bg-red-50 text-red-800 ring-1 ring-red-200 px-3 py-2 text-[12px]">{error}</div>}
 
             {/* Gestionar categorías: crear / renombrar / borrar (definidas por ti) */}
             <div className="rounded-xl ring-1 ring-marfil bg-marfil/30 p-3">

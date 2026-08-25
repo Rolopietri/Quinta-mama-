@@ -27,12 +27,25 @@ export async function setCategoriaPorNombre(nombreOriginal: string, categoria: s
   const norm = normPos(nombreOriginal);
   if (!categoria || !categoria.trim()) {
     const { error } = await sb.from("categoria_por_nombre").delete().eq("nombre_norm", norm);
-    if (error) throw error;
+    if (error) throw traducir(error);
     return;
   }
   const { error } = await sb.from("categoria_por_nombre").upsert(
     { nombre_norm: norm, nombre_original: nombreOriginal, categoria: categoria.trim(), updated_at: new Date().toISOString() },
     { onConflict: "nombre_norm" },
   );
-  if (error) throw error;
+  if (error) throw traducir(error);
+}
+
+// Convierte el error crudo de Supabase en un mensaje accionable. El caso típico
+// es que la tabla aún no exista (falta correr el SQL).
+function traducir(error: { message?: string; code?: string }): Error {
+  const msg = error?.message ?? "";
+  const code = error?.code ?? "";
+  if (code === "42P01" || code === "PGRST205" || /categoria_por_nombre/i.test(msg)) {
+    return new Error(
+      "Falta crear la tabla en Supabase. Corre el SQL de supabase/categoria-por-nombre.sql (SQL Editor → pega el contenido → Run) y recarga.",
+    );
+  }
+  return new Error(msg || "No se pudo guardar la categoría");
 }
