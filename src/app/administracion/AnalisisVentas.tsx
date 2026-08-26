@@ -907,7 +907,7 @@ export function AnalisisVentas() {
         return (
           <section className="rounded-2xl bg-white ring-1 ring-marfil p-4">
             <div className="flex items-center justify-between gap-2 mb-1">
-              <h3 className="font-cinzel text-base text-cacao">Cocina vs Ingresos</h3>
+              <h3 className="font-cinzel text-base text-cacao">Venta vs Ingresos</h3>
               <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] uppercase tracking-widest ${cuadra ? "bg-[#F1F4ED] text-[#2F4A1F]" : "bg-[#FBF3E2] text-[#7A5A18]"}`}>
                 <span className={`h-1.5 w-1.5 rounded-full ${cuadra ? "bg-[#4B7A2F]" : "bg-[#C9A24B]"}`} />
                 {cuadra ? "Cuadra" : "Revisar"}
@@ -915,7 +915,7 @@ export function AnalisisVentas() {
             </div>
             <p className="text-[11px] text-cacao-mute mb-3">Del período (todas las ventas, sin filtros). La diferencia es lo que se vendió a crédito y las cortesías: sale en Cocina pero todavía no es dinero.</p>
             <div className="text-sm max-w-md space-y-1">
-              <Fila label="Ventas en Cocina" val={fEUR(cocinaTotalRango)} />
+              <Fila label="Ventas registradas" val={fEUR(cocinaTotalRango)} />
               <Fila label="Ingresos (dinero que entró)" val={fEUR(conc.setuxNeto)} />
               <div className="border-t border-marfil pt-1"><Fila label="Diferencia" val={fEUR(diferencia)} fuerte /></div>
             </div>

@@ -41,6 +41,9 @@ const fUSD = (n: number) =>
 const fUnid = (n: number) =>
   Number.isInteger(n) ? n.toLocaleString("en-US") : n.toLocaleString("en-US", { maximumFractionDigits: 2 });
 const fPct = (n: number) => `${n.toFixed(1)}%`;
+// Egresos vienen en € (admin_egreso). Se muestran en € para no mezclar.
+const fEUR = (n: number) => `${(n ?? 0).toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
+type GastosResp = { fijos: number; variables: number; insumosEgreso: number; cortesias: number; porCategoria: { categoria: string; clasificacion: string; eur: number }[]; prev: { fijos: number; variables: number } };
 
 function isoLocal(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -133,6 +136,7 @@ export function AnalisisCompras() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [asignando, setAsignando] = useState<string | null>(null);
+  const [gastos, setGastos] = useState<GastosResp | null>(null);
   const [catDrill, setCatDrill] = useState<{ key: string; label: string } | null>(null);
   const [mostrarDetalle, setMostrarDetalle] = useState(false);
   const [mostrarClasif, setMostrarClasif] = useState(false);
@@ -182,6 +186,16 @@ export function AnalisisCompras() {
       .catch(() => !cancel && setComprasPrev([]));
     return () => { cancel = true; };
   }, [rangoPrev.desde, rangoPrev.hasta]);
+
+  // Egresos operativos (fijos/variables) de Administración para el mismo rango.
+  useEffect(() => {
+    let cancel = false;
+    fetch(`/api/admin/gastos?desde=${desde}&hasta=${hasta}`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((g) => { if (!cancel) setGastos(g && !g.error ? g : null); })
+      .catch(() => { if (!cancel) setGastos(null); });
+    return () => { cancel = true; };
+  }, [desde, hasta]);
 
   const insMap = useMemo(() => new Map(insumos.map((i) => [i.id, i])), [insumos]);
   const provMap = useMemo(() => new Map(proveedores.map((p) => [p.id, p.nombre])), [proveedores]);
@@ -808,9 +822,59 @@ export function AnalisisCompras() {
             )}
           </section>
 
+          {/* ── Egresos operativos (Administración) ─────────────── */}
+          {(() => {
+            const egFijos = gastos?.fijos ?? 0;
+            const egVariables = gastos?.variables ?? 0;
+            const egresosTotal = egFijos + egVariables;
+            const egresosPrev = (gastos?.prev.fijos ?? 0) + (gastos?.prev.variables ?? 0);
+            const egDelta = egresosPrev > 0 ? (egresosTotal - egresosPrev) / egresosPrev : null;
+            const salidasTotal = globalTotal + egresosTotal;
+            const egCategorias = gastos?.porCategoria ?? [];
+            return (
+              <section className="rounded-2xl bg-white ring-1 ring-marfil p-4 space-y-3">
+                <h3 className="font-cinzel text-base text-cacao">Egresos operativos (Administración)</h3>
+                {!gastos ? (
+                  <p className="text-sm text-cacao-soft italic">No pude leer los egresos de Administración para el período (o no hay ninguno cargado). Se registran en Administración → Egresos.</p>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      <CompraCard titulo="Gastos fijos" valor={fEUR(egFijos)} sub="alquiler, nómina…" />
+                      <CompraCard titulo="Gastos variables" valor={fEUR(egVariables)} sub="sin insumos" />
+                      <CompraCard titulo="Egresos (total)" valor={fEUR(egresosTotal)} sub={egDelta == null ? undefined : `${egDelta >= 0 ? "▲" : "▼"} ${fPct(Math.abs(egDelta) * 100)} vs antes`} tono={egDelta == null ? undefined : egDelta >= 0 ? "alerta" : "bien"} />
+                      <CompraCard titulo="Salidas totales" valor={fEUR(salidasTotal)} sub="insumos + egresos" tono="alerta" />
+                    </div>
+                    {egCategorias.length > 0 && (
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                        <PanelCard titulo="Egresos por categoría">
+                          <BarrasH rows={egCategorias.map((c, i) => ({ key: c.categoria, label: c.categoria, value: c.eur, color: colorPorIndice(i), tip: `${c.categoria} (${c.clasificacion === "fija" ? "fijo" : "variable"}): ${fEUR(c.eur)}` }))} format={fEUR} />
+                        </PanelCard>
+                        <PanelCard titulo="Distribución de egresos">
+                          <Dona segmentos={egCategorias.map((c, i) => ({ key: c.categoria, label: c.categoria, value: c.eur, color: colorPorIndice(i) }))} format={fEUR} />
+                        </PanelCard>
+                      </div>
+                    )}
+                    <p className="text-[11px] text-cacao-mute">Los <strong>insumos</strong> se cuentan arriba (Compras de Cocina); por eso aquí se excluye la categoría “Insumos” de Egresos para no duplicar. Las <strong>cortesías</strong> ({fEUR(gastos.cortesias)}) no se suman: son venta regalada, no un gasto. Egresos en €.</p>
+                  </>
+                )}
+              </section>
+            );
+          })()}
+
           <p className="text-[11px] text-cacao-soft italic">El costo de insumos vs las ventas (food cost %) y la utilidad real están en la pestaña <strong>Resumen</strong>.</p>
         </>
       )}
+    </div>
+  );
+}
+
+function CompraCard({ titulo, valor, sub, tono }: { titulo: string; valor: string; sub?: string; tono?: "bien" | "alerta" }) {
+  const color = tono === "bien" ? "text-[#2F4A1F]" : tono === "alerta" ? "text-[#7A5A18]" : "text-cacao";
+  return (
+    <div className="rounded-2xl bg-white ring-1 ring-marfil p-4">
+      <div className="text-[10px] uppercase tracking-widest text-cacao-mute">{titulo}</div>
+      <div className={`mt-1 font-cinzel text-lg leading-tight break-words ${color}`}>{valor}</div>
+      {sub && <div className="text-xs text-cacao-soft mt-0.5">{sub}</div>}
     </div>
   );
 }
