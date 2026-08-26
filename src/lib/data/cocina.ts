@@ -361,6 +361,7 @@ type CompraRow = {
   tasa_bcv_usada: number | string | null;
   modalidad_pago: string | null;
   notas: string | null;
+  numero_factura: string | null;
   pagada: boolean | null;
   fecha_pago: string | null;
 };
@@ -378,6 +379,7 @@ function rowToCompra(r: CompraRow): Compra {
       r.tasa_bcv_usada === null ? undefined : Number(r.tasa_bcv_usada),
     modalidadPago: (r.modalidad_pago as ModalidadPago) ?? undefined,
     notas: r.notas ?? undefined,
+    numeroFactura: r.numero_factura ?? undefined,
     pagada: r.pagada ?? true,
     fechaPago: r.fecha_pago ?? undefined,
   };
@@ -430,6 +432,7 @@ export async function createCompra(input: CompraInput): Promise<Compra> {
       tasa_bcv_usada: input.tasaBcvUsada ?? null,
       modalidad_pago: input.modalidadPago ?? null,
       notas: input.notas ?? null,
+      numero_factura: input.numeroFactura?.trim() || null,
       pagada: input.pagada ?? true,
       fecha_pago:
         input.pagada === false ? null : (input.fechaPago ?? input.fecha),

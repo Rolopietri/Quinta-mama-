@@ -456,6 +456,8 @@ export type Compra = {
   tasaBcvUsada?: number;
   modalidadPago?: ModalidadPago;
   notas?: string;
+  /** Número de factura del proveedor (para conciliación y contabilidad). */
+  numeroFactura?: string;
   /** Estado de pago al proveedor. true = ya pagada (default). false = cuenta por
    *  pagar (pago diferido). */
   pagada: boolean;

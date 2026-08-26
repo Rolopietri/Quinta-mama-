@@ -44,6 +44,7 @@ type FormState = {
   ivaModo: "con" | "sin";
   ivaPorc: string;
   notas: string;
+  numeroFactura: string;
   /** true = la factura se paga después (cuenta por pagar). */
   pagarDespues: boolean;
 };
@@ -87,6 +88,7 @@ const emptyForm: FormState = {
   ivaModo: "con",
   ivaPorc: "16",
   notas: "",
+  numeroFactura: "",
   pagarDespues: false,
 };
 
@@ -201,6 +203,7 @@ export function ComprasClient() {
       ivaModo: "con",
       ivaPorc: "16",
       notas: c.notas ?? "",
+      numeroFactura: c.numeroFactura ?? "",
       pagarDespues: !c.pagada,
     });
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -438,6 +441,7 @@ export function ComprasClient() {
       tasaBcvUsada: tasaUsada,
       modalidadPago: form.modalidadPago,
       notas: notasFinal || undefined,
+      numeroFactura: form.numeroFactura.trim() || undefined,
       pagada: !form.pagarDespues,
     };
     try {
@@ -828,6 +832,20 @@ export function ComprasClient() {
             )}
           </div>
 
+          <label className="text-sm text-cacao block">
+            N° de factura{" "}
+            <span className="text-cacao-soft font-normal">(opcional)</span>
+            <input
+              type="text"
+              value={form.numeroFactura}
+              onChange={(e) =>
+                setForm({ ...form, numeroFactura: e.target.value })
+              }
+              placeholder="Ej: 00012345"
+              className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2"
+            />
+          </label>
+
           <textarea
             placeholder="Notas (opcional)"
             value={form.notas}
@@ -921,7 +939,11 @@ export function ComprasClient() {
                       const modalidad = MODALIDADES_PAGO.find(
                         (m) => m.value === c.modalidadPago,
                       );
-                      const meta = [proveedor?.nombre, modalidad?.label]
+                      const meta = [
+                        proveedor?.nombre,
+                        modalidad?.label,
+                        c.numeroFactura ? `Factura ${c.numeroFactura}` : null,
+                      ]
                         .filter(Boolean)
                         .join(" · ");
                       return (
