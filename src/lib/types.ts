@@ -363,6 +363,10 @@ export type Insumo = {
   /** Texto libre. Las predefinidas (CATEGORIAS_INSUMO) son solo sugerencias;
    *  se pueden crear categorías nuevas en cualquier momento. */
   categoria: string;
+  /** Categoría de COMPRA (nombre de categoria_insumo). Independiente de
+   *  `categoria` (que Ventas usa para insumos de reventa). Es la que agrupa el
+   *  Análisis de Compras. Se asigna desde "Clasificar insumos". */
+  categoriaCompra?: string;
   nombre: string;
   seccion: Seccion;
   unidadCompra: string;

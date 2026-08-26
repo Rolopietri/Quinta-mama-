@@ -131,6 +131,7 @@ type InsumoRow = {
   id: string;
   nombre: string;
   categoria: string;
+  categoria_compra: string | null;
   seccion: string;
   unidad_compra: string;
   cantidad_por_compra: number | string;
@@ -160,6 +161,7 @@ function rowToInsumo(r: InsumoRow): Insumo {
     id: r.id,
     nombre: r.nombre,
     categoria: r.categoria,
+    categoriaCompra: r.categoria_compra ?? undefined,
     seccion: r.seccion as Seccion,
     unidadCompra: r.unidad_compra,
     cantidadPorCompra: Number(r.cantidad_por_compra),
@@ -320,6 +322,20 @@ export async function setInsumoCategoria(
 ): Promise<void> {
   const sb = createSupabaseBrowserClient();
   const { error } = await sb.from("insumos").update({ categoria }).eq("id", id);
+  if (error) throw error;
+}
+
+/** Cambia SOLO la categoría de COMPRA de un insumo (para clasificar desde
+ *  Análisis de Compras). Es un campo aparte de `categoria` (que usa Ventas). */
+export async function setInsumoCategoriaCompra(
+  id: string,
+  categoria: string | null,
+): Promise<void> {
+  const sb = createSupabaseBrowserClient();
+  const { error } = await sb
+    .from("insumos")
+    .update({ categoria_compra: categoria })
+    .eq("id", id);
   if (error) throw error;
 }
 

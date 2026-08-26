@@ -9,13 +9,21 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { Compra, Insumo, Proveedor } from "@/lib/types";
-import { categoriaInsumoLabel } from "@/lib/types";
 import {
   listComprasRango,
   listInsumos,
   listProveedores,
   setCompraProveedor,
+  setInsumoCategoriaCompra,
 } from "@/lib/data/cocina";
+import {
+  listCategoriasInsumo,
+  createCategoriaInsumo,
+  renameCategoriaInsumo,
+  deleteCategoriaInsumo,
+  setCategoriaInsumoExcluirRanking,
+  type CategoriaInsumo,
+} from "@/lib/data/categoriasInsumo";
 import { hoyISO } from "@/lib/ui";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import {
@@ -69,6 +77,41 @@ const MODALIDAD: Record<string, string> = {
 
 type OrdenTabla = "monto" | "compras";
 
+// Fila de compra enriquecida (categoría de compra, proveedor, estado, monto…).
+type EnrRow = {
+  id: string;
+  fecha: string;
+  insumoId: string;
+  insumo: string;
+  catKey: string;
+  catLabel: string;
+  provKey: string;
+  proveedor: string;
+  modalidad: string;
+  pagada: boolean;
+  monto: number;
+  flete: number;
+};
+type InsumoAgg = { id: string; nombre: string; catKey: string; catLabel: string; monto: number; veces: number };
+type ProvAgg = { key: string; nombre: string; monto: number; veces: number };
+
+function aggInsumo(rows: EnrRow[]): InsumoAgg[] {
+  const m = new Map<string, InsumoAgg>();
+  rows.forEach((e) => {
+    const cur = m.get(e.insumoId) ?? { id: e.insumoId, nombre: e.insumo, catKey: e.catKey, catLabel: e.catLabel, monto: 0, veces: 0 };
+    cur.monto += e.monto; cur.veces += 1; m.set(e.insumoId, cur);
+  });
+  return Array.from(m.values()).sort((a, b) => b.monto - a.monto);
+}
+function aggProveedor(rows: EnrRow[]): ProvAgg[] {
+  const m = new Map<string, ProvAgg>();
+  rows.forEach((e) => {
+    const cur = m.get(e.provKey) ?? { key: e.provKey, nombre: e.proveedor, monto: 0, veces: 0 };
+    cur.monto += e.monto; cur.veces += 1; m.set(e.provKey, cur);
+  });
+  return Array.from(m.values()).sort((a, b) => b.monto - a.monto);
+}
+
 export function AnalisisCompras() {
   const [preset, setPreset] = useState<Preset>("mes");
   const inicial = rangoDePreset("mes");
@@ -86,17 +129,20 @@ export function AnalisisCompras() {
   const [comprasPrev, setComprasPrev] = useState<Compra[]>([]);
   const [insumos, setInsumos] = useState<Insumo[]>([]);
   const [proveedores, setProveedores] = useState<Proveedor[]>([]);
+  const [categorias, setCategorias] = useState<CategoriaInsumo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [asignando, setAsignando] = useState<string | null>(null);
   const [catDrill, setCatDrill] = useState<{ key: string; label: string } | null>(null);
   const [mostrarDetalle, setMostrarDetalle] = useState(false);
+  const [mostrarClasif, setMostrarClasif] = useState(false);
 
-  // Insumos + proveedores una vez (para nombres y categorías).
+  // Insumos + proveedores + categorías de insumo una vez (para nombres y clasificación).
   useEffect(() => {
     let cancel = false;
     listInsumos().then((i) => !cancel && setInsumos(i)).catch(() => {});
     listProveedores().then((p) => !cancel && setProveedores(p)).catch(() => {});
+    listCategoriasInsumo().then((c) => !cancel && setCategorias(c)).catch(() => {});
     return () => { cancel = true; };
   }, []);
 
@@ -142,11 +188,11 @@ export function AnalisisCompras() {
 
   // Enriquecer cada compra (mismo patrón que Ventas): categoría del insumo,
   // proveedor, modalidad, estado de pago, monto (costo de insumos) y flete.
-  const enriquecidas = useMemo(
+  const enriquecidas = useMemo<EnrRow[]>(
     () =>
       compras.map((c) => {
         const ins = insMap.get(c.insumoId);
-        const catLabel = ins?.categoria ? categoriaInsumoLabel(ins.categoria) : "Sin categoría";
+        const catLabel = ins?.categoriaCompra?.trim() ? ins.categoriaCompra : "Sin categoría";
         return {
           id: c.id,
           fecha: c.fecha,
@@ -213,23 +259,25 @@ export function AnalisisCompras() {
   const prevTotal = useMemo(() => comprasPrev.reduce((s, c) => s + (c.precioTotalUsd || 0), 0), [comprasPrev]);
   const delta = prevTotal > 0 ? (globalTotal - prevTotal) / prevTotal : null;
 
-  const porInsumo = useMemo(() => {
-    const m = new Map<string, { id: string; nombre: string; catKey: string; catLabel: string; monto: number; veces: number }>();
-    filtradas.forEach((e) => {
-      const cur = m.get(e.insumoId) ?? { id: e.insumoId, nombre: e.insumo, catKey: e.catKey, catLabel: e.catLabel, monto: 0, veces: 0 };
-      cur.monto += e.monto; cur.veces += 1; m.set(e.insumoId, cur);
-    });
-    return Array.from(m.values()).sort((a, b) => b.monto - a.monto);
-  }, [filtradas]);
+  // Categorías excluidas de los rankings/tops (siguen contando en totales y en
+  // "por categoría"). Igual que en Ventas: p.ej. una categoría atípica que
+  // dominaría los tops. Se marca desde "Clasificar insumos".
+  const excluidasSet = useMemo(
+    () => new Set(categorias.filter((c) => c.excluirRanking).map((c) => normCat(c.nombre))),
+    [categorias],
+  );
+  const hayExcluidas = excluidasSet.size > 0;
+  const filtradasRank = useMemo(
+    () => (hayExcluidas ? filtradas.filter((e) => !excluidasSet.has(e.catKey)) : filtradas),
+    [filtradas, excluidasSet, hayExcluidas],
+  );
 
-  const porProveedor = useMemo(() => {
-    const m = new Map<string, { key: string; nombre: string; monto: number; veces: number }>();
-    filtradas.forEach((e) => {
-      const cur = m.get(e.provKey) ?? { key: e.provKey, nombre: e.proveedor, monto: 0, veces: 0 };
-      cur.monto += e.monto; cur.veces += 1; m.set(e.provKey, cur);
-    });
-    return Array.from(m.values()).sort((a, b) => b.monto - a.monto);
-  }, [filtradas]);
+  // Agregados por insumo/proveedor. La versión "…Rank" excluye las categorías
+  // marcadas como fuera de ranking; se usa en tops, Pareto y "mayor gasto".
+  const porInsumo = useMemo(() => aggInsumo(filtradas), [filtradas]);
+  const porProveedor = useMemo(() => aggProveedor(filtradas), [filtradas]);
+  const porInsumoRank = useMemo(() => (hayExcluidas ? aggInsumo(filtradasRank) : porInsumo), [filtradasRank, hayExcluidas, porInsumo]);
+  const porProveedorRank = useMemo(() => (hayExcluidas ? aggProveedor(filtradasRank) : porProveedor), [filtradasRank, hayExcluidas, porProveedor]);
 
   const porCategoria = useMemo(() => {
     const m = new Map<string, { key: string; label: string; veces: number; monto: number }>();
@@ -280,16 +328,16 @@ export function AnalisisCompras() {
 
   // Pareto 80/20: cuántos insumos concentran el 80% del gasto.
   const pareto = useMemo(() => {
-    const arr = [...porInsumo];
+    const arr = [...porInsumoRank];
     const t = arr.reduce((s, p) => s + p.monto, 0);
     let acc = 0, n = 0;
     for (const p of arr) { acc += p.monto; n++; if (t > 0 && acc / t >= 0.8) break; }
     return { n, deTotal: arr.length, pctProd: arr.length > 0 ? n / arr.length : 0 };
-  }, [porInsumo]);
+  }, [porInsumoRank]);
 
-  const topInsumos = useMemo(() => porInsumo.slice(0, topN), [porInsumo, topN]);
-  const topProveedores = useMemo(() => porProveedor.slice(0, topN), [porProveedor, topN]);
-  const concentracion = porProveedor[0] ? pct(porProveedor[0].monto) : 0;
+  const topInsumos = useMemo(() => porInsumoRank.slice(0, topN), [porInsumoRank, topN]);
+  const topProveedores = useMemo(() => porProveedorRank.slice(0, topN), [porProveedorRank, topN]);
+  const concentracion = porProveedorRank[0] ? pct(porProveedorRank[0].monto) : 0;
 
   // Drill-down: insumos de la categoría abierta.
   const drill = useMemo(() => {
@@ -342,6 +390,59 @@ export function AnalisisCompras() {
       setAsignando(null);
     }
   }
+
+  // ── Clasificar insumos (asignar categoría + gestionar la lista) ──
+  async function asignarCategoria(insumoId: string, categoria: string) {
+    setError(null);
+    try {
+      await setInsumoCategoriaCompra(insumoId, categoria || null);
+      setInsumos((prev) => prev.map((i) => (i.id === insumoId ? { ...i, categoriaCompra: categoria || undefined } : i)));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo asignar la categoría");
+    }
+  }
+  async function agregarCategoria(nombre: string) {
+    const n = nombre.trim();
+    if (!n) return;
+    setError(null);
+    try {
+      const c = await createCategoriaInsumo(n, (categorias.at(-1)?.orden ?? 0) + 10);
+      setCategorias((prev) => [...prev, c].sort((a, b) => a.orden - b.orden || a.nombre.localeCompare(b.nombre)));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo crear la categoría");
+    }
+  }
+  async function renombrarCategoria(id: string, nombreViejo: string, nombreNuevo: string) {
+    const nuevo = nombreNuevo.trim();
+    if (!nuevo || nuevo === nombreViejo) return;
+    setError(null);
+    try {
+      await renameCategoriaInsumo(id, nombreViejo, nuevo);
+      setCategorias((prev) => prev.map((c) => (c.id === id ? { ...c, nombre: nuevo } : c)));
+      setInsumos((prev) => prev.map((i) => (i.categoriaCompra === nombreViejo ? { ...i, categoriaCompra: nuevo } : i)));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo renombrar");
+    }
+  }
+  async function borrarCategoria(id: string) {
+    setError(null);
+    try {
+      await deleteCategoriaInsumo(id);
+      setCategorias((prev) => prev.filter((c) => c.id !== id));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo borrar");
+    }
+  }
+  async function toggleExcluir(id: string, excluir: boolean) {
+    setCategorias((prev) => prev.map((c) => (c.id === id ? { ...c, excluirRanking: excluir } : c)));
+    try {
+      await setCategoriaInsumoExcluirRanking(id, excluir);
+    } catch (e) {
+      setCategorias((prev) => prev.map((c) => (c.id === id ? { ...c, excluirRanking: !excluir } : c)));
+      setError(e instanceof Error ? e.message : "No se pudo actualizar");
+    }
+  }
+  const sinClasificar = useMemo(() => insumos.filter((i) => !i.categoriaCompra?.trim()).length, [insumos]);
 
   function aplicarPreset(p: Preset) {
     setPreset(p);
@@ -414,6 +515,31 @@ export function AnalisisCompras() {
 
       {error && <ErrorBanner>{error}</ErrorBanner>}
 
+      {/* ── Clasificar insumos (asigna categoría + gestiona la lista) ── */}
+      <section className="rounded-2xl bg-white ring-1 ring-marfil p-4">
+        <button type="button" onClick={() => setMostrarClasif((v) => !v)} className="w-full flex items-center justify-between gap-2 text-left">
+          <span className="flex items-center gap-2">
+            <span className="font-cinzel text-base text-cacao">Clasificar insumos</span>
+            {sinClasificar > 0 && <span className="rounded-full bg-amber-50 text-amber-800 ring-1 ring-amber-300 px-2 py-0.5 text-[10px] uppercase tracking-widest">{sinClasificar} por clasificar</span>}
+          </span>
+          <span className="flex items-center gap-2">
+            <span className="text-[11px] text-cacao-mute">{categorias.length} categorías</span>
+            <span className={`text-cacao-mute transition-transform ${mostrarClasif ? "rotate-90" : ""}`}>›</span>
+          </span>
+        </button>
+        {mostrarClasif && (
+          <ClasificarInsumos
+            insumos={insumos}
+            categorias={categorias}
+            onAsignar={asignarCategoria}
+            onCrear={agregarCategoria}
+            onRenombrar={renombrarCategoria}
+            onBorrar={borrarCategoria}
+            onExcluir={toggleExcluir}
+          />
+        )}
+      </section>
+
       {loading ? (
         <div className="rounded-2xl bg-white ring-1 ring-marfil p-12 text-center text-cacao-soft">Cargando análisis…</div>
       ) : !hayDatos ? (
@@ -427,8 +553,8 @@ export function AnalisisCompras() {
             <StatCard titulo="Compras totales" valor={fUSD(totalMonto)} sub={fleteTotal > 0 ? `+ ${fUSD(fleteTotal)} flete` : undefined} />
             <StatCard titulo="Nº de compras" valor={fUnid(nCompras)} sub={`${diasConCompra} días con compra`} />
             <StatCard titulo="Insumos distintos" valor={fUnid(porInsumo.length)} />
-            <StatCard titulo="Mayor gasto (proveedor)" valor={porProveedor[0]?.nombre ?? "—"} sub={porProveedor[0] ? fUSD(porProveedor[0].monto) : undefined} />
-            <StatCard titulo="Mayor gasto (insumo)" valor={porInsumo[0]?.nombre ?? "—"} sub={porInsumo[0] ? fUSD(porInsumo[0].monto) : undefined} />
+            <StatCard titulo="Mayor gasto (proveedor)" valor={porProveedorRank[0]?.nombre ?? "—"} sub={porProveedorRank[0] ? fUSD(porProveedorRank[0].monto) : undefined} />
+            <StatCard titulo="Mayor gasto (insumo)" valor={porInsumoRank[0]?.nombre ?? "—"} sub={porInsumoRank[0] ? fUSD(porInsumoRank[0].monto) : undefined} />
           </div>
 
           {/* ── KPIs adicionales ────────────────────────────────── */}
@@ -446,9 +572,9 @@ export function AnalisisCompras() {
           </div>
 
           {/* Insight: concentración de proveedor */}
-          {porProveedor[0] && concentracion >= 40 && (
+          {porProveedorRank[0] && concentracion >= 40 && (
             <div className="rounded-lg bg-marfil-soft ring-1 ring-marfil p-3 text-xs text-cacao-soft">
-              <strong className="text-cacao">{porProveedor[0].nombre}</strong> concentra el <strong className="text-cacao">{fPct(concentracion)}</strong> de tus compras del período.{concentracion >= 50 ? " Dependes fuerte de un solo proveedor — conviene tener alternativas." : ""}
+              <strong className="text-cacao">{porProveedorRank[0].nombre}</strong> concentra el <strong className="text-cacao">{fPct(concentracion)}</strong> de tus compras del período.{concentracion >= 50 ? " Dependes fuerte de un solo proveedor — conviene tener alternativas." : ""}
             </div>
           )}
 
@@ -708,5 +834,144 @@ function SortableTh({ label, active, onClick }: { label: string; active: boolean
         {label} {active ? "↓" : ""}
       </button>
     </th>
+  );
+}
+
+// ── Clasificar insumos (espejo de "Clasificar productos" de Ventas) ────────
+function ClasificarInsumos({
+  insumos,
+  categorias,
+  onAsignar,
+  onCrear,
+  onRenombrar,
+  onBorrar,
+  onExcluir,
+}: {
+  insumos: Insumo[];
+  categorias: CategoriaInsumo[];
+  onAsignar: (insumoId: string, categoria: string) => void;
+  onCrear: (nombre: string) => void;
+  onRenombrar: (id: string, viejo: string, nuevo: string) => void;
+  onBorrar: (id: string) => void;
+  onExcluir: (id: string, excluir: boolean) => void;
+}) {
+  const [busca, setBusca] = useState("");
+  const [soloSin, setSoloSin] = useState(false);
+  const [nuevaCat, setNuevaCat] = useState("");
+  const [editId, setEditId] = useState<string | null>(null);
+  const [editNombre, setEditNombre] = useState("");
+
+  const lista = useMemo(() => {
+    const q = busca.trim().toLowerCase();
+    return insumos
+      .filter((i) => i.activo)
+      .filter((i) => (soloSin ? !i.categoriaCompra?.trim() : true))
+      .filter((i) => (q ? i.nombre.toLowerCase().includes(q) : true))
+      .sort((a, b) => {
+        const sa = a.categoriaCompra?.trim() ? 1 : 0;
+        const sb = b.categoriaCompra?.trim() ? 1 : 0;
+        if (sa !== sb) return sa - sb; // sin clasificar primero
+        return a.nombre.localeCompare(b.nombre);
+      });
+  }, [insumos, busca, soloSin]);
+
+  return (
+    <div className="mt-3 grid grid-cols-1 lg:grid-cols-3 gap-4">
+      {/* Gestionar la lista de categorías */}
+      <div className="lg:col-span-1 rounded-xl ring-1 ring-marfil p-3">
+        <div className="text-[11px] uppercase tracking-widest text-cacao-soft mb-2">Categorías ({categorias.length})</div>
+        {categorias.length === 0 && <p className="text-[12px] text-cacao-soft italic">Aún no hay categorías. Crea la primera abajo (o corre el SQL de semilla).</p>}
+        <ul className="space-y-1 max-h-72 overflow-y-auto">
+          {categorias.map((c) => (
+            <li key={c.id} className="flex items-center gap-2 text-sm">
+              {editId === c.id ? (
+                <>
+                  <input
+                    autoFocus
+                    value={editNombre}
+                    onChange={(e) => setEditNombre(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") { onRenombrar(c.id, c.nombre, editNombre); setEditId(null); } if (e.key === "Escape") setEditId(null); }}
+                    className="flex-1 min-w-0 rounded-lg ring-1 ring-marfil px-2 py-1 text-sm"
+                  />
+                  <button type="button" onClick={() => { onRenombrar(c.id, c.nombre, editNombre); setEditId(null); }} className="text-cacao-soft hover:text-cacao text-sm" title="Guardar">✓</button>
+                  <button type="button" onClick={() => setEditId(null)} className="text-cacao-mute hover:text-cacao text-sm" title="Cancelar">✕</button>
+                </>
+              ) : (
+                <>
+                  <span className="flex-1 min-w-0 truncate text-cacao">{c.nombre}</span>
+                  <button
+                    type="button"
+                    onClick={() => onExcluir(c.id, !c.excluirRanking)}
+                    title={c.excluirRanking ? "Excluida de tops/Pareto — clic para incluir" : "Incluida en tops — clic para excluir de rankings"}
+                    className={`text-[10px] uppercase tracking-widest px-1.5 py-0.5 rounded-full ring-1 ${c.excluirRanking ? "bg-marfil-soft text-cacao-soft ring-marfil" : "text-cacao-mute ring-transparent hover:ring-marfil"}`}
+                  >
+                    {c.excluirRanking ? "sin ranking" : "ranking"}
+                  </button>
+                  <button type="button" onClick={() => { setEditId(c.id); setEditNombre(c.nombre); }} className="text-cacao-mute hover:text-cacao text-sm" title="Renombrar">✎</button>
+                  <button type="button" onClick={() => onBorrar(c.id)} className="text-cacao-mute hover:text-terracotta text-sm" title="Borrar">✕</button>
+                </>
+              )}
+            </li>
+          ))}
+        </ul>
+        <div className="flex gap-2 mt-2">
+          <input
+            value={nuevaCat}
+            onChange={(e) => setNuevaCat(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && nuevaCat.trim()) { onCrear(nuevaCat); setNuevaCat(""); } }}
+            placeholder="Nueva categoría…"
+            className="flex-1 min-w-0 rounded-lg ring-1 ring-marfil px-3 py-2 text-sm"
+          />
+          <button type="button" onClick={() => { onCrear(nuevaCat); setNuevaCat(""); }} disabled={!nuevaCat.trim()} className="rounded-lg bg-terracotta text-white px-3 py-2 text-sm disabled:opacity-40">Agregar</button>
+        </div>
+      </div>
+
+      {/* Asignar categoría a cada insumo */}
+      <div className="lg:col-span-2 rounded-xl ring-1 ring-marfil p-3">
+        <div className="flex flex-wrap items-center gap-2 mb-2">
+          <input
+            value={busca}
+            onChange={(e) => setBusca(e.target.value)}
+            placeholder="Buscar insumo…"
+            className="flex-1 min-w-[160px] rounded-lg ring-1 ring-marfil px-3 py-2 text-sm"
+          />
+          <label className="flex items-center gap-1.5 text-xs text-cacao-soft cursor-pointer">
+            <input type="checkbox" checked={soloSin} onChange={(e) => setSoloSin(e.target.checked)} className="accent-cacao" />
+            Solo sin clasificar
+          </label>
+        </div>
+        {lista.length === 0 ? (
+          <p className="text-sm text-cacao-soft italic p-4 text-center">Sin insumos que coincidan.</p>
+        ) : (
+          <div className="rounded-lg ring-1 ring-marfil overflow-hidden max-h-96 overflow-y-auto">
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 bg-white">
+                <tr className="text-cacao-mute uppercase tracking-widest text-[11px] text-left">
+                  <th className="py-1.5 px-2 font-normal">Insumo</th>
+                  <th className="py-1.5 px-2 font-normal">Categoría</th>
+                </tr>
+              </thead>
+              <tbody>
+                {lista.map((i) => (
+                  <tr key={i.id} className="border-t border-marfil">
+                    <td className="py-1 px-2 text-cacao">{i.nombre}</td>
+                    <td className="py-1 px-2">
+                      <select
+                        value={i.categoriaCompra?.trim() && categorias.some((c) => c.nombre === i.categoriaCompra) ? i.categoriaCompra : ""}
+                        onChange={(e) => onAsignar(i.id, e.target.value)}
+                        className={`rounded-lg ring-1 px-2 py-1 text-sm bg-white ${i.categoriaCompra?.trim() ? "ring-marfil text-cacao" : "ring-amber-300 text-cacao-soft"}`}
+                      >
+                        <option value="">— Sin categoría —</option>
+                        {categorias.map((c) => <option key={c.id} value={c.nombre}>{c.nombre}</option>)}
+                      </select>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
