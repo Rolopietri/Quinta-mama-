@@ -334,7 +334,7 @@ export function Dona({
     <div className="flex flex-col sm:flex-row items-center gap-5">
       {donut}
       {/* Leyenda */}
-      <ul className="flex-1 space-y-1.5 w-full">
+      <ul className="flex-1 min-w-0 space-y-1.5 w-full">
         {segmentos.map((s, i) => (
           <li
             key={s.key}
