@@ -15,6 +15,7 @@ import {
   updateCompra,
   deleteCompra,
   marcarCompraPagada,
+  marcarFacturaPagada,
   createProveedor,
   listInsumos,
   listProveedores,
@@ -212,18 +213,38 @@ export function ComprasClient() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  // Marca una compra como pagada / por pagar (no toca stock ni precio).
+  // Marca el pago (no toca stock ni precio). Una factura se paga completa: si la
+  // compra tiene N° de factura, marca TODAS las líneas de esa factura (mismo
+  // número + proveedor) de una vez; si no tiene factura, solo esa línea.
   async function marcarPagada(id: string, pagada: boolean) {
     setError(null);
+    const compra = compras.find((c) => c.id === id);
+    const numFactura = compra?.numeroFactura?.trim();
     try {
-      await marcarCompraPagada(id, pagada);
-      setCompras((prev) =>
-        prev.map((c) =>
-          c.id === id
-            ? { ...c, pagada, fechaPago: pagada ? todayISO() : undefined }
-            : c,
-        ),
-      );
+      if (numFactura) {
+        const idsAfectados = await marcarFacturaPagada(
+          numFactura,
+          compra?.proveedorId ?? null,
+          pagada,
+        );
+        const set = new Set(idsAfectados.length ? idsAfectados : [id]);
+        setCompras((prev) =>
+          prev.map((c) =>
+            set.has(c.id)
+              ? { ...c, pagada, fechaPago: pagada ? todayISO() : undefined }
+              : c,
+          ),
+        );
+      } else {
+        await marcarCompraPagada(id, pagada);
+        setCompras((prev) =>
+          prev.map((c) =>
+            c.id === id
+              ? { ...c, pagada, fechaPago: pagada ? todayISO() : undefined }
+              : c,
+          ),
+        );
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error actualizando el pago");
     }
@@ -233,6 +254,26 @@ export function ComprasClient() {
     () => insumos.find((i) => i.id === form.insumoId),
     [insumos, form.insumoId],
   );
+
+  // Una factura se paga completa: si el N° de factura que se está cargando ya
+  // existe (mismo número + proveedor), la nueva línea HEREDA su estado de pago.
+  // No tiene sentido que unas líneas de la misma factura estén pagadas y otras
+  // por pagar. `facturaLock` = la compra existente que fija ese estado (o null).
+  const facturaLock = useMemo(() => {
+    const num = form.numeroFactura.trim().toLowerCase();
+    if (!num) return null;
+    return (
+      compras.find(
+        (c) =>
+          c.id !== editingId &&
+          (c.numeroFactura ?? "").trim().toLowerCase() === num &&
+          (!form.proveedorId || c.proveedorId === form.proveedorId),
+      ) ?? null
+    );
+  }, [compras, editingId, form.numeroFactura, form.proveedorId]);
+
+  // Estado de "pagar después" efectivo: si la factura ya existe, manda su estado.
+  const pagarDespuesEfectivo = facturaLock ? !facturaLock.pagada : form.pagarDespues;
 
   // Modalidad que se paga en Bs (para sugerir la tasa correcta del día).
   const pagaEnBs =
@@ -446,7 +487,8 @@ export function ComprasClient() {
       notas: notasFinal || undefined,
       numeroFactura: form.numeroFactura.trim() || undefined,
       fleteUsd: Number(form.fleteUsd) > 0 ? Number(form.fleteUsd) : undefined,
-      pagada: !form.pagarDespues,
+      // Si la factura ya existe, hereda su estado de pago (se paga completa).
+      pagada: facturaLock ? facturaLock.pagada : !form.pagarDespues,
     };
     try {
       if (editingId) {
@@ -877,10 +919,15 @@ export function ComprasClient() {
             className="w-full rounded-lg ring-1 ring-marfil px-3 py-2"
           />
 
-          <label className="flex items-start gap-2 rounded-lg bg-marfil-soft ring-1 ring-marfil p-3 cursor-pointer">
+          <label
+            className={`flex items-start gap-2 rounded-lg bg-marfil-soft ring-1 ring-marfil p-3 ${
+              facturaLock ? "opacity-70 cursor-not-allowed" : "cursor-pointer"
+            }`}
+          >
             <input
               type="checkbox"
-              checked={form.pagarDespues}
+              checked={pagarDespuesEfectivo}
+              disabled={!!facturaLock}
               onChange={(e) =>
                 setForm({ ...form, pagarDespues: e.target.checked })
               }
@@ -894,6 +941,23 @@ export function ComprasClient() {
               </span>
             </span>
           </label>
+          {facturaLock && (
+            <p className="-mt-1 text-[12px] text-cacao-soft">
+              La factura{" "}
+              <span className="font-medium text-cacao">
+                {facturaLock.numeroFactura}
+              </span>{" "}
+              ya existe y está{" "}
+              <span
+                className={`font-medium ${
+                  facturaLock.pagada ? "text-oliva" : "text-terracotta"
+                }`}
+              >
+                {facturaLock.pagada ? "pagada" : "por pagar"}
+              </span>
+              . Esta línea hereda ese estado (una factura se paga completa).
+            </p>
+          )}
 
           <div className="flex gap-2 pt-2">
             <button
@@ -1040,8 +1104,15 @@ export function ComprasClient() {
                                 <button
                                   onClick={() => marcarPagada(c.id, true)}
                                   className="text-cacao-mute hover:text-cacao"
+                                  title={
+                                    c.numeroFactura
+                                      ? "Marca pagada toda la factura"
+                                      : undefined
+                                  }
                                 >
-                                  Marcar pagada
+                                  {c.numeroFactura
+                                    ? "Pagar factura"
+                                    : "Marcar pagada"}
                                 </button>
                               )}
                               <button

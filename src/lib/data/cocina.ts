@@ -475,6 +475,25 @@ export async function marcarCompraPagada(
   if (error) throw error;
 }
 
+/** Marca como pagada / por pagar TODAS las líneas de una misma factura (mismo
+ *  número de factura + proveedor). Una factura se paga completa, no línea por
+ *  línea. Devuelve los ids afectados para actualizar el estado local. */
+export async function marcarFacturaPagada(
+  numeroFactura: string,
+  proveedorId: string | null,
+  pagada: boolean,
+): Promise<string[]> {
+  const sb = createSupabaseBrowserClient();
+  let q = sb
+    .from("compras")
+    .update({ pagada, fecha_pago: pagada ? hoyISO() : null })
+    .eq("numero_factura", numeroFactura);
+  q = proveedorId ? q.eq("proveedor_id", proveedorId) : q.is("proveedor_id", null);
+  const { data, error } = await q.select("id");
+  if (error) throw error;
+  return (data ?? []).map((r) => (r as { id: string }).id);
+}
+
 export async function deleteCompra(id: string): Promise<void> {
   const sb = createSupabaseBrowserClient();
   const { error } = await sb.from("compras").delete().eq("id", id);
