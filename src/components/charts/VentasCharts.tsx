@@ -60,7 +60,7 @@ export function BarrasH({
         return (
           <div key={r.key} title={r.tip} className="group">
             <div className="flex items-baseline justify-between gap-3 text-xs mb-0.5">
-              <span className="text-cacao truncate">{r.label}</span>
+              <span className="text-cacao truncate min-w-0">{r.label}</span>
               <span className="text-cacao-soft tabular-nums shrink-0">
                 {format(r.value)}
               </span>
@@ -202,15 +202,23 @@ export function LineaEvolucion({
           ) : null,
         )}
       </svg>
-      {hover !== null && (
-        <div
-          className="pointer-events-none absolute -translate-x-1/2 -top-1 rounded-lg bg-cacao text-white text-[11px] px-2 py-1 shadow-lg whitespace-nowrap"
-          style={{ left: `${(x(hover) / W) * 100}%` }}
-        >
-          <div className="font-medium">{puntos[hover].tip ?? puntos[hover].label}</div>
-          <div className="tabular-nums">{format(puntos[hover].value)}</div>
-        </div>
-      )}
+      {hover !== null && (() => {
+        // Ancla el tooltip según dónde esté el punto para que NO se salga del
+        // recuadro: pegado a la izquierda cerca del inicio, a la derecha cerca
+        // del final, centrado en el medio.
+        const leftPct = (x(hover) / W) * 100;
+        const transform =
+          leftPct < 15 ? "translateX(0)" : leftPct > 85 ? "translateX(-100%)" : "translateX(-50%)";
+        return (
+          <div
+            className="pointer-events-none absolute -top-1 rounded-lg bg-cacao text-white text-[11px] px-2 py-1 shadow-lg whitespace-nowrap max-w-[70%] overflow-hidden text-ellipsis"
+            style={{ left: `${leftPct}%`, transform }}
+          >
+            <div className="font-medium truncate">{puntos[hover].tip ?? puntos[hover].label}</div>
+            <div className="tabular-nums">{format(puntos[hover].value)}</div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -298,16 +306,19 @@ export function Dona({
             );
           })}
         </svg>
-        <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-6 pointer-events-none">
-          <span className="text-[10px] uppercase tracking-widest text-cacao-mute truncate max-w-full">
-            {centroTexto}
-          </span>
-          <span className="text-lg font-cinzel text-cacao tabular-nums leading-tight">
-            {format(centroValor)}
-          </span>
-          <span className="text-[11px] text-cacao-soft tabular-nums">
-            {centroPct.toFixed(1)}%
-          </span>
+        <div className="absolute inset-0 flex flex-col items-center justify-center text-center pointer-events-none">
+          {/* Acotado al agujero de la dona para no montarse sobre el anillo. */}
+          <div className="flex flex-col items-center leading-tight" style={{ maxWidth: 118 }}>
+            <span className="text-[10px] uppercase tracking-widest text-cacao-mute truncate max-w-full">
+              {centroTexto}
+            </span>
+            <span className="text-base font-cinzel text-cacao tabular-nums truncate max-w-full">
+              {format(centroValor)}
+            </span>
+            <span className="text-[11px] text-cacao-soft tabular-nums">
+              {centroPct.toFixed(1)}%
+            </span>
+          </div>
         </div>
       </div>
       {/* Leyenda */}
@@ -325,11 +336,11 @@ export function Dona({
               className="size-2.5 rounded-full shrink-0"
               style={{ backgroundColor: s.color ?? colorPorIndice(i) }}
             />
-            <span className="text-cacao truncate flex-1">{s.label}</span>
-            <span className="text-cacao-soft tabular-nums shrink-0">
+            <span className="text-cacao truncate flex-1 min-w-0">{s.label}</span>
+            <span className="text-cacao-soft tabular-nums shrink-0 w-12 text-right">
               {((s.value / total) * 100).toFixed(1)}%
             </span>
-            <span className="text-cacao-soft tabular-nums shrink-0 w-16 text-right">
+            <span className="text-cacao-soft tabular-nums shrink-0 w-20 text-right whitespace-nowrap">
               {format(s.value)}
             </span>
           </li>
