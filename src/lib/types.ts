@@ -458,6 +458,9 @@ export type Compra = {
   notas?: string;
   /** Número de factura del proveedor (para conciliación y contabilidad). */
   numeroFactura?: string;
+  /** Flete / delivery que el proveedor cobra por traer los insumos. Suma al
+   *  total de la factura, pero NO al precio unitario del insumo. */
+  fleteUsd?: number;
   /** Estado de pago al proveedor. true = ya pagada (default). false = cuenta por
    *  pagar (pago diferido). */
   pagada: boolean;

@@ -45,6 +45,7 @@ type FormState = {
   ivaPorc: string;
   notas: string;
   numeroFactura: string;
+  fleteUsd: string;
   /** true = la factura se paga después (cuenta por pagar). */
   pagarDespues: boolean;
 };
@@ -89,6 +90,7 @@ const emptyForm: FormState = {
   ivaPorc: "16",
   notas: "",
   numeroFactura: "",
+  fleteUsd: "",
   pagarDespues: false,
 };
 
@@ -204,6 +206,7 @@ export function ComprasClient() {
       ivaPorc: "16",
       notas: c.notas ?? "",
       numeroFactura: c.numeroFactura ?? "",
+      fleteUsd: c.fleteUsd ? String(c.fleteUsd) : "",
       pagarDespues: !c.pagada,
     });
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -442,6 +445,7 @@ export function ComprasClient() {
       modalidadPago: form.modalidadPago,
       notas: notasFinal || undefined,
       numeroFactura: form.numeroFactura.trim() || undefined,
+      fleteUsd: Number(form.fleteUsd) > 0 ? Number(form.fleteUsd) : undefined,
       pagada: !form.pagarDespues,
     };
     try {
@@ -832,19 +836,38 @@ export function ComprasClient() {
             )}
           </div>
 
-          <label className="text-sm text-cacao block">
-            N° de factura{" "}
-            <span className="text-cacao-soft font-normal">(opcional)</span>
-            <input
-              type="text"
-              value={form.numeroFactura}
-              onChange={(e) =>
-                setForm({ ...form, numeroFactura: e.target.value })
-              }
-              placeholder="Ej: 00012345"
-              className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2"
-            />
-          </label>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <label className="text-sm text-cacao block">
+              N° de factura{" "}
+              <span className="text-cacao-soft font-normal">(opcional)</span>
+              <input
+                type="text"
+                value={form.numeroFactura}
+                onChange={(e) =>
+                  setForm({ ...form, numeroFactura: e.target.value })
+                }
+                placeholder="Ej: 00012345"
+                className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2"
+              />
+            </label>
+            <label className="text-sm text-cacao block">
+              Flete / delivery ($){" "}
+              <span className="text-cacao-soft font-normal">(opcional)</span>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={form.fleteUsd}
+                onChange={(e) => setForm({ ...form, fleteUsd: e.target.value })}
+                placeholder="0.00"
+                className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2"
+              />
+              <span className="text-[11px] text-cacao-mute">
+                Cargo de entrega del proveedor. Si la factura trae varios insumos,
+                ponlo en una sola línea. No infla el precio del insumo.
+              </span>
+            </label>
+          </div>
 
           <textarea
             placeholder="Notas (opcional)"
@@ -975,6 +998,11 @@ export function ComprasClient() {
                             <div className="text-cacao font-medium">
                               ${c.precioTotalUsd.toFixed(2)}
                             </div>
+                            {c.fleteUsd ? (
+                              <div className="text-xs text-cacao-soft">
+                                + flete ${c.fleteUsd.toFixed(2)}
+                              </div>
+                            ) : null}
                             {c.precioTotalBs && (
                               <div className="text-xs text-cacao-soft">
                                 Bs {c.precioTotalBs.toFixed(2)}

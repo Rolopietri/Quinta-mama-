@@ -149,6 +149,60 @@ export function AnalisisCompras() {
   const pct = (m: number) => (total > 0 ? (m / total) * 100 : 0);
   const concentracion = porProveedor[0] ? pct(porProveedor[0].monto) : 0;
 
+  // Resumen POR FACTURA: agrupa las líneas de compra por número de factura
+  // (mismo proveedor). Las que no traen factura se agrupan por proveedor+fecha.
+  // total de la factura = costo de insumos + flete.
+  const porFactura = useMemo(() => {
+    const m = new Map<
+      string,
+      {
+        key: string;
+        factura: string;
+        proveedor: string;
+        fecha: string;
+        lineas: number;
+        insumos: number;
+        flete: number;
+        total: number;
+        porPagar: boolean;
+      }
+    >();
+    compras.forEach((c) => {
+      const fact = c.numeroFactura?.trim();
+      const key = fact
+        ? `f:${fact.toLowerCase()}:${c.proveedorId ?? ""}`
+        : `sf:${c.proveedorId ?? ""}:${c.fecha}`;
+      const prov = c.proveedorId
+        ? (provMap.get(c.proveedorId) ?? "—")
+        : "Sin proveedor";
+      const cur =
+        m.get(key) ??
+        {
+          key,
+          factura: fact || "(sin factura)",
+          proveedor: prov,
+          fecha: c.fecha,
+          lineas: 0,
+          insumos: 0,
+          flete: 0,
+          total: 0,
+          porPagar: false,
+        };
+      cur.lineas += 1;
+      cur.insumos += c.precioTotalUsd || 0;
+      cur.flete += c.fleteUsd || 0;
+      cur.total += (c.precioTotalUsd || 0) + (c.fleteUsd || 0);
+      if (!c.pagada) cur.porPagar = true;
+      if (c.fecha < cur.fecha) cur.fecha = c.fecha;
+      m.set(key, cur);
+    });
+    return Array.from(m.values()).sort((a, b) => b.total - a.total);
+  }, [compras, provMap]);
+  const fleteTotal = useMemo(
+    () => compras.reduce((s, c) => s + (c.fleteUsd || 0), 0),
+    [compras],
+  );
+
   // Compras sin proveedor (para completarlas asignando uno).
   const sinProveedor = useMemo(
     () => compras
@@ -281,6 +335,54 @@ export function AnalisisCompras() {
               {proveedores.length === 0 && <p className="text-[11px] text-[#7A5A18] mt-2">No hay proveedores cargados. Crea alguno en Cocina → Proveedores para poder asignarlo.</p>}
             </PanelCard>
           )}
+
+          <PanelCard titulo={`Por factura (${porFactura.length})`}>
+            <p className="text-[11px] text-cacao-mute mb-2">
+              Cada factura resumida: costo de insumos + flete = total.
+              {fleteTotal > 0 ? ` Flete total del período: ${fUSD(fleteTotal)}.` : ""}
+            </p>
+            <div className="rounded-xl ring-1 ring-marfil overflow-hidden max-h-96 overflow-y-auto">
+              <table className="w-full text-xs">
+                <thead className="sticky top-0 bg-white">
+                  <tr className="text-cacao-mute uppercase tracking-widest text-left">
+                    <th className="py-1.5 px-2 font-normal">Factura</th>
+                    <th className="py-1.5 px-2 font-normal">Proveedor</th>
+                    <th className="py-1.5 px-2 font-normal">Fecha</th>
+                    <th className="py-1.5 px-2 font-normal text-right">Insumos</th>
+                    <th className="py-1.5 px-2 font-normal text-right">Flete</th>
+                    <th className="py-1.5 px-2 font-normal text-right">Total</th>
+                    <th className="py-1.5 px-2 font-normal">Pago</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {porFactura.map((f) => (
+                    <tr key={f.key} className="border-t border-marfil">
+                      <td className="py-1 px-2 text-cacao whitespace-nowrap">
+                        {f.factura}
+                        {f.lineas > 1 ? (
+                          <span className="text-cacao-mute"> · {f.lineas} ítems</span>
+                        ) : null}
+                      </td>
+                      <td className="py-1 px-2 text-cacao-soft">{f.proveedor}</td>
+                      <td className="py-1 px-2 text-cacao-soft whitespace-nowrap">{f.fecha}</td>
+                      <td className="py-1 px-2 text-right tabular-nums text-cacao-soft">{fUSD(f.insumos)}</td>
+                      <td className="py-1 px-2 text-right tabular-nums text-cacao-soft">{f.flete > 0 ? fUSD(f.flete) : "—"}</td>
+                      <td className="py-1 px-2 text-right tabular-nums text-cacao font-medium">{fUSD(f.total)}</td>
+                      <td className="py-1 px-2">
+                        {f.porPagar ? (
+                          <span className="text-[10px] uppercase tracking-widest px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 ring-1 ring-amber-200">
+                            Por pagar
+                          </span>
+                        ) : (
+                          <span className="text-cacao-mute">Pagada</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </PanelCard>
 
           <PanelCard titulo="Por modalidad de pago">
             <BarrasH rows={porModalidad.map((m, i) => ({ key: m.key, label: m.label, value: m.monto, color: colorPorIndice(i), tip: `${m.label}: ${fUSD(m.monto)} · ${fPct(pct(m.monto))}` }))} format={fUSD} />

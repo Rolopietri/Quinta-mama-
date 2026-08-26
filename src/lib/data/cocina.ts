@@ -362,6 +362,7 @@ type CompraRow = {
   modalidad_pago: string | null;
   notas: string | null;
   numero_factura: string | null;
+  flete_usd: number | string | null;
   pagada: boolean | null;
   fecha_pago: string | null;
 };
@@ -380,6 +381,7 @@ function rowToCompra(r: CompraRow): Compra {
     modalidadPago: (r.modalidad_pago as ModalidadPago) ?? undefined,
     notas: r.notas ?? undefined,
     numeroFactura: r.numero_factura ?? undefined,
+    fleteUsd: r.flete_usd === null ? undefined : Number(r.flete_usd),
     pagada: r.pagada ?? true,
     fechaPago: r.fecha_pago ?? undefined,
   };
@@ -433,6 +435,7 @@ export async function createCompra(input: CompraInput): Promise<Compra> {
       modalidad_pago: input.modalidadPago ?? null,
       notas: input.notas ?? null,
       numero_factura: input.numeroFactura?.trim() || null,
+      flete_usd: input.fleteUsd ?? null,
       pagada: input.pagada ?? true,
       fecha_pago:
         input.pagada === false ? null : (input.fechaPago ?? input.fecha),
