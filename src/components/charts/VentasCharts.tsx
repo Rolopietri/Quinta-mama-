@@ -331,10 +331,11 @@ export function Dona({
   }
 
   return (
-    <div className="flex flex-col sm:flex-row items-center gap-5">
+    <div className="flex flex-col items-center gap-4">
       {donut}
-      {/* Leyenda */}
-      <ul className="flex-1 min-w-0 space-y-1.5 w-full">
+      {/* Leyenda debajo de la dona, a todo el ancho: así los nombres se leen
+          completos en vez de quedar apretados al lado. */}
+      <ul className="w-full space-y-1.5">
         {segmentos.map((s, i) => (
           <li
             key={s.key}
