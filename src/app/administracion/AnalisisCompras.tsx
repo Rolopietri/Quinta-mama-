@@ -1,41 +1,87 @@
 "use client";
 
-// Análisis de Compras (insumos de Cocina). Refleja la tabla `compras` de Cocina
-// —igual que Análisis de ventas refleja `ventas`— con la MISMA lente (rango,
-// evolución, por categoría, ▲▼ vs período anterior) para que ambos se comparen
-// lado a lado. La utilidad real (ventas − costos) vive en el Resumen.
+// Análisis de Compras — módulo ESPEJO de Análisis de Ventas, adaptado a la
+// realidad de las compras (tabla `compras` de Cocina). Misma arquitectura:
+// filtros globales (período, categoría, insumo, proveedor, estado, modalidad),
+// KPIs con comparación vs período anterior, evolución, categorías con drill-down,
+// tops, segmentaciones y detalle. Cada métrica usa sus propios datos de compras;
+// no inventa nada. La utilidad real (ventas − costos) vive en el Resumen.
+
 import { useEffect, useMemo, useState } from "react";
 import type { Compra, Insumo, Proveedor } from "@/lib/types";
 import { categoriaInsumoLabel } from "@/lib/types";
-import { listComprasRango, listInsumos, listProveedores, setCompraProveedor } from "@/lib/data/cocina";
+import {
+  listComprasRango,
+  listInsumos,
+  listProveedores,
+  setCompraProveedor,
+} from "@/lib/data/cocina";
 import { hoyISO } from "@/lib/ui";
 import { ErrorBanner } from "@/components/ErrorBanner";
-import { BarrasH, LineaEvolucion, Dona, PanelCard, colorPorIndice } from "@/components/charts/VentasCharts";
+import {
+  BarrasH,
+  LineaEvolucion,
+  Dona,
+  PanelCard,
+  colorPorIndice,
+  type BarRow,
+} from "@/components/charts/VentasCharts";
 
-const fUSD = (n: number) => "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const fUnid = (n: number) => (Number.isInteger(n) ? n.toLocaleString("en-US") : n.toLocaleString("en-US", { maximumFractionDigits: 2 }));
+// ── Formato ──────────────────────────────────────────────────────────────
+const fUSD = (n: number) =>
+  "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fUnid = (n: number) =>
+  Number.isInteger(n) ? n.toLocaleString("en-US") : n.toLocaleString("en-US", { maximumFractionDigits: 2 });
 const fPct = (n: number) => `${n.toFixed(1)}%`;
+
 function isoLocal(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
-function diaCorto(iso: string): string { const [, m, d] = iso.split("-"); return `${d}/${m}`; }
+function diaCorto(iso: string): string {
+  const [, m, d] = iso.split("-");
+  return `${d}/${m}`;
+}
+// Normaliza un nombre de categoría para agrupar (sin acentos, minúsculas).
+function normCat(s: string): string {
+  return s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim().replace(/\s+/g, " ");
+}
+
 type Preset = "dia" | "semana" | "mes" | "rango";
 function rangoDePreset(preset: Preset): { desde: string; hasta: string } {
   const hoy = new Date();
   if (preset === "dia") return { desde: isoLocal(hoy), hasta: isoLocal(hoy) };
-  if (preset === "semana") { const d = new Date(hoy); d.setDate(d.getDate() - 6); return { desde: isoLocal(d), hasta: isoLocal(hoy) }; }
+  if (preset === "semana") {
+    const d = new Date(hoy);
+    d.setDate(d.getDate() - 6);
+    return { desde: isoLocal(d), hasta: isoLocal(hoy) };
+  }
   const primero = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
   return { desde: isoLocal(primero), hasta: isoLocal(hoy) };
 }
+
 const MODALIDAD: Record<string, string> = {
-  bcv_dolar: "BCV dólar", bcv_euro: "BCV euro", paralela: "Paralela", efectivo: "Efectivo", divisa: "Divisa",
+  bcv_dolar: "BCV dólar",
+  bcv_euro: "BCV euro",
+  paralela: "Paralela",
+  efectivo: "Efectivo",
+  divisa: "Divisa",
 };
+
+type OrdenTabla = "monto" | "compras";
 
 export function AnalisisCompras() {
   const [preset, setPreset] = useState<Preset>("mes");
-  const ini = rangoDePreset("mes");
-  const [desde, setDesde] = useState(ini.desde);
-  const [hasta, setHasta] = useState(ini.hasta);
+  const inicial = rangoDePreset("mes");
+  const [desde, setDesde] = useState(inicial.desde);
+  const [hasta, setHasta] = useState(inicial.hasta);
+  const [filtroCat, setFiltroCat] = useState<string>("all");
+  const [filtroIns, setFiltroIns] = useState<string>("all");
+  const [filtroProv, setFiltroProv] = useState<string>("all");
+  const [filtroEstado, setFiltroEstado] = useState<"all" | "pagada" | "porpagar">("all");
+  const [filtroModalidad, setFiltroModalidad] = useState<string>("all");
+  const [topN, setTopN] = useState<5 | 10 | 20>(5);
+  const [orden, setOrden] = useState<OrdenTabla>("monto");
+
   const [compras, setCompras] = useState<Compra[]>([]);
   const [comprasPrev, setComprasPrev] = useState<Compra[]>([]);
   const [insumos, setInsumos] = useState<Insumo[]>([]);
@@ -43,7 +89,10 @@ export function AnalisisCompras() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [asignando, setAsignando] = useState<string | null>(null);
+  const [catDrill, setCatDrill] = useState<{ key: string; label: string } | null>(null);
+  const [mostrarDetalle, setMostrarDetalle] = useState(false);
 
+  // Insumos + proveedores una vez (para nombres y categorías).
   useEffect(() => {
     let cancel = false;
     listInsumos().then((i) => !cancel && setInsumos(i)).catch(() => {});
@@ -51,18 +100,12 @@ export function AnalisisCompras() {
     return () => { cancel = true; };
   }, []);
 
-  const rangoPrev = useMemo(() => {
-    const d0 = new Date(desde + "T00:00"); const d1 = new Date(hasta + "T00:00");
-    const dias = Math.round((d1.getTime() - d0.getTime()) / 86400000) + 1;
-    const fin = new Date(d0); fin.setDate(fin.getDate() - 1);
-    const ini2 = new Date(fin); ini2.setDate(ini2.getDate() - (dias - 1));
-    return { desde: isoLocal(ini2), hasta: isoLocal(fin) };
-  }, [desde, hasta]);
-
+  // Compras del rango.
   useEffect(() => {
     let cancel = false;
-    (async () => {
-      setLoading(true); setError(null);
+    async function cargar() {
+      setLoading(true);
+      setError(null);
       try {
         const c = await listComprasRango(desde, hasta);
         if (!cancel) setCompras(c);
@@ -71,145 +114,219 @@ export function AnalisisCompras() {
       } finally {
         if (!cancel) setLoading(false);
       }
-    })();
+    }
+    cargar();
     return () => { cancel = true; };
+  }, [desde, hasta]);
+
+  // Período anterior (mismo largo, justo antes) para el ▲▼.
+  const rangoPrev = useMemo(() => {
+    const d0 = new Date(desde + "T00:00");
+    const d1 = new Date(hasta + "T00:00");
+    const dias = Math.round((d1.getTime() - d0.getTime()) / 86400000) + 1;
+    const fin = new Date(d0); fin.setDate(fin.getDate() - 1);
+    const ini = new Date(fin); ini.setDate(ini.getDate() - (dias - 1));
+    return { desde: isoLocal(ini), hasta: isoLocal(fin) };
   }, [desde, hasta]);
 
   useEffect(() => {
     let cancel = false;
-    listComprasRango(rangoPrev.desde, rangoPrev.hasta).then((c) => !cancel && setComprasPrev(c)).catch(() => !cancel && setComprasPrev([]));
+    listComprasRango(rangoPrev.desde, rangoPrev.hasta)
+      .then((c) => !cancel && setComprasPrev(c))
+      .catch(() => !cancel && setComprasPrev([]));
     return () => { cancel = true; };
   }, [rangoPrev.desde, rangoPrev.hasta]);
 
   const insMap = useMemo(() => new Map(insumos.map((i) => [i.id, i])), [insumos]);
   const provMap = useMemo(() => new Map(proveedores.map((p) => [p.id, p.nombre])), [proveedores]);
 
-  const total = useMemo(() => compras.reduce((s, c) => s + (c.precioTotalUsd || 0), 0), [compras]);
-  const totalPrev = useMemo(() => comprasPrev.reduce((s, c) => s + (c.precioTotalUsd || 0), 0), [comprasPrev]);
-  const delta = totalPrev > 0 ? (total - totalPrev) / totalPrev : null;
-  const nCompras = compras.length;
-  const compraPromedio = nCompras > 0 ? total / nCompras : 0;
-  const diasConCompra = useMemo(() => new Set(compras.map((c) => c.fecha)).size, [compras]);
+  // Enriquecer cada compra (mismo patrón que Ventas): categoría del insumo,
+  // proveedor, modalidad, estado de pago, monto (costo de insumos) y flete.
+  const enriquecidas = useMemo(
+    () =>
+      compras.map((c) => {
+        const ins = insMap.get(c.insumoId);
+        const catLabel = ins?.categoria ? categoriaInsumoLabel(ins.categoria) : "Sin categoría";
+        return {
+          id: c.id,
+          fecha: c.fecha,
+          insumoId: c.insumoId,
+          insumo: ins?.nombre ?? "—",
+          catKey: normCat(catLabel),
+          catLabel,
+          provKey: c.proveedorId ?? "sin",
+          proveedor: c.proveedorId ? (provMap.get(c.proveedorId) ?? "Proveedor") : "Sin proveedor",
+          modalidad: c.modalidadPago ?? "—",
+          pagada: c.pagada,
+          monto: c.precioTotalUsd || 0,
+          flete: c.fleteUsd || 0,
+        };
+      }),
+    [compras, insMap, provMap],
+  );
 
-  // Por insumo (top por gasto).
+  // Opciones de filtros (según lo que existe en el rango).
+  const categoriasOpciones = useMemo(() => {
+    const m = new Map<string, string>();
+    enriquecidas.forEach((e) => m.set(e.catKey, e.catLabel));
+    return Array.from(m.entries()).map(([key, label]) => ({ key, label })).sort((a, b) => a.label.localeCompare(b.label));
+  }, [enriquecidas]);
+  const insumosOpciones = useMemo(() => {
+    const base = filtroCat === "all" ? enriquecidas : enriquecidas.filter((e) => e.catKey === filtroCat);
+    return Array.from(new Set(base.map((e) => e.insumo))).sort((a, b) => a.localeCompare(b));
+  }, [enriquecidas, filtroCat]);
+  const proveedoresOpciones = useMemo(() => {
+    const m = new Map<string, string>();
+    enriquecidas.forEach((e) => m.set(e.provKey, e.proveedor));
+    return Array.from(m.entries()).map(([key, label]) => ({ key, label })).sort((a, b) => a.label.localeCompare(b.label));
+  }, [enriquecidas]);
+  const modalidadesOpciones = useMemo(() => {
+    const s = new Set(enriquecidas.map((e) => e.modalidad));
+    return Array.from(s).map((k) => ({ key: k, label: MODALIDAD[k] ?? k }));
+  }, [enriquecidas]);
+
+  // Aplicar todos los filtros (global — afecta KPIs, gráficos y tablas).
+  const filtradas = useMemo(
+    () =>
+      enriquecidas.filter(
+        (e) =>
+          (filtroCat === "all" || e.catKey === filtroCat) &&
+          (filtroIns === "all" || e.insumo === filtroIns) &&
+          (filtroProv === "all" || e.provKey === filtroProv) &&
+          (filtroEstado === "all" || (filtroEstado === "pagada" ? e.pagada : !e.pagada)) &&
+          (filtroModalidad === "all" || e.modalidad === filtroModalidad),
+      ),
+    [enriquecidas, filtroCat, filtroIns, filtroProv, filtroEstado, filtroModalidad],
+  );
+
+  // ── Agregados ────────────────────────────────────────────────────────
+  const totalMonto = useMemo(() => filtradas.reduce((s, e) => s + e.monto, 0), [filtradas]);
+  const fleteTotal = useMemo(() => filtradas.reduce((s, e) => s + e.flete, 0), [filtradas]);
+  const nCompras = filtradas.length;
+  const diasConCompra = useMemo(() => new Set(filtradas.map((e) => e.fecha)).size, [filtradas]);
+  const compraPromedio = nCompras > 0 ? totalMonto / nCompras : 0;
+  const compraPromedioDia = diasConCompra > 0 ? totalMonto / diasConCompra : 0;
+  const pct = (m: number) => (totalMonto > 0 ? (m / totalMonto) * 100 : 0);
+
+  // Comparación vs período anterior (global, sin filtros — igual que Ventas).
+  const globalTotal = useMemo(() => compras.reduce((s, c) => s + (c.precioTotalUsd || 0), 0), [compras]);
+  const prevTotal = useMemo(() => comprasPrev.reduce((s, c) => s + (c.precioTotalUsd || 0), 0), [comprasPrev]);
+  const delta = prevTotal > 0 ? (globalTotal - prevTotal) / prevTotal : null;
+
   const porInsumo = useMemo(() => {
-    const m = new Map<string, { id: string; nombre: string; monto: number; veces: number }>();
-    for (const c of compras) {
-      const ins = insMap.get(c.insumoId);
-      const nombre = ins?.nombre ?? "—";
-      const cur = m.get(c.insumoId) ?? { id: c.insumoId, nombre, monto: 0, veces: 0 };
-      cur.monto += c.precioTotalUsd || 0; cur.veces += 1; m.set(c.insumoId, cur);
-    }
+    const m = new Map<string, { id: string; nombre: string; catKey: string; catLabel: string; monto: number; veces: number }>();
+    filtradas.forEach((e) => {
+      const cur = m.get(e.insumoId) ?? { id: e.insumoId, nombre: e.insumo, catKey: e.catKey, catLabel: e.catLabel, monto: 0, veces: 0 };
+      cur.monto += e.monto; cur.veces += 1; m.set(e.insumoId, cur);
+    });
     return Array.from(m.values()).sort((a, b) => b.monto - a.monto);
-  }, [compras, insMap]);
+  }, [filtradas]);
 
-  // Por proveedor.
   const porProveedor = useMemo(() => {
-    const m = new Map<string, { key: string; nombre: string; monto: number }>();
-    for (const c of compras) {
-      const key = c.proveedorId ?? "sin";
-      const nombre = c.proveedorId ? (provMap.get(c.proveedorId) ?? "Proveedor") : "Sin proveedor";
-      const cur = m.get(key) ?? { key, nombre, monto: 0 };
-      cur.monto += c.precioTotalUsd || 0; m.set(key, cur);
-    }
+    const m = new Map<string, { key: string; nombre: string; monto: number; veces: number }>();
+    filtradas.forEach((e) => {
+      const cur = m.get(e.provKey) ?? { key: e.provKey, nombre: e.proveedor, monto: 0, veces: 0 };
+      cur.monto += e.monto; cur.veces += 1; m.set(e.provKey, cur);
+    });
     return Array.from(m.values()).sort((a, b) => b.monto - a.monto);
-  }, [compras, provMap]);
+  }, [filtradas]);
 
-  // Por categoría del insumo.
   const porCategoria = useMemo(() => {
-    const m = new Map<string, { key: string; label: string; monto: number }>();
-    for (const c of compras) {
-      const ins = insMap.get(c.insumoId);
-      const label = ins?.categoria ? categoriaInsumoLabel(ins.categoria) : "Sin categoría";
-      const key = label.toLowerCase();
-      const cur = m.get(key) ?? { key, label, monto: 0 };
-      cur.monto += c.precioTotalUsd || 0; m.set(key, cur);
-    }
+    const m = new Map<string, { key: string; label: string; veces: number; monto: number }>();
+    filtradas.forEach((e) => {
+      const cur = m.get(e.catKey) ?? { key: e.catKey, label: e.catLabel, veces: 0, monto: 0 };
+      cur.veces += 1; cur.monto += e.monto; m.set(e.catKey, cur);
+    });
     return Array.from(m.values()).sort((a, b) => b.monto - a.monto);
-  }, [compras, insMap]);
+  }, [filtradas]);
 
-  // Por modalidad de pago.
   const porModalidad = useMemo(() => {
     const m = new Map<string, number>();
-    for (const c of compras) { const k = c.modalidadPago ?? "—"; m.set(k, (m.get(k) ?? 0) + (c.precioTotalUsd || 0)); }
+    filtradas.forEach((e) => m.set(e.modalidad, (m.get(e.modalidad) ?? 0) + e.monto));
     return Array.from(m.entries()).map(([k, monto]) => ({ key: k, label: MODALIDAD[k] ?? k, monto })).sort((a, b) => b.monto - a.monto);
-  }, [compras]);
+  }, [filtradas]);
 
-  // Evolución diaria.
+  const porEstado = useMemo(() => {
+    let pagada = 0, porPagar = 0;
+    filtradas.forEach((e) => { if (e.pagada) pagada += e.monto; else porPagar += e.monto; });
+    return { pagada, porPagar };
+  }, [filtradas]);
+  const porPagarN = useMemo(() => filtradas.filter((e) => !e.pagada).length, [filtradas]);
+
+  // Evolución diaria (todos los días del rango, 0 si no hubo compras).
   const porDia = useMemo(() => {
     const acc = new Map<string, number>();
-    compras.forEach((c) => acc.set(c.fecha, (acc.get(c.fecha) ?? 0) + (c.precioTotalUsd || 0)));
+    filtradas.forEach((e) => acc.set(e.fecha, (acc.get(e.fecha) ?? 0) + e.monto));
     const dias: { label: string; value: number; tip: string }[] = [];
     const d = new Date(desde + "T00:00"); const fin = new Date(hasta + "T00:00");
     let guard = 0;
-    while (d <= fin && guard < 400) { const iso = isoLocal(d); dias.push({ label: diaCorto(iso), value: acc.get(iso) ?? 0, tip: iso }); d.setDate(d.getDate() + 1); guard++; }
+    while (d <= fin && guard < 400) {
+      const iso = isoLocal(d);
+      dias.push({ label: diaCorto(iso), value: acc.get(iso) ?? 0, tip: iso });
+      d.setDate(d.getDate() + 1); guard++;
+    }
     return dias;
-  }, [compras, desde, hasta]);
+  }, [filtradas, desde, hasta]);
 
-  const pct = (m: number) => (total > 0 ? (m / total) * 100 : 0);
+  const porDiaSemana = useMemo(() => {
+    const nombres = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
+    const monto = new Array(7).fill(0);
+    filtradas.forEach((e) => {
+      const dow = (new Date(e.fecha + "T00:00").getDay() + 6) % 7;
+      monto[dow] += e.monto;
+    });
+    return nombres.map((label, i) => ({ key: label, label, value: monto[i] }));
+  }, [filtradas]);
+
+  // Pareto 80/20: cuántos insumos concentran el 80% del gasto.
+  const pareto = useMemo(() => {
+    const arr = [...porInsumo];
+    const t = arr.reduce((s, p) => s + p.monto, 0);
+    let acc = 0, n = 0;
+    for (const p of arr) { acc += p.monto; n++; if (t > 0 && acc / t >= 0.8) break; }
+    return { n, deTotal: arr.length, pctProd: arr.length > 0 ? n / arr.length : 0 };
+  }, [porInsumo]);
+
+  const topInsumos = useMemo(() => porInsumo.slice(0, topN), [porInsumo, topN]);
+  const topProveedores = useMemo(() => porProveedor.slice(0, topN), [porProveedor, topN]);
   const concentracion = porProveedor[0] ? pct(porProveedor[0].monto) : 0;
 
-  // Resumen POR FACTURA: agrupa las líneas de compra por número de factura
-  // (mismo proveedor). Las que no traen factura se agrupan por proveedor+fecha.
-  // total de la factura = costo de insumos + flete.
+  // Drill-down: insumos de la categoría abierta.
+  const drill = useMemo(() => {
+    if (!catDrill) return null;
+    const items = porInsumo.filter((p) => p.catKey === catDrill.key);
+    const total = items.reduce((s, p) => s + p.monto, 0);
+    return { items: [...items].sort((a, b) => b.monto - a.monto), total };
+  }, [catDrill, porInsumo]);
+
+  const tablaOrdenada = useMemo(() => {
+    const arr = [...porInsumo];
+    arr.sort((a, b) => (orden === "compras" ? b.veces - a.veces : b.monto - a.monto));
+    return arr;
+  }, [porInsumo, orden]);
+
+  // Resumen POR FACTURA (compras-específico, se conserva): agrupa por número de
+  // factura (mismo proveedor); las sin factura por proveedor+fecha. Respeta los
+  // filtros activos. total = insumos + flete.
   const porFactura = useMemo(() => {
-    const m = new Map<
-      string,
-      {
-        key: string;
-        factura: string;
-        proveedor: string;
-        fecha: string;
-        lineas: number;
-        insumos: number;
-        flete: number;
-        total: number;
-        porPagar: boolean;
-      }
-    >();
-    compras.forEach((c) => {
-      const fact = c.numeroFactura?.trim();
-      const key = fact
-        ? `f:${fact.toLowerCase()}:${c.proveedorId ?? ""}`
-        : `sf:${c.proveedorId ?? ""}:${c.fecha}`;
-      const prov = c.proveedorId
-        ? (provMap.get(c.proveedorId) ?? "—")
-        : "Sin proveedor";
-      const cur =
-        m.get(key) ??
-        {
-          key,
-          factura: fact || "(sin factura)",
-          proveedor: prov,
-          fecha: c.fecha,
-          lineas: 0,
-          insumos: 0,
-          flete: 0,
-          total: 0,
-          porPagar: false,
-        };
-      cur.lineas += 1;
-      cur.insumos += c.precioTotalUsd || 0;
-      cur.flete += c.fleteUsd || 0;
-      cur.total += (c.precioTotalUsd || 0) + (c.fleteUsd || 0);
-      if (!c.pagada) cur.porPagar = true;
-      if (c.fecha < cur.fecha) cur.fecha = c.fecha;
+    const m = new Map<string, { key: string; factura: string; proveedor: string; fecha: string; lineas: number; insumos: number; flete: number; total: number; porPagar: boolean }>();
+    filtradas.forEach((e) => {
+      const c = compras.find((x) => x.id === e.id);
+      const fact = c?.numeroFactura?.trim();
+      const key = fact ? `f:${fact.toLowerCase()}:${e.provKey}` : `sf:${e.provKey}:${e.fecha}`;
+      const cur = m.get(key) ?? { key, factura: fact || "(sin factura)", proveedor: e.proveedor, fecha: e.fecha, lineas: 0, insumos: 0, flete: 0, total: 0, porPagar: false };
+      cur.lineas += 1; cur.insumos += e.monto; cur.flete += e.flete; cur.total += e.monto + e.flete;
+      if (!e.pagada) cur.porPagar = true;
+      if (e.fecha < cur.fecha) cur.fecha = e.fecha;
       m.set(key, cur);
     });
     return Array.from(m.values()).sort((a, b) => b.total - a.total);
-  }, [compras, provMap]);
-  const fleteTotal = useMemo(
-    () => compras.reduce((s, c) => s + (c.fleteUsd || 0), 0),
-    [compras],
-  );
+  }, [filtradas, compras]);
 
-  // Compras sin proveedor (para completarlas asignando uno).
+  // Compras sin proveedor (para completarlas asignando uno) — se conserva.
   const sinProveedor = useMemo(
-    () => compras
-      .filter((c) => !c.proveedorId)
-      .map((c) => ({ id: c.id, fecha: c.fecha, monto: c.precioTotalUsd || 0, insumo: insMap.get(c.insumoId)?.nombre ?? "—" }))
-      .sort((a, b) => b.fecha.localeCompare(a.fecha) || b.monto - a.monto),
-    [compras, insMap],
+    () => filtradas.filter((e) => e.provKey === "sin").map((e) => ({ id: e.id, fecha: e.fecha, monto: e.monto, insumo: e.insumo })).sort((a, b) => b.fecha.localeCompare(a.fecha) || b.monto - a.monto),
+    [filtradas],
   );
   const totalSinProv = useMemo(() => sinProveedor.reduce((s, c) => s + c.monto, 0), [sinProveedor]);
 
@@ -230,12 +347,27 @@ export function AnalisisCompras() {
     setPreset(p);
     if (p !== "rango") { const r = rangoDePreset(p); setDesde(r.desde); setHasta(r.hasta); }
   }
+  function limpiarFiltros() {
+    setPreset("mes");
+    const r = rangoDePreset("mes");
+    setDesde(r.desde); setHasta(r.hasta);
+    setFiltroCat("all"); setFiltroIns("all"); setFiltroProv("all");
+    setFiltroEstado("all"); setFiltroModalidad("all");
+    setTopN(5); setOrden("monto");
+  }
+  const hayFiltro = filtroCat !== "all" || filtroIns !== "all" || filtroProv !== "all" || filtroEstado !== "all" || filtroModalidad !== "all" || preset !== "mes";
   const pill = (active: boolean) => `px-3 py-1 rounded-full text-[11px] uppercase tracking-widest ring-1 ${active ? "bg-cacao text-white ring-cacao" : "bg-white text-cacao-soft ring-marfil hover:bg-marfil-soft"}`;
-  const hayDatos = compras.length > 0;
+  const selCls = "rounded-lg ring-1 ring-marfil px-2 py-1.5 text-sm bg-white";
+  const hayDatos = filtradas.length > 0;
+
+  // Fila de barra para un insumo/proveedor (con tooltip).
+  function barIns(p: { id?: string; key?: string; nombre: string; monto: number; veces: number }, i: number): BarRow {
+    return { key: p.id ?? p.key ?? p.nombre, label: p.nombre, value: p.monto, color: colorPorIndice(i), tip: `${p.nombre}: ${fUSD(p.monto)} · ${p.veces} compra(s) · ${fPct(pct(p.monto))} del total` };
+  }
 
   return (
     <div className="space-y-5">
-      {/* Filtros */}
+      {/* ── Filtros ─────────────────────────────────────────────── */}
       <section className="rounded-2xl bg-white ring-1 ring-marfil p-4 space-y-3">
         <div className="flex flex-wrap items-center gap-2">
           {(["dia", "semana", "mes", "rango"] as Preset[]).map((p) => (
@@ -252,51 +384,192 @@ export function AnalisisCompras() {
             </label>
           </div>
         </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <select value={filtroCat} onChange={(e) => { setFiltroCat(e.target.value); setFiltroIns("all"); }} className={selCls}>
+            <option value="all">Todas las categorías</option>
+            {categoriasOpciones.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+          </select>
+          <select value={filtroIns} onChange={(e) => setFiltroIns(e.target.value)} className={`${selCls} max-w-[220px]`}>
+            <option value="all">Todos los insumos</option>
+            {insumosOpciones.map((p) => <option key={p} value={p}>{p}</option>)}
+          </select>
+          <select value={filtroProv} onChange={(e) => setFiltroProv(e.target.value)} className={`${selCls} max-w-[200px]`}>
+            <option value="all">Todos los proveedores</option>
+            {proveedoresOpciones.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
+          </select>
+          <select value={filtroEstado} onChange={(e) => setFiltroEstado(e.target.value as "all" | "pagada" | "porpagar")} className={selCls}>
+            <option value="all">Todos los estados</option>
+            <option value="pagada">Pagadas</option>
+            <option value="porpagar">Por pagar</option>
+          </select>
+          <select value={filtroModalidad} onChange={(e) => setFiltroModalidad(e.target.value)} className={selCls}>
+            <option value="all">Toda modalidad</option>
+            {modalidadesOpciones.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
+          </select>
+          {hayFiltro && (
+            <button type="button" onClick={limpiarFiltros} className="text-xs uppercase tracking-widest text-cacao-soft hover:text-terracotta">↺ Limpiar filtros</button>
+          )}
+        </div>
       </section>
 
       {error && <ErrorBanner>{error}</ErrorBanner>}
 
       {loading ? (
-        <div className="rounded-2xl bg-white ring-1 ring-marfil p-12 text-center text-cacao-soft">Cargando compras…</div>
+        <div className="rounded-2xl bg-white ring-1 ring-marfil p-12 text-center text-cacao-soft">Cargando análisis…</div>
       ) : !hayDatos ? (
         <div className="rounded-2xl bg-white ring-1 ring-marfil p-12 text-center">
-          <p className="font-serif italic text-cacao-soft">No hay compras de insumos registradas en el período. Se registran en Cocina → Compras y aquí se reflejan.</p>
+          <p className="font-serif italic text-cacao-soft">No hay compras en el período{hayFiltro ? " / filtro" : ""} seleccionado. Las compras se registran en Cocina → Compras y aquí se reflejan.</p>
         </div>
       ) : (
         <>
+          {/* ── Resumen ─────────────────────────────────────────── */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-            <Card titulo="Compras totales" valor={fUSD(total)} />
-            <Card titulo="vs período anterior" valor={delta == null ? "—" : `${delta >= 0 ? "▲" : "▼"} ${fPct(Math.abs(delta) * 100)}`} sub={totalPrev > 0 ? `antes ${fUSD(totalPrev)}` : "sin datos previos"} tono={delta == null ? undefined : delta >= 0 ? "alerta" : "bien"} />
-            <Card titulo="Nº de compras" valor={fUnid(nCompras)} sub={`${diasConCompra} días con compra`} />
-            <Card titulo="Compra promedio" valor={fUSD(compraPromedio)} />
-            <Card titulo="Insumos distintos" valor={fUnid(porInsumo.length)} />
+            <StatCard titulo="Compras totales" valor={fUSD(totalMonto)} sub={fleteTotal > 0 ? `+ ${fUSD(fleteTotal)} flete` : undefined} />
+            <StatCard titulo="Nº de compras" valor={fUnid(nCompras)} sub={`${diasConCompra} días con compra`} />
+            <StatCard titulo="Insumos distintos" valor={fUnid(porInsumo.length)} />
+            <StatCard titulo="Mayor gasto (proveedor)" valor={porProveedor[0]?.nombre ?? "—"} sub={porProveedor[0] ? fUSD(porProveedor[0].monto) : undefined} />
+            <StatCard titulo="Mayor gasto (insumo)" valor={porInsumo[0]?.nombre ?? "—"} sub={porInsumo[0] ? fUSD(porInsumo[0].monto) : undefined} />
           </div>
 
+          {/* ── KPIs adicionales ────────────────────────────────── */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+            <StatCard
+              titulo="vs período anterior"
+              valor={delta == null ? "—" : `${delta >= 0 ? "▲" : "▼"} ${fPct(Math.abs(delta) * 100)}`}
+              sub={prevTotal > 0 ? `antes ${fUSD(prevTotal)}` : "sin datos previos"}
+              tono={delta == null ? undefined : delta >= 0 ? "alerta" : "bien"}
+            />
+            <StatCard titulo="Compra prom./día" valor={fUSD(compraPromedioDia)} sub={`${diasConCompra} días`} />
+            <StatCard titulo="Costo prom./compra" valor={fUSD(compraPromedio)} />
+            <StatCard titulo="Concentración 80/20" valor={pareto.deTotal > 0 ? `${pareto.n} de ${pareto.deTotal}` : "—"} sub={pareto.deTotal > 0 ? `${fPct(pareto.pctProd * 100)} de insumos = 80% del gasto` : undefined} />
+            <StatCard titulo="Por pagar" valor={fUSD(porEstado.porPagar)} sub={`${porPagarN} compra(s) pendiente(s)`} tono={porEstado.porPagar > 0 ? "alerta" : undefined} />
+          </div>
+
+          {/* Insight: concentración de proveedor */}
+          {porProveedor[0] && concentracion >= 40 && (
+            <div className="rounded-lg bg-marfil-soft ring-1 ring-marfil p-3 text-xs text-cacao-soft">
+              <strong className="text-cacao">{porProveedor[0].nombre}</strong> concentra el <strong className="text-cacao">{fPct(concentracion)}</strong> de tus compras del período.{concentracion >= 50 ? " Dependes fuerte de un solo proveedor — conviene tener alternativas." : ""}
+            </div>
+          )}
+
+          {/* ── Evolución ───────────────────────────────────────── */}
           <PanelCard titulo="Evolución de compras (por día)">
             <LineaEvolucion puntos={porDia} format={fUSD} />
           </PanelCard>
 
+          {/* ── Categorías ──────────────────────────────────────── */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <PanelCard titulo="Compras por categoría de insumo">
-              <BarrasH rows={porCategoria.map((c, i) => ({ key: c.key, label: c.label, value: c.monto, color: colorPorIndice(i), tip: `${c.label}: ${fUSD(c.monto)} · ${fPct(pct(c.monto))}` }))} format={fUSD} />
+              <BarrasH rows={porCategoria.map((c, i) => ({ key: c.key, label: c.label, value: c.monto, color: colorPorIndice(i), tip: `${c.label}: ${fUSD(c.monto)} · ${fPct(pct(c.monto))} del total` }))} format={fUSD} />
+              <p className="mt-3 text-[11px] text-cacao-mute">Toca una categoría para ver el desglose de sus insumos.</p>
+              <div className="mt-1 overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-cacao-mute uppercase tracking-widest text-left">
+                      <th className="py-1 font-normal">Categoría</th>
+                      <th className="py-1 font-normal text-right">Compras</th>
+                      <th className="py-1 font-normal text-right">Gasto</th>
+                      <th className="py-1 font-normal text-right">%</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {porCategoria.map((c) => (
+                      <tr key={c.key} onClick={() => setCatDrill({ key: c.key, label: c.label })} className={`border-t border-marfil cursor-pointer hover:bg-marfil-soft ${catDrill?.key === c.key ? "bg-marfil-soft" : ""}`}>
+                        <td className="py-1 text-cacao"><span className="inline-flex items-center gap-1">{c.label}<span className="text-cacao-mute">›</span></span></td>
+                        <td className="py-1 text-right tabular-nums text-cacao-soft">{fUnid(c.veces)}</td>
+                        <td className="py-1 text-right tabular-nums text-cacao">{fUSD(c.monto)}</td>
+                        <td className="py-1 text-right tabular-nums text-cacao-soft">{fPct(pct(c.monto))}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </PanelCard>
-            <PanelCard titulo="Distribución por categoría">
+
+            <PanelCard titulo="Distribución por categoría (gasto)">
               <Dona segmentos={porCategoria.map((c, i) => ({ key: c.key, label: c.label, value: c.monto, color: colorPorIndice(i) }))} format={fUSD} />
             </PanelCard>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <PanelCard titulo="Top proveedores (gasto)">
-              <BarrasH rows={porProveedor.slice(0, 8).map((p, i) => ({ key: p.key, label: p.nombre, value: p.monto, color: colorPorIndice(i), tip: `${p.nombre}: ${fUSD(p.monto)} · ${fPct(pct(p.monto))}` }))} format={fUSD} />
-              {porProveedor[0] && (
-                <p className="mt-3 text-[11px] text-cacao-mute">Concentración: <strong className="text-cacao">{porProveedor[0].nombre}</strong> es el {fPct(concentracion)} de tus compras.{concentracion >= 50 ? " Dependes fuerte de un solo proveedor." : ""}</p>
+          {/* ── Desglose de la categoría seleccionada (drill-down) ── */}
+          {catDrill && drill && (
+            <section className="rounded-2xl bg-white ring-1 ring-terracotta/40 p-4">
+              <div className="flex items-center justify-between gap-2 mb-1">
+                <h3 className="font-cinzel text-base text-cacao">Desglose: {catDrill.label}</h3>
+                <button type="button" onClick={() => setCatDrill(null)} className="text-xs uppercase tracking-widest text-cacao-soft hover:text-terracotta">✕ Cerrar</button>
+              </div>
+              <p className="text-[11px] text-cacao-mute mb-3">{fUSD(drill.total)} en {drill.items.length} insumos. El % es dentro de esta categoría.</p>
+              {drill.items.length === 0 ? (
+                <p className="text-sm text-cacao-soft italic">Sin insumos en esta categoría en el período.</p>
+              ) : (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  <Dona segmentos={drill.items.map((p, i) => ({ key: p.id, label: p.nombre, value: p.monto, color: colorPorIndice(i) }))} format={fUSD} />
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="text-cacao-mute uppercase tracking-widest text-left">
+                          <th className="py-1 font-normal">Insumo</th>
+                          <th className="py-1 font-normal text-right">Compras</th>
+                          <th className="py-1 font-normal text-right">Gasto</th>
+                          <th className="py-1 font-normal text-right">% cat.</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {drill.items.map((p) => (
+                          <tr key={p.id} className="border-t border-marfil">
+                            <td className="py-1 text-cacao">{p.nombre}</td>
+                            <td className="py-1 text-right tabular-nums text-cacao-soft">{fUnid(p.veces)}</td>
+                            <td className="py-1 text-right tabular-nums text-cacao">{fUSD(p.monto)}</td>
+                            <td className="py-1 text-right tabular-nums text-cacao-soft">{fPct(drill.total > 0 ? (p.monto / drill.total) * 100 : 0)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
               )}
+            </section>
+          )}
+
+          {/* ── Top selector + tops ─────────────────────────────── */}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs uppercase tracking-widest text-cacao-mute">Mostrar</span>
+            {([5, 10, 20] as const).map((n) => (
+              <button key={n} type="button" onClick={() => setTopN(n)} className={pill(topN === n)}>Top {n}</button>
+            ))}
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <PanelCard titulo={`Top ${topN} proveedores (gasto)`}>
+              <BarrasH rows={topProveedores.map((p, i) => barIns(p, i))} format={fUSD} emptyLabel="Sin proveedores en el período." />
             </PanelCard>
-            <PanelCard titulo="Top insumos por gasto">
-              <BarrasH rows={porInsumo.slice(0, 10).map((p, i) => ({ key: p.id, label: p.nombre, value: p.monto, color: colorPorIndice(i), tip: `${p.nombre}: ${fUSD(p.monto)} · ${p.veces} compra(s)` }))} format={fUSD} />
+            <PanelCard titulo={`Top ${topN} insumos (gasto)`}>
+              <BarrasH rows={topInsumos.map((p, i) => barIns(p, i))} format={fUSD} />
             </PanelCard>
           </div>
 
+          {/* ── Ritmo y estado ──────────────────────────────────── */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <PanelCard titulo="Compras por día de la semana">
+              <BarrasH rows={porDiaSemana.map((d, i) => ({ key: d.key, label: d.label, value: d.value, color: colorPorIndice(i), tip: `${d.label}: ${fUSD(d.value)}` }))} format={fUSD} />
+            </PanelCard>
+            <PanelCard titulo="Pagadas vs por pagar">
+              <Dona
+                segmentos={[
+                  { key: "pagada", label: "Pagadas", value: porEstado.pagada, color: "#4B7A2F" },
+                  { key: "porpagar", label: "Por pagar", value: porEstado.porPagar, color: "#C9A24B" },
+                ]}
+                format={fUSD}
+              />
+              <p className="mt-2 text-[11px] text-cacao-mute">{porPagarN > 0 ? `Tienes ${fUSD(porEstado.porPagar)} pendientes de pago en ${porPagarN} compra(s).` : "Todo el período está pagado."}</p>
+            </PanelCard>
+          </div>
+
+          {/* ── Modalidad de pago ───────────────────────────────── */}
+          <PanelCard titulo="Compras por modalidad de pago">
+            <BarrasH rows={porModalidad.map((m, i) => ({ key: m.key, label: m.label, value: m.monto, color: colorPorIndice(i), tip: `${m.label}: ${fUSD(m.monto)} · ${fPct(pct(m.monto))}` }))} format={fUSD} />
+          </PanelCard>
+
+          {/* ── Compras sin proveedor (asignar inline) ──────────── */}
           {sinProveedor.length > 0 && (
             <PanelCard titulo={`Compras sin proveedor (${sinProveedor.length})`}>
               <p className="text-[11px] text-cacao-mute mb-2">{fUSD(totalSinProv)} sin proveedor asignado. Elige uno en cada fila para completarlas — se guarda al instante (no afecta stock ni precio).</p>
@@ -317,12 +590,7 @@ export function AnalisisCompras() {
                         <td className="py-1 px-2 text-cacao">{c.insumo}</td>
                         <td className="py-1 px-2 text-right tabular-nums text-cacao">{fUSD(c.monto)}</td>
                         <td className="py-1 px-2">
-                          <select
-                            defaultValue=""
-                            disabled={asignando === c.id || proveedores.length === 0}
-                            onChange={(e) => asignarProveedor(c.id, e.target.value)}
-                            className="rounded-lg ring-1 ring-marfil px-2 py-1 text-xs bg-white disabled:opacity-50"
-                          >
+                          <select defaultValue="" disabled={asignando === c.id || proveedores.length === 0} onChange={(e) => asignarProveedor(c.id, e.target.value)} className="rounded-lg ring-1 ring-marfil px-2 py-1 text-xs bg-white disabled:opacity-50">
                             <option value="">{asignando === c.id ? "Guardando…" : "Elegir…"}</option>
                             {proveedores.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
                           </select>
@@ -336,11 +604,9 @@ export function AnalisisCompras() {
             </PanelCard>
           )}
 
+          {/* ── Por factura ─────────────────────────────────────── */}
           <PanelCard titulo={`Por factura (${porFactura.length})`}>
-            <p className="text-[11px] text-cacao-mute mb-2">
-              Cada factura resumida: costo de insumos + flete = total.
-              {fleteTotal > 0 ? ` Flete total del período: ${fUSD(fleteTotal)}.` : ""}
-            </p>
+            <p className="text-[11px] text-cacao-mute mb-2">Cada factura resumida: costo de insumos + flete = total.{fleteTotal > 0 ? ` Flete total del período: ${fUSD(fleteTotal)}.` : ""}</p>
             <div className="rounded-xl ring-1 ring-marfil overflow-hidden max-h-96 overflow-y-auto">
               <table className="w-full text-xs">
                 <thead className="sticky top-0 bg-white">
@@ -357,26 +623,13 @@ export function AnalisisCompras() {
                 <tbody>
                   {porFactura.map((f) => (
                     <tr key={f.key} className="border-t border-marfil">
-                      <td className="py-1 px-2 text-cacao whitespace-nowrap">
-                        {f.factura}
-                        {f.lineas > 1 ? (
-                          <span className="text-cacao-mute"> · {f.lineas} ítems</span>
-                        ) : null}
-                      </td>
+                      <td className="py-1 px-2 text-cacao whitespace-nowrap">{f.factura}{f.lineas > 1 ? <span className="text-cacao-mute"> · {f.lineas} ítems</span> : null}</td>
                       <td className="py-1 px-2 text-cacao-soft">{f.proveedor}</td>
                       <td className="py-1 px-2 text-cacao-soft whitespace-nowrap">{f.fecha}</td>
                       <td className="py-1 px-2 text-right tabular-nums text-cacao-soft">{fUSD(f.insumos)}</td>
                       <td className="py-1 px-2 text-right tabular-nums text-cacao-soft">{f.flete > 0 ? fUSD(f.flete) : "—"}</td>
                       <td className="py-1 px-2 text-right tabular-nums text-cacao font-medium">{fUSD(f.total)}</td>
-                      <td className="py-1 px-2">
-                        {f.porPagar ? (
-                          <span className="text-[10px] uppercase tracking-widest px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 ring-1 ring-amber-200">
-                            Por pagar
-                          </span>
-                        ) : (
-                          <span className="text-cacao-mute">Pagada</span>
-                        )}
-                      </td>
+                      <td className="py-1 px-2">{f.porPagar ? <span className="text-[10px] uppercase tracking-widest px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 ring-1 ring-amber-200">Por pagar</span> : <span className="text-cacao-mute">Pagada</span>}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -384,9 +637,50 @@ export function AnalisisCompras() {
             </div>
           </PanelCard>
 
-          <PanelCard titulo="Por modalidad de pago">
-            <BarrasH rows={porModalidad.map((m, i) => ({ key: m.key, label: m.label, value: m.monto, color: colorPorIndice(i), tip: `${m.label}: ${fUSD(m.monto)} · ${fPct(pct(m.monto))}` }))} format={fUSD} />
-          </PanelCard>
+          {/* ── Detalle por insumo (plegable, ordenable) ────────── */}
+          <section className="rounded-2xl bg-white ring-1 ring-marfil p-4">
+            <button type="button" onClick={() => setMostrarDetalle((v) => !v)} className="w-full flex items-center justify-between gap-2 text-left">
+              <span className="font-cinzel text-base text-cacao">Detalle por insumo</span>
+              <span className="flex items-center gap-2">
+                <span className="text-[11px] text-cacao-mute">{porInsumo.length} insumos</span>
+                <span className={`text-cacao-mute transition-transform ${mostrarDetalle ? "rotate-90" : ""}`}>›</span>
+              </span>
+            </button>
+            {mostrarDetalle && (
+              <div className="mt-3 overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-cacao-mute uppercase tracking-widest text-[11px] text-left">
+                      <th className="py-2 font-normal">Insumo</th>
+                      <th className="py-2 font-normal">Categoría</th>
+                      <SortableTh label="Nº compras" active={orden === "compras"} onClick={() => setOrden("compras")} />
+                      <SortableTh label="Gasto" active={orden === "monto"} onClick={() => setOrden("monto")} />
+                      <SortableTh label="% del total" active={orden === "monto"} onClick={() => setOrden("monto")} />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {tablaOrdenada.map((p) => (
+                      <tr key={p.id} className="border-t border-marfil">
+                        <td className="py-2 text-cacao">{p.nombre}</td>
+                        <td className="py-2 text-cacao-soft">{p.catLabel}</td>
+                        <td className="py-2 text-right tabular-nums text-cacao">{fUnid(p.veces)}</td>
+                        <td className="py-2 text-right tabular-nums text-cacao">{fUSD(p.monto)}</td>
+                        <td className="py-2 text-right tabular-nums text-cacao-soft">{fPct(pct(p.monto))}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t-2 border-marfil font-medium">
+                      <td className="py-2 text-cacao" colSpan={2}>Total ({porInsumo.length} insumos)</td>
+                      <td className="py-2 text-right tabular-nums text-cacao">{fUnid(nCompras)}</td>
+                      <td className="py-2 text-right tabular-nums text-cacao">{fUSD(totalMonto)}</td>
+                      <td className="py-2 text-right tabular-nums text-cacao-soft">100%</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            )}
+          </section>
 
           <p className="text-[11px] text-cacao-soft italic">El costo de insumos vs las ventas (food cost %) y la utilidad real están en la pestaña <strong>Resumen</strong>.</p>
         </>
@@ -395,7 +689,8 @@ export function AnalisisCompras() {
   );
 }
 
-function Card({ titulo, valor, sub, tono }: { titulo: string; valor: string; sub?: string; tono?: "bien" | "alerta" }) {
+// ── Subcomponentes (iguales a Análisis de Ventas) ──────────────────────
+function StatCard({ titulo, valor, sub, tono }: { titulo: string; valor: string; sub?: string; tono?: "bien" | "alerta" }) {
   const color = tono === "bien" ? "text-[#2F4A1F]" : tono === "alerta" ? "text-[#7A5A18]" : "text-cacao";
   return (
     <div className="rounded-2xl bg-white ring-1 ring-marfil p-4">
@@ -403,5 +698,15 @@ function Card({ titulo, valor, sub, tono }: { titulo: string; valor: string; sub
       <div className={`mt-1 font-cinzel text-lg leading-tight break-words ${color}`}>{valor}</div>
       {sub && <div className="text-xs text-cacao-soft mt-0.5">{sub}</div>}
     </div>
+  );
+}
+
+function SortableTh({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <th className="py-2 font-normal text-right">
+      <button type="button" onClick={onClick} className={`uppercase tracking-widest text-[11px] hover:text-cacao ${active ? "text-cacao" : "text-cacao-mute"}`} title="Ordenar de mayor a menor">
+        {label} {active ? "↓" : ""}
+      </button>
+    </th>
   );
 }
