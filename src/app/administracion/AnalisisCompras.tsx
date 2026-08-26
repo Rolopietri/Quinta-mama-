@@ -629,7 +629,7 @@ export function AnalisisCompras() {
                 <p className="text-sm text-cacao-soft italic">Sin insumos en esta categoría en el período.</p>
               ) : (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                  <Dona segmentos={drill.items.map((p, i) => ({ key: p.id, label: p.nombre, value: p.monto, color: colorPorIndice(i) }))} format={fUSD} />
+                  <Dona segmentos={drill.items.map((p, i) => ({ key: p.id, label: p.nombre, value: p.monto, color: colorPorIndice(i) }))} format={fUSD} sinLeyenda />
                   <div className="overflow-x-auto">
                     <table className="w-full text-xs">
                       <thead>

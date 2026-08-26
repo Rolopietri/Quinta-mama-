@@ -237,10 +237,14 @@ export function Dona({
   segmentos,
   format,
   centroLabel = "Total",
+  sinLeyenda = false,
 }: {
   segmentos: SegmentoDona[];
   format: (n: number) => string;
   centroLabel?: string;
+  /** Oculta la leyenda lateral (útil cuando al lado hay una tabla con el mismo
+   *  detalle — evita duplicar y que se monten los textos). */
+  sinLeyenda?: boolean;
 }) {
   const [hover, setHover] = useState<number | null>(null);
   const total = segmentos.reduce((s, x) => s + x.value, 0);
@@ -270,9 +274,8 @@ export function Dona({
   const centroTexto = activo ? activo.label : centroLabel;
   const centroPct = activo ? (activo.value / total) * 100 : 100;
 
-  return (
-    <div className="flex flex-col sm:flex-row items-center gap-5">
-      <div className="relative shrink-0" style={{ width: size, height: size }}>
+  const donut = (
+    <div className="relative shrink-0" style={{ width: size, height: size }}>
         <svg
           viewBox={`0 0 ${size} ${size}`}
           className="w-full h-full"
@@ -321,6 +324,15 @@ export function Dona({
           </div>
         </div>
       </div>
+  );
+
+  if (sinLeyenda) {
+    return <div className="flex justify-center py-2">{donut}</div>;
+  }
+
+  return (
+    <div className="flex flex-col sm:flex-row items-center gap-5">
+      {donut}
       {/* Leyenda */}
       <ul className="flex-1 space-y-1.5 w-full">
         {segmentos.map((s, i) => (

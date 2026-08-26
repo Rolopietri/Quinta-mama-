@@ -1099,6 +1099,7 @@ export function AnalisisVentas() {
                   <Dona
                     segmentos={drill.items.map((p, i) => ({ key: p.producto, label: p.producto, value: p.monto, color: colorPorIndice(i) }))}
                     format={fUSD}
+                    sinLeyenda
                   />
                   <div className="overflow-x-auto">
                     <table className="w-full text-xs">
