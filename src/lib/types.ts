@@ -1126,6 +1126,9 @@ export type PedidoCocina = {
   estado: EstadoPedidoCocina;
   createdAt: string;
   recetas: PedidoCocinaReceta[];
+  /** true si al marcarse "comprado" ya se generaron sus planes de producción
+   *  (pendientes). Evita crearlos dos veces si se cambia el estado ida y vuelta. */
+  planesGenerados: boolean;
 };
 
 export const ESTADOS_PEDIDO_COCINA: {

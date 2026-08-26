@@ -18,6 +18,7 @@ type HeaderRow = {
   fecha_necesaria: string | null;
   nota: string | null;
   estado: string;
+  planes_generados: boolean | null;
   created_at: string;
 };
 
@@ -53,6 +54,7 @@ function headerToPedido(
     estado: h.estado as EstadoPedidoCocina,
     createdAt: h.created_at,
     recetas: recetas.sort((a, b) => a.orden - b.orden),
+    planesGenerados: !!h.planes_generados,
   };
 }
 
@@ -133,7 +135,9 @@ export async function createPedidoCocina(
  *  recetas conviene borrar y crear de nuevo el pedido. */
 export async function updatePedidoCocina(
   id: string,
-  patch: Partial<Pick<PedidoCocinaInput, "nombre" | "fechaNecesaria" | "nota" | "estado">>,
+  patch: Partial<
+    Pick<PedidoCocinaInput, "nombre" | "fechaNecesaria" | "nota" | "estado">
+  > & { planesGenerados?: boolean },
 ): Promise<void> {
   const sb = createSupabaseBrowserClient();
   const dbPatch: Record<string, unknown> = {};
@@ -143,6 +147,8 @@ export async function updatePedidoCocina(
   if (patch.nota !== undefined)
     dbPatch.nota = patch.nota && patch.nota.trim() ? patch.nota.trim() : null;
   if (patch.estado !== undefined) dbPatch.estado = patch.estado;
+  if (patch.planesGenerados !== undefined)
+    dbPatch.planes_generados = patch.planesGenerados;
   const { error } = await sb
     .from("cocina_pedidos")
     .update(dbPatch)

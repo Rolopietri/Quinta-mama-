@@ -14,7 +14,10 @@ import type {
 import { ESTADOS_PEDIDO_COCINA } from "@/lib/types";
 import { listRecetas } from "@/lib/data/recetas";
 import { listInsumos, listProveedores } from "@/lib/data/cocina";
-import { listPlanesProduccion } from "@/lib/data/planes-produccion";
+import {
+  listPlanesProduccion,
+  createPlanProduccion,
+} from "@/lib/data/planes-produccion";
 import { calcularPedidoSugerido } from "@/lib/data/ventas";
 import {
   listPedidosCocina,
@@ -267,10 +270,79 @@ export function PedidoSugeridoClient() {
   // ── Cambiar estado / borrar pedidos guardados ─────────────
   async function setEstadoPedido(id: string, estado: EstadoPedidoCocina) {
     try {
+      const pedido = pedidosGuardados.find((p) => p.id === id);
+      // Al marcar "comprado" por primera vez, generar un plan de producción
+      // PENDIENTE por cada receta del pedido (reserva sus insumos). El flag
+      // planesGenerados evita duplicarlos si se cambia el estado ida y vuelta.
+      const generarPlanes =
+        estado === "comprado" && !!pedido && !pedido.planesGenerados;
+
+      let creados = 0;
+      const sinReceta: string[] = [];
+      const fallidos: string[] = [];
+      if (generarPlanes && pedido) {
+        for (const linea of pedido.recetas) {
+          const rec = linea.recetaId
+            ? recetas.find((r) => r.id === linea.recetaId)
+            : undefined;
+          if (!rec || linea.raciones <= 0) {
+            sinReceta.push(linea.recetaNombre);
+            continue;
+          }
+          try {
+            await createPlanProduccion({
+              receta: rec,
+              raciones: linea.raciones,
+              nota: `Desde pedido: ${pedido.nombre}`,
+              recetas,
+              insumos,
+            });
+            creados++;
+          } catch {
+            fallidos.push(linea.recetaNombre);
+          }
+        }
+      }
+
+      const marcarFlag = generarPlanes && creados > 0;
       await updatePedidoCocina(id, { estado });
+      // El flag es best-effort: si la columna aún no existe (SQL sin correr), el
+      // estado igual se guardó y los planes ya se crearon.
+      if (marcarFlag) {
+        try {
+          await updatePedidoCocina(id, { planesGenerados: true });
+        } catch {
+          /* noop */
+        }
+      }
       setPedidosGuardados((prev) =>
-        prev.map((p) => (p.id === id ? { ...p, estado } : p)),
+        prev.map((p) =>
+          p.id === id
+            ? { ...p, estado, planesGenerados: p.planesGenerados || marcarFlag }
+            : p,
+        ),
       );
+
+      if (generarPlanes) {
+        const partes: string[] = [];
+        if (creados > 0)
+          partes.push(
+            `${creados} plan${creados === 1 ? "" : "es"} de producción creado${creados === 1 ? "" : "s"} (pendiente${creados === 1 ? "" : "s"}, reservan insumos)`,
+          );
+        if (sinReceta.length)
+          partes.push(`sin plan (receta no encontrada): ${sinReceta.join(", ")}`);
+        if (fallidos.length) partes.push(`no se pudo con: ${fallidos.join(", ")}`);
+        if (partes.length)
+          setInfo(
+            `${partes.join(" · ")}. Míralos en Inventario → Planes de producción.`,
+          );
+        // Refrescar planes en memoria (afectan el cálculo del pedido sugerido).
+        try {
+          setPlanes(await listPlanesProduccion());
+        } catch {
+          /* noop */
+        }
+      }
     } catch (e) {
       setError(extractError(e, "Error actualizando"));
     }
@@ -366,6 +438,9 @@ export function PedidoSugeridoClient() {
                         )}
                         {pg.recetas.length} receta
                         {pg.recetas.length === 1 ? "" : "s"}
+                        {pg.planesGenerados && (
+                          <span className="text-sky-700"> · planes creados</span>
+                        )}
                       </span>
                       {pg.nota && (
                         <span className="block text-xs text-cacao-soft italic font-serif mt-1">
@@ -379,9 +454,14 @@ export function PedidoSugeridoClient() {
                       <button
                         type="button"
                         onClick={() => setEstadoPedido(pg.id, "comprado")}
+                        title={
+                          pg.planesGenerados
+                            ? "Marcar como comprado"
+                            : "Marcar como comprado y crear sus planes de producción (pendientes, reservan insumos)"
+                        }
                         className="text-[10px] uppercase tracking-widest px-3 py-1 rounded-full ring-1 ring-marfil text-cacao-soft hover:bg-marfil-soft"
                       >
-                        ✓ Comprado
+                        ✓ Comprado{!pg.planesGenerados ? " + plan" : ""}
                       </button>
                     )}
                     {pg.estado === "comprado" && (
