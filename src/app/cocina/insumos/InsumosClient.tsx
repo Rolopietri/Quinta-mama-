@@ -454,14 +454,21 @@ export function InsumosClient() {
       <UnitCalculator className="mb-5" />
 
       {/* Buscador */}
-      <div className="mb-3">
+      <div className="mb-3 flex items-center gap-2">
         <input
           type="text"
           placeholder="Buscar insumo por nombre..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="w-full rounded-lg ring-1 ring-marfil px-3 py-2"
+          className="flex-1 rounded-lg ring-1 ring-marfil px-3 py-2"
         />
+        <a
+          href="/cocina/inventario/conteo"
+          title="Cuadrar el inventario con un conteo físico"
+          className="shrink-0 rounded-lg ring-1 ring-marfil px-3 py-2 text-xs uppercase tracking-widest text-cacao-soft hover:bg-marfil-soft whitespace-nowrap"
+        >
+          Conteo físico
+        </a>
       </div>
 
       {/* Filtros */}

@@ -114,6 +114,27 @@ export async function registrarPerdida(
  * error). Solo repone movimientos de la capa 'total'. Devuelve el nuevo
  * stock físico si hubo reposición.
  */
+/**
+ * Conteo físico: fija el stock_actual del insumo al valor ABSOLUTO contado y
+ * registra el ajuste (delta) en el libro. Atómico (RPC con lock de fila).
+ * Devuelve el nuevo stock. Si el valor es igual al actual, no registra nada.
+ */
+export async function ajustarStockConteo(
+  insumoId: string,
+  nuevo: number,
+  nota?: string,
+): Promise<number> {
+  if (!(nuevo >= 0)) throw new Error("El conteo debe ser un número ≥ 0.");
+  const sb = createSupabaseBrowserClient();
+  const { data, error } = await sb.rpc("ajustar_stock_conteo", {
+    p_insumo_id: insumoId,
+    p_nuevo: nuevo,
+    p_nota: nota?.trim() || null,
+  });
+  if (error) throw error;
+  return Number(data);
+}
+
 export async function deleteMovimiento(
   id: string,
   opts: { devolverStock?: boolean } = {},

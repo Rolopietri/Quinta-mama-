@@ -4,6 +4,11 @@ import { SubHubGrid, type SubModulo } from "../_SubHub";
 
 const SUBMODULOS: SubModulo[] = [
   {
+    href: "/cocina/inventario/conteo",
+    label: "Conteo físico",
+    desc: "Cuadrá el inventario: pon el stock real de cada insumo de un golpe. Queda registrado como ajuste.",
+  },
+  {
     href: "/cocina/inventario/planes",
     label: "Planes de producción",
     desc: "Reservá stock por adelantado para producciones planificadas (eventos, batches).",
