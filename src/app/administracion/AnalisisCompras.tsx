@@ -602,12 +602,36 @@ export function AnalisisCompras() {
           <div className="grid grid-cols-1 gap-4">
             <PanelCard titulo="Compras por categoría de insumo">
               <p className="text-[11px] text-cacao-mute mb-3">Toca una categoría (en el gráfico o en la lista) para ver su desglose.</p>
-              <Dona
-                segmentos={porCategoria.map((c, i) => ({ key: c.key, label: c.label, value: c.monto, color: colorPorIndice(i), sub: `${fUnid(c.veces)}×` }))}
-                format={fUSD}
-                onSelect={(k) => { const c = porCategoria.find((x) => x.key === k); if (c) setCatDrill({ key: c.key, label: c.label }); }}
-                activeKey={catDrill?.key}
-              />
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+                <Dona
+                  segmentos={porCategoria.map((c, i) => ({ key: c.key, label: c.label, value: c.monto, color: colorPorIndice(i) }))}
+                  format={fUSD}
+                  sinLeyenda
+                  onSelect={(k) => { const c = porCategoria.find((x) => x.key === k); if (c) setCatDrill({ key: c.key, label: c.label }); }}
+                />
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-cacao-mute uppercase tracking-widest text-left">
+                        <th className="py-1 font-normal">Categoría</th>
+                        <th className="py-1 font-normal text-right">Compras</th>
+                        <th className="py-1 font-normal text-right">Gasto</th>
+                        <th className="py-1 font-normal text-right">%</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {porCategoria.map((c) => (
+                        <tr key={c.key} onClick={() => setCatDrill({ key: c.key, label: c.label })} className={`border-t border-marfil cursor-pointer hover:bg-marfil-soft ${catDrill?.key === c.key ? "bg-marfil-soft" : ""}`}>
+                          <td className="py-1 text-cacao"><span className="inline-flex items-center gap-1">{c.label}<span className="text-cacao-mute">›</span></span></td>
+                          <td className="py-1 text-right tabular-nums text-cacao-soft">{fUnid(c.veces)}</td>
+                          <td className="py-1 text-right tabular-nums text-cacao">{fUSD(c.monto)}</td>
+                          <td className="py-1 text-right tabular-nums text-cacao-soft">{fPct(pct(c.monto))}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </PanelCard>
           </div>
 
