@@ -2512,6 +2512,20 @@ function SeccionEstado() {
                   {monedas.length > 1 && <div className="text-[10px] text-[#9A938B] mt-1.5">Balance por moneda (no se mezclan).</div>}
                 </div>
               </div>
+
+              {/* Total REAL: todo convertido a € (tasa BCV real) para el número final */}
+              <div className="rounded-2xl bg-marfil-soft ring-1 ring-marfil p-4">
+                <div className="flex items-center justify-between gap-3 mb-2">
+                  <span className="font-display text-[9px] tracking-[0.25em] uppercase text-cacao-mute">Total real del mes (todo en €)</span>
+                  <span className="text-[10px] text-cacao-mute">tasa BCV real por fecha</span>
+                </div>
+                <div className="grid grid-cols-3 gap-3 text-center">
+                  <div><div className="text-[10px] uppercase tracking-widest text-cacao-mute">Ingresos</div><div className="text-lg font-medium text-cacao">{fmtMonto(ingUni, "EUR")}</div></div>
+                  <div><div className="text-[10px] uppercase tracking-widest text-cacao-mute">Egresos</div><div className="text-lg font-medium text-cacao">{fmtMonto(egrUni, "EUR")}</div></div>
+                  <div><div className="text-[10px] uppercase tracking-widest text-cacao-mute">Balance</div><div className={`text-lg font-medium ${balUni < 0 ? "text-[#7A2419]" : "text-[#2F4A1F]"}`}>{balUni < 0 ? `− ${fmtMonto(Math.abs(balUni), "EUR")}` : fmtMonto(balUni, "EUR")}</div></div>
+                </div>
+              </div>
+
               <div className="grid gap-4 sm:grid-cols-2">
                 <DesglosePorMoneda titulo="Ingresos por categoría" filas={catPorMoneda(ingresos)} orden={ORDEN} />
                 <DesglosePorMoneda titulo="Egresos por categoría" filas={catPorMoneda(egresosAll)} orden={ORDEN} />
