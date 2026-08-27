@@ -14,10 +14,10 @@ import { AnalisisAdministrativo } from "./AnalisisAdministrativo";
 type Seccion = "proveedores" | "solicitudes" | "ingresos" | "analisis-ventas" | "cobrar" | "egresos" | "estado" | "historico";
 const SECCIONES: { id: Seccion; label: string; grupo?: string }[] = [
   { id: "estado", label: "Estado de Cuenta" },
-  { id: "analisis-ventas", label: "Análisis administrativo" },
   { id: "ingresos", label: "Ingresos" },
   { id: "egresos", label: "Egresos" },
   { id: "cobrar", label: "Cuentas por cobrar" },
+  { id: "analisis-ventas", label: "Análisis administrativo" },
   { id: "historico", label: "Históricos y comparación" },
   { id: "proveedores", label: "Proveedores", grupo: "Proveedores" },
   { id: "solicitudes", label: "Generar solicitud de pagos", grupo: "Proveedores" },
