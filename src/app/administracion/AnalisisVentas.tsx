@@ -5,7 +5,7 @@
 // carga las ventas del rango + las recetas (para la categoría) y agrega todo en
 // el cliente con useMemo. Modular: no toca la lógica de registro de ventas.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { Venta, Receta, Insumo } from "@/lib/types";
 import { categoriaRecetaLabel, categoriaInsumoLabel } from "@/lib/types";
 import { listVentasRango, normPos } from "@/lib/data/ventas";
@@ -1130,7 +1130,8 @@ export function AnalisisVentas() {
             </section>
           )}
 
-          {/* ── Top / menos vendidos ────────────────────────────── */}
+          {/* ── Top / menos vendidos (plegable) ── */}
+          <Plegable titulo="Top y menos vendidos" sub={nombresExcluidos.length > 0 ? `sin ${nombresExcluidos.join(", ")}` : undefined}>
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs uppercase tracking-widest text-cacao-mute">
               Mostrar
@@ -1172,8 +1173,10 @@ export function AnalisisVentas() {
               format={fUnid}
             />
           </PanelCard>
+          </Plegable>
 
-          {/* ── Ritmo y mezcla ──────────────────────────────────── */}
+          {/* ── Ritmo y mezcla (plegable) ── */}
+          <Plegable titulo="Ritmo: día de la semana y mezcla de ingreso">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <PanelCard titulo="Ventas por día de la semana">
               <BarrasH
@@ -1195,8 +1198,10 @@ export function AnalisisVentas() {
               </PanelCard>
             )}
           </div>
+          </Plegable>
 
-          {/* ── Rentabilidad ────────────────────────────────────── */}
+          {/* ── Rentabilidad (plegable) ── */}
+          <Plegable titulo="Rentabilidad (margen)">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <PanelCard titulo={`Top ${topN} por ganancia (margen)`}>
               <BarrasH
@@ -1238,6 +1243,7 @@ export function AnalisisVentas() {
               </div>
             </PanelCard>
           </div>
+          </Plegable>
 
           {/* ── Alquileres / eventos (categorías fuera de rankings) ── */}
           {categoriasExcluidasResumen.length > 0 && (
@@ -1380,6 +1386,23 @@ export function AnalisisVentas() {
 }
 
 // ── Subcomponentes ─────────────────────────────────────────────────────
+// Sección plegable: cabecera tipo tarjeta; el contenido fluye debajo al abrir.
+function Plegable({ titulo, sub, defaultOpen = false, children }: { titulo: string; sub?: string; defaultOpen?: boolean; children: ReactNode }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="space-y-4">
+      <button type="button" onClick={() => setOpen((v) => !v)} className="w-full rounded-2xl bg-white ring-1 ring-marfil p-4 flex items-center justify-between gap-2 text-left hover:bg-marfil-soft/40">
+        <span className="font-cinzel text-base text-cacao">{titulo}</span>
+        <span className="flex items-center gap-2">
+          {sub && <span className="text-[11px] text-cacao-mute">{sub}</span>}
+          <span className={`text-cacao-mute transition-transform ${open ? "rotate-90" : ""}`}>›</span>
+        </span>
+      </button>
+      {open && children}
+    </div>
+  );
+}
+
 function Fila({ label, val, tenue, fuerte }: { label: string; val: string; tenue?: boolean; fuerte?: boolean }) {
   return (
     <div className="flex items-center justify-between gap-3">
