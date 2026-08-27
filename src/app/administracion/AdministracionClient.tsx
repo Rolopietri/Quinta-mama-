@@ -2942,6 +2942,29 @@ function SeccionCuentasCobrar() {
       recargar();
     } catch { setError("No se pudo eliminar la cuenta."); }
   }
+  async function editarCuenta(cuentaId: string, montoActual: number | null, moneda: string) {
+    const val = window.prompt(`Nuevo monto de la cuenta (${moneda}):`, montoActual != null ? String(montoActual).replace(".", ",") : "");
+    if (val == null) return;
+    const monto = parseTasa(val);
+    if (monto == null || monto < 0) { setError("Monto inválido."); return; }
+    setError(null);
+    try {
+      const r = await fetch("/api/admin/cuentas-cobrar", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accion: "editar-cuenta", cuenta: cuentaId, monto }) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "No se pudo editar.");
+      setMsg("Monto de la cuenta actualizado."); recargar();
+    } catch (e) { setError(e instanceof Error ? e.message : "No se pudo editar."); }
+  }
+  async function ajustarSaldo(clienteNombre: string) {
+    if (!confirm("Se creará una deuda de ajuste que cuadra el pago existente y deja el saldo en cero (NO borra el pago ni su ingreso). Úsalo cuando el cliente pagó cuentas que luego se eliminaron. ¿Continuar?")) return;
+    setError(null);
+    try {
+      const r = await fetch("/api/admin/cuentas-cobrar", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accion: "ajustar", cliente: clienteNombre }) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "No se pudo ajustar.");
+      setMsg("Saldo ajustado a cero."); recargar();
+    } catch (e) { setError(e instanceof Error ? e.message : "No se pudo ajustar."); }
+  }
   async function marcarIncobrable(cuentaId: string) {
     if (!confirm("Marcar esta cuenta como INCOBRABLE. Sale del saldo por cobrar y se registra como pérdida (egreso “Incobrables”). ¿Continuar?")) return;
     setError(null);
@@ -3147,6 +3170,7 @@ function SeccionCuentasCobrar() {
                               <span className="text-right">
                                 <span className={`inline-block rounded-full px-2 py-0.5 text-[9px] uppercase tracking-widest ${estado === "Pagada" ? "bg-[#F1F4ED] text-[#2F4A1F]" : estado === "Parcial" ? "bg-[#FBF3E2] text-[#7A5A18]" : estado === "A favor" ? "bg-[#EAF0EA] text-[#2F4A1F]" : "bg-[#F9EBE7] text-[#7A2419]"}`}>{estado}</span>
                                 {estado !== "Pagada" && <button type="button" onClick={() => marcarIncobrable(cu.id)} className="ml-2 text-cacao-soft hover:text-terracotta text-[10px] uppercase tracking-widest" title="Marcar incobrable (pérdida)">Incobrable</button>}
+                                <button type="button" onClick={() => editarCuenta(cu.id, cu.monto, cu.moneda || "EUR")} className="ml-2 text-cacao-soft hover:text-terracotta text-xs" title="Editar monto" aria-label="Editar monto">✎</button>
                                 <button type="button" onClick={() => borrarCuenta(cu.id)} className="ml-2 text-cacao-soft hover:text-terracotta text-xs" aria-label="Eliminar cuenta">✕</button>
                               </span>
                             </li>
@@ -3174,10 +3198,16 @@ function SeccionCuentasCobrar() {
                       )}
 
                       {/* Saldo */}
-                      <div className="flex items-center justify-between text-sm px-1">
+                      <div className="flex items-center justify-between text-sm px-1 gap-3 flex-wrap">
                         <span className="text-cacao-mute">Generado {fmtMonto(eurDe(c.total_cuentas_usd), "EUR")} · Pagado {fmtMonto(eurDe(c.total_pagos_usd), "EUR")}</span>
                         <span className="font-medium text-cacao">Saldo: {fmtMonto(eurDe(c.saldo_usd), "EUR")} <span className="text-cacao-mute font-normal">(≈ {fmtMonto(c.saldo_usd, "USD")})</span></span>
                       </div>
+                      {enFavor && (
+                        <div className="px-1">
+                          <button type="button" onClick={() => ajustarSaldo(c.cliente)} className="rounded-lg ring-1 ring-marfil text-cacao px-3 py-1.5 text-[11px] uppercase tracking-widest hover:bg-marfil-soft">Ajustar saldo a cero</button>
+                          <span className="ml-2 text-[11px] text-cacao-mute">Si pagó cuentas que luego se eliminaron: cuadra el pago sin borrarlo.</span>
+                        </div>
+                      )}
 
                       {/* Unir con otro cliente (mismo cliente, distinto nombre en Zetux) */}
                       <div className="px-1 pt-1 flex items-center gap-2 flex-wrap">

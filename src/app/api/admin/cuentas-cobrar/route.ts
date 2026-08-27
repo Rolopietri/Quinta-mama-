@@ -301,6 +301,53 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 
+  // ── Editar el monto de una cuenta (deuda) ──
+  if (b.accion === "editar-cuenta") {
+    const cuentaId = texto(b.cuenta);
+    const nuevoMonto = numero(b.monto);
+    if (!cuentaId) return NextResponse.json({ error: "Falta la cuenta." }, { status: 400 });
+    if (nuevoMonto == null || nuevoMonto < 0) return NextResponse.json({ error: "Pon un monto válido." }, { status: 400 });
+    const { data: cu } = await sb.from("admin_cuenta_cobrar").select("moneda, tasa").eq("id", cuentaId).single();
+    const moneda = (cu?.moneda as string) ?? "EUR";
+    let tasa = (cu?.tasa as number | null) ?? null;
+    if (moneda === "EUR" && (tasa == null || tasa <= 0)) tasa = await getTasaEurUsd(sb);
+    const { error } = await sb.from("admin_cuenta_cobrar")
+      .update({ monto: r2(nuevoMonto), monto_usd: equivUSD(nuevoMonto, moneda, tasa) })
+      .eq("id", cuentaId);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ ok: true });
+  }
+
+  // ── Ajustar el saldo A FAVOR de un cliente a cero ──
+  // Caso típico: pagó cuentas que luego se borraron (reimportación) → queda a
+  // favor sin deuda. Crea una deuda de ajuste que cuadra el pago existente, sin
+  // tocar el pago ni su ingreso. Reversible (se borra la cuenta de ajuste).
+  if (b.accion === "ajustar") {
+    const nombre = texto(b.cliente);
+    if (!nombre) return NextResponse.json({ error: "Falta el cliente." }, { status: 400 });
+    const clientes = await cargarClientes(sb);
+    const g = clientes.find((c) => c.key === clave(nombre));
+    if (!g) return NextResponse.json({ error: "No encontré ese cliente." }, { status: 400 });
+    if (g.saldo_usd >= -0.005) return NextResponse.json({ error: "Ese cliente no tiene saldo a favor que ajustar." }, { status: 400 });
+    const favorUsd = -g.saldo_usd; // positivo
+    const tasa = await getTasaEurUsd(sb);
+    const montoEur = tasa > 0 ? r2(favorUsd / tasa) : r2(favorUsd);
+    const { error } = await sb.from("admin_cuenta_cobrar").insert({
+      fecha: new Date().toISOString().slice(0, 10),
+      descripcion: "Ajuste: deudas ya saldadas (cuentas eliminadas)",
+      deudor: g.cliente,
+      ref: null,
+      monto: montoEur,
+      moneda: "EUR",
+      tasa,
+      monto_usd: r2(favorUsd),
+      cobrada: false,
+      fuente: "ajuste",
+    });
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ ok: true, ajustado_eur: montoEur });
+  }
+
   // ── Agregar una cuenta a mano (deuda) ──
   const cliente = texto(b.cliente);
   const monto = numero(b.monto);
