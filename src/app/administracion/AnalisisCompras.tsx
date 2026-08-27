@@ -34,6 +34,7 @@ import {
   colorPorIndice,
   type BarRow,
 } from "@/components/charts/VentasCharts";
+import { Plegable } from "@/components/Plegable";
 
 // ── Formato ──────────────────────────────────────────────────────────────
 const fUSD = (n: number) =>
@@ -598,7 +599,7 @@ export function AnalisisCompras() {
           </PanelCard>
 
           {/* ── Categorías ──────────────────────────────────────── */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4">
             <PanelCard titulo="Compras por categoría de insumo">
               <BarrasH rows={porCategoria.map((c, i) => ({ key: c.key, label: c.label, value: c.monto, color: colorPorIndice(i), tip: `${c.label}: ${fUSD(c.monto)} · ${fPct(pct(c.monto))} del total` }))} format={fUSD} />
               <p className="mt-3 text-[11px] text-cacao-mute">Toca una categoría para ver el desglose de sus insumos.</p>
@@ -624,10 +625,6 @@ export function AnalisisCompras() {
                   </tbody>
                 </table>
               </div>
-            </PanelCard>
-
-            <PanelCard titulo="Distribución por categoría (gasto)">
-              <Dona segmentos={porCategoria.map((c, i) => ({ key: c.key, label: c.label, value: c.monto, color: colorPorIndice(i) }))} format={fUSD} />
             </PanelCard>
           </div>
 
@@ -671,7 +668,8 @@ export function AnalisisCompras() {
             </section>
           )}
 
-          {/* ── Top selector + tops ─────────────────────────────── */}
+          {/* ── Top proveedores e insumos (plegable) ── */}
+          <Plegable titulo="Top proveedores e insumos">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs uppercase tracking-widest text-cacao-mute">Mostrar</span>
             {([5, 10, 20] as const).map((n) => (
@@ -686,8 +684,10 @@ export function AnalisisCompras() {
               <BarrasH rows={topInsumos.map((p, i) => barIns(p, i))} format={fUSD} />
             </PanelCard>
           </div>
+          </Plegable>
 
-          {/* ── Ritmo y estado ──────────────────────────────────── */}
+          {/* ── Ritmo y estado (plegable) ── */}
+          <Plegable titulo="Ritmo: día de la semana y estado de pago">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <PanelCard titulo="Compras por día de la semana">
               <BarrasH rows={porDiaSemana.map((d, i) => ({ key: d.key, label: d.label, value: d.value, color: colorPorIndice(i), tip: `${d.label}: ${fUSD(d.value)}` }))} format={fUSD} />
@@ -703,11 +703,14 @@ export function AnalisisCompras() {
               <p className="mt-2 text-[11px] text-cacao-mute">{porPagarN > 0 ? `Tienes ${fUSD(porEstado.porPagar)} pendientes de pago en ${porPagarN} compra(s).` : "Todo el período está pagado."}</p>
             </PanelCard>
           </div>
+          </Plegable>
 
-          {/* ── Modalidad de pago ───────────────────────────────── */}
+          {/* ── Modalidad de pago (plegable) ── */}
+          <Plegable titulo="Compras por modalidad de pago">
           <PanelCard titulo="Compras por modalidad de pago">
             <BarrasH rows={porModalidad.map((m, i) => ({ key: m.key, label: m.label, value: m.monto, color: colorPorIndice(i), tip: `${m.label}: ${fUSD(m.monto)} · ${fPct(pct(m.monto))}` }))} format={fUSD} />
           </PanelCard>
+          </Plegable>
 
           {/* ── Compras sin proveedor (asignar inline) ──────────── */}
           {sinProveedor.length > 0 && (
@@ -744,7 +747,8 @@ export function AnalisisCompras() {
             </PanelCard>
           )}
 
-          {/* ── Por factura ─────────────────────────────────────── */}
+          {/* ── Por factura (plegable) ── */}
+          <Plegable titulo={`Por factura (${porFactura.length})`}>
           <PanelCard titulo={`Por factura (${porFactura.length})`}>
             <p className="text-[11px] text-cacao-mute mb-2">Cada factura resumida: costo de insumos + flete = total.{fleteTotal > 0 ? ` Flete total del período: ${fUSD(fleteTotal)}.` : ""}</p>
             <div className="rounded-xl ring-1 ring-marfil overflow-hidden max-h-96 overflow-y-auto">
@@ -776,6 +780,7 @@ export function AnalisisCompras() {
               </table>
             </div>
           </PanelCard>
+          </Plegable>
 
           {/* ── Detalle por insumo (plegable, ordenable) ────────── */}
           <section className="rounded-2xl bg-white ring-1 ring-marfil p-4">
@@ -871,10 +876,10 @@ export function AnalisisCompras() {
 function CompraCard({ titulo, valor, sub, tono }: { titulo: string; valor: string; sub?: string; tono?: "bien" | "alerta" }) {
   const color = tono === "bien" ? "text-[#2F4A1F]" : tono === "alerta" ? "text-[#7A5A18]" : "text-cacao";
   return (
-    <div className="rounded-2xl bg-white ring-1 ring-marfil p-4">
-      <div className="text-[10px] uppercase tracking-widest text-cacao-mute">{titulo}</div>
-      <div className={`mt-1 font-cinzel text-lg leading-tight break-words ${color}`}>{valor}</div>
-      {sub && <div className="text-xs text-cacao-soft mt-0.5">{sub}</div>}
+    <div className="rounded-xl bg-white ring-1 ring-marfil p-3">
+      <div className="text-[9px] uppercase tracking-widest text-cacao-mute leading-tight">{titulo}</div>
+      <div className={`mt-0.5 font-cinzel text-base leading-tight break-words ${color}`}>{valor}</div>
+      {sub && <div className="text-[11px] text-cacao-soft mt-0.5 leading-tight">{sub}</div>}
     </div>
   );
 }
@@ -883,10 +888,10 @@ function CompraCard({ titulo, valor, sub, tono }: { titulo: string; valor: strin
 function StatCard({ titulo, valor, sub, tono }: { titulo: string; valor: string; sub?: string; tono?: "bien" | "alerta" }) {
   const color = tono === "bien" ? "text-[#2F4A1F]" : tono === "alerta" ? "text-[#7A5A18]" : "text-cacao";
   return (
-    <div className="rounded-2xl bg-white ring-1 ring-marfil p-4">
-      <div className="text-[10px] uppercase tracking-widest text-cacao-mute">{titulo}</div>
-      <div className={`mt-1 font-cinzel text-lg leading-tight break-words ${color}`}>{valor}</div>
-      {sub && <div className="text-xs text-cacao-soft mt-0.5">{sub}</div>}
+    <div className="rounded-xl bg-white ring-1 ring-marfil p-3">
+      <div className="text-[9px] uppercase tracking-widest text-cacao-mute leading-tight">{titulo}</div>
+      <div className={`mt-0.5 font-cinzel text-base leading-tight break-words ${color}`}>{valor}</div>
+      {sub && <div className="text-[11px] text-cacao-soft mt-0.5 leading-tight">{sub}</div>}
     </div>
   );
 }

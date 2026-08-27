@@ -5,7 +5,8 @@
 // carga las ventas del rango + las recetas (para la categoría) y agrega todo en
 // el cliente con useMemo. Modular: no toca la lógica de registro de ventas.
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { Plegable } from "@/components/Plegable";
 import type { Venta, Receta, Insumo } from "@/lib/types";
 import { categoriaRecetaLabel, categoriaInsumoLabel } from "@/lib/types";
 import { listVentasRango, normPos } from "@/lib/data/ventas";
@@ -973,10 +974,6 @@ export function AnalisisVentas() {
               valor={masFactura?.producto ?? "—"}
               sub={masFactura ? fUSD(masFactura.monto) : undefined}
             />
-          </div>
-
-          {/* ── KPIs adicionales ────────────────────────────────── */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
             <StatCard
               titulo="vs período anterior"
               valor={deltaMonto == null ? "—" : `${deltaMonto >= 0 ? "▲" : "▼"} ${fPct(Math.abs(deltaMonto) * 100)}`}
@@ -1022,7 +1019,7 @@ export function AnalisisVentas() {
           </PanelCard>
 
           {/* ── Categorías ──────────────────────────────────────── */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4">
             <PanelCard titulo="Ventas por categoría">
               <BarrasH
                 rows={porCategoria.map((c, i) => ({
@@ -1069,18 +1066,6 @@ export function AnalisisVentas() {
                   </tbody>
                 </table>
               </div>
-            </PanelCard>
-
-            <PanelCard titulo="Distribución por categoría (facturación)">
-              <Dona
-                segmentos={porCategoria.map((c, i) => ({
-                  key: c.key,
-                  label: c.label,
-                  value: c.monto,
-                  color: colorPorIndice(i),
-                }))}
-                format={fUSD}
-              />
             </PanelCard>
           </div>
 
@@ -1386,23 +1371,6 @@ export function AnalisisVentas() {
 }
 
 // ── Subcomponentes ─────────────────────────────────────────────────────
-// Sección plegable: cabecera tipo tarjeta; el contenido fluye debajo al abrir.
-function Plegable({ titulo, sub, defaultOpen = false, children }: { titulo: string; sub?: string; defaultOpen?: boolean; children: ReactNode }) {
-  const [open, setOpen] = useState(defaultOpen);
-  return (
-    <div className="space-y-4">
-      <button type="button" onClick={() => setOpen((v) => !v)} className="w-full rounded-2xl bg-white ring-1 ring-marfil p-4 flex items-center justify-between gap-2 text-left hover:bg-marfil-soft/40">
-        <span className="font-cinzel text-base text-cacao">{titulo}</span>
-        <span className="flex items-center gap-2">
-          {sub && <span className="text-[11px] text-cacao-mute">{sub}</span>}
-          <span className={`text-cacao-mute transition-transform ${open ? "rotate-90" : ""}`}>›</span>
-        </span>
-      </button>
-      {open && children}
-    </div>
-  );
-}
-
 function Fila({ label, val, tenue, fuerte }: { label: string; val: string; tenue?: boolean; fuerte?: boolean }) {
   return (
     <div className="flex items-center justify-between gap-3">
@@ -1425,14 +1393,14 @@ function StatCard({
 }) {
   const colorValor = tono === "bien" ? "text-[#2F4A1F]" : tono === "alerta" ? "text-[#7A5A18]" : "text-cacao";
   return (
-    <div className="rounded-2xl bg-white ring-1 ring-marfil p-4">
-      <div className="text-[10px] uppercase tracking-widest text-cacao-mute">
+    <div className="rounded-xl bg-white ring-1 ring-marfil p-3">
+      <div className="text-[9px] uppercase tracking-widest text-cacao-mute leading-tight">
         {titulo}
       </div>
-      <div className={`mt-1 font-cinzel text-lg leading-tight break-words ${colorValor}`}>
+      <div className={`mt-0.5 font-cinzel text-base leading-tight break-words ${colorValor}`}>
         {valor}
       </div>
-      {sub && <div className="text-xs text-cacao-soft mt-0.5">{sub}</div>}
+      {sub && <div className="text-[11px] text-cacao-soft mt-0.5 leading-tight">{sub}</div>}
     </div>
   );
 }
