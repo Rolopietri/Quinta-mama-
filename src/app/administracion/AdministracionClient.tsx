@@ -1348,16 +1348,30 @@ function FormEgreso({
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Registro de un proveedor NUEVO desde aquí mismo (se guarda en el catálogo).
+  const [creandoProv, setCreandoProv] = useState(false);
+  const [nprov, setNprov] = useState<Record<string, string>>({ nombre: "", concepto: "", cedula: "", rif: "", numero_cuenta: "", banco: "" });
+  const setNp = (k: string, v: string) => setNprov((o) => ({ ...o, [k]: v }));
 
   function set<K extends keyof typeof f>(k: K, v: string) { setF((o) => ({ ...o, [k]: v })); }
 
   async function guardar() {
     if (parseMonto(f.monto) == null) { setError("Pon un monto."); return; }
+    if (creandoProv && !nprov.nombre.trim()) { setError("Pon el nombre del proveedor nuevo (o elige “— Ninguno —”)."); return; }
     setBusy(true);
     setError(null);
     try {
       const cat = categorias.find((c) => c.id === f.categoria_id);
-      const prov = proveedores.find((p) => p.id === f.proveedor_id);
+      // Si se está registrando un proveedor nuevo, se crea primero en el catálogo.
+      let provId: string | null = f.proveedor_id || null;
+      let provNombre: string | null = proveedores.find((p) => p.id === f.proveedor_id)?.nombre ?? null;
+      if (creandoProv) {
+        const rp = await fetch("/api/admin/proveedores", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(nprov) });
+        const dp = await rp.json();
+        if (!rp.ok) throw new Error(dp.error || "No se pudo crear el proveedor.");
+        provId = dp.proveedor?.id ?? null;
+        provNombre = dp.proveedor?.nombre ?? nprov.nombre.trim();
+      }
       const cuerpo = {
         ...(esEdicion ? { id: inicial!.id } : {}),
         fecha: f.fecha,
@@ -1365,8 +1379,8 @@ function FormEgreso({
         categoria_id: f.categoria_id || null,
         categoria_nombre: cat?.nombre ?? null,
         clasificacion: cat?.clasificacion ?? null,
-        proveedor_id: f.proveedor_id || null,
-        proveedor_nombre: prov?.nombre ?? null,
+        proveedor_id: provId,
+        proveedor_nombre: provNombre,
         monto: parseMonto(f.monto),
         moneda: f.moneda,
         tasa: parseTasa(f.tasa),
@@ -1404,11 +1418,28 @@ function FormEgreso({
         </Campo>
       </div>
       <Campo label="Proveedor (opcional)">
-        <select value={f.proveedor_id} onChange={(e) => set("proveedor_id", e.target.value)} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
+        <select
+          value={creandoProv ? "__nuevo__" : f.proveedor_id}
+          onChange={(e) => { const v = e.target.value; if (v === "__nuevo__") { setCreandoProv(true); set("proveedor_id", ""); } else { setCreandoProv(false); set("proveedor_id", v); } }}
+          className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white"
+        >
           <option value="">— Ninguno —</option>
           {proveedores.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+          <option value="__nuevo__">+ Nuevo proveedor…</option>
         </select>
       </Campo>
+      {creandoProv && (
+        <div className="rounded-xl ring-1 ring-marfil bg-marfil-soft/40 p-3 space-y-2">
+          <p className="text-[11px] uppercase tracking-widest text-cacao-mute">Nuevo proveedor (se guarda en tu registro)</p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {CAMPOS_FORM.map((c) => (
+              <Campo key={c.k as string} label={c.label}>
+                <input value={nprov[c.k as string] ?? ""} onChange={(e) => setNp(c.k as string, e.target.value)} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
+              </Campo>
+            ))}
+          </div>
+        </div>
+      )}
       <Campo label="Concepto"><input value={f.concepto} onChange={(e) => set("concepto", e.target.value)} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" /></Campo>
       <div className="grid grid-cols-3 gap-2">
         <Campo label="Monto"><input inputMode="decimal" value={f.monto} onChange={(e) => set("monto", e.target.value)} placeholder="0,00" className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" /></Campo>
