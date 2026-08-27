@@ -2287,6 +2287,9 @@ function SeccionEstado() {
   const [egresos, setEgresos] = useState<Egreso[]>([]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Vista de moneda: unificada en € (por defecto), en $, o cada moneda por separado.
+  const [vista, setVista] = useState<"eur" | "usd" | "moneda">("eur");
+  const [eurUsd, setEurUsd] = useState(1.17); // 1 € = X $
 
   useEffect(() => {
     let a = true;
@@ -2309,6 +2312,19 @@ function SeccionEstado() {
     })();
     return () => { a = false; };
   }, [mes]);
+
+  useEffect(() => {
+    let a = true;
+    (async () => {
+      try {
+        const r = await fetch("/api/admin/config", { cache: "no-store" });
+        const d = await r.json();
+        const v = Number(String(d.config?.tasa_eur_usd ?? "").replace(",", "."));
+        if (a && isFinite(v) && v > 0) setEurUsd(v);
+      } catch { /* usa el valor por defecto */ }
+    })();
+    return () => { a = false; };
+  }, []);
 
   // Totales por moneda (sin forzar conversión): Setux en €, alquileres en $, etc.
   const sumaMoneda = (arr: (Ingreso | Egreso)[]) => {
@@ -2334,12 +2350,48 @@ function SeccionEstado() {
     return Object.entries(o);
   };
 
+  // ── Conversión a moneda única (conserva el original abajo) ──
+  // Cada registro guarda monto_usd (equivalente calculado a la tasa con que se
+  // pagó). Para € usamos ese equivalente ÷ (1€=X$); para € nativos, el monto tal cual.
+  const enUSD = (e: Ingreso | Egreso): number => {
+    if (e.monto_usd != null) return e.monto_usd;
+    const mon = e.moneda || "EUR";
+    if (mon === "USD") return e.monto ?? 0;
+    if (mon === "EUR") return (e.monto ?? 0) * eurUsd;
+    return 0; // Bs sin equivalente: no se puede convertir con fiabilidad
+  };
+  const enEUR = (e: Ingreso | Egreso): number => {
+    const mon = e.moneda || "EUR";
+    if (mon === "EUR") return e.monto ?? 0;
+    return eurUsd > 0 ? enUSD(e) / eurUsd : 0;
+  };
+  const conv = vista === "usd" ? enUSD : enEUR;
+  const monedaUni = vista === "usd" ? "USD" : "EUR";
+  const unificado = vista !== "moneda";
+  const ingUni = ingresos.reduce((s, e) => s + conv(e), 0);
+  const egrUni = egresos.reduce((s, e) => s + conv(e), 0);
+  const balUni = ingUni - egrUni;
+  // Categorías en moneda única (para la vista unificada).
+  const catUni = (arr: (Ingreso | Egreso)[]): [string, number][] => {
+    const o: Record<string, number> = {};
+    for (const e of arr) { const c = e.categoria_nombre || "Sin categoría"; o[c] = (o[c] ?? 0) + conv(e); }
+    return Object.entries(o).sort((a, b) => b[1] - a[1]);
+  };
+  // Composición por moneda original de los egresos (para no perder la tasa).
+  const egrOrig = monedas.map((k) => ({ k, monto: egrByMon[k] ?? 0 })).filter((x) => x.monto > 0.005);
+  const btn = (active: boolean) => `rounded-md px-3 py-1.5 text-[11px] uppercase tracking-widest ${active ? "bg-cacao text-white" : "text-cacao hover:bg-marfil-soft"}`;
+
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 flex-wrap">
         <button type="button" onClick={() => { setCargando(true); setMes((m) => moverMes(m, -1)); }} className="rounded-lg ring-1 ring-marfil px-2.5 py-1.5 text-cacao hover:bg-marfil-soft" aria-label="Mes anterior">←</button>
         <span className="font-cinzel text-base text-cacao min-w-[9rem] text-center">{nombreMes(mes)}</span>
         <button type="button" onClick={() => { setCargando(true); setMes((m) => moverMes(m, 1)); }} className="rounded-lg ring-1 ring-marfil px-2.5 py-1.5 text-cacao hover:bg-marfil-soft" aria-label="Mes siguiente">→</button>
+        <div className="ml-auto flex gap-1 rounded-lg ring-1 ring-marfil p-1">
+          {([["eur", "Todo en €"], ["usd", "Todo en $"], ["moneda", "Por moneda"]] as const).map(([k, label]) => (
+            <button key={k} type="button" onClick={() => setVista(k)} className={btn(vista === k)}>{label}</button>
+          ))}
+        </div>
       </div>
 
       {error && <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419]">{error}</div>}
@@ -2348,29 +2400,56 @@ function SeccionEstado() {
         <p className="rounded-2xl bg-white ring-1 ring-marfil p-5 text-cacao-soft italic font-serif">Cargando…</p>
       ) : (
         <>
-          <div className="grid gap-3 sm:grid-cols-3">
-            <CajaMonedas titulo="Ingresos" datos={ingByMon} monedas={monedas} />
-            <CajaMonedas titulo="Egresos" datos={egrByMon} monedas={monedas} />
-            <div className="rounded-2xl ring-1 p-4 bg-[#0F0F0F] text-[#EDE7E0] ring-[#0F0F0F]">
-              <div className="font-display text-[9px] tracking-[0.25em] uppercase text-[#9A938B]">Balance del mes</div>
-              <div className="mt-1 space-y-0.5">
-                {monedas.length === 0 ? (
-                  <div className="text-lg font-medium">—</div>
-                ) : (
-                  monedas.map((k) => {
-                    const bal = (ingByMon[k] ?? 0) - (egrByMon[k] ?? 0);
-                    return <div key={k} className={`text-lg font-medium leading-tight ${bal < 0 ? "text-[#E7A99B]" : ""}`}>{bal < 0 ? `− ${fmtMonto(Math.abs(bal), k)}` : fmtMonto(bal, k)}</div>;
-                  })
-                )}
+          {unificado ? (
+            <>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="rounded-2xl bg-white ring-1 ring-marfil p-4">
+                  <div className="font-display text-[9px] tracking-[0.25em] uppercase text-cacao-mute">Ingresos</div>
+                  <div className="mt-1 text-lg font-medium text-cacao leading-tight">{fmtMonto(ingUni, monedaUni)}</div>
+                </div>
+                <div className="rounded-2xl bg-white ring-1 ring-marfil p-4">
+                  <div className="font-display text-[9px] tracking-[0.25em] uppercase text-cacao-mute">Egresos</div>
+                  <div className="mt-1 text-lg font-medium text-cacao leading-tight">{fmtMonto(egrUni, monedaUni)}</div>
+                  {egrOrig.length > 1 && <div className="text-[10px] text-cacao-mute mt-1">De: {egrOrig.map((x) => fmtMonto(x.monto, x.k)).join(" + ")}</div>}
+                </div>
+                <div className="rounded-2xl ring-1 p-4 bg-[#0F0F0F] text-[#EDE7E0] ring-[#0F0F0F]">
+                  <div className="font-display text-[9px] tracking-[0.25em] uppercase text-[#9A938B]">Balance del mes</div>
+                  <div className={`mt-1 text-lg font-medium leading-tight ${balUni < 0 ? "text-[#E7A99B]" : ""}`}>{balUni < 0 ? `− ${fmtMonto(Math.abs(balUni), monedaUni)}` : fmtMonto(balUni, monedaUni)}</div>
+                  <div className="text-[10px] text-[#9A938B] mt-1.5">Convertido con 1 € = {eurUsd} $. La tasa de cada pago se conserva en su registro.</div>
+                </div>
               </div>
-              {monedas.length > 1 && <div className="text-[10px] text-[#9A938B] mt-1.5">Balance por moneda (no se mezclan).</div>}
-            </div>
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <DesglosePorMoneda titulo="Ingresos por categoría" filas={catPorMoneda(ingresos)} orden={ORDEN} />
-            <DesglosePorMoneda titulo="Egresos por categoría" filas={catPorMoneda(egresos)} orden={ORDEN} />
-          </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <DesgloseUnico titulo="Ingresos por categoría" filas={catUni(ingresos)} moneda={monedaUni} />
+                <DesgloseUnico titulo="Egresos por categoría" filas={catUni(egresos)} moneda={monedaUni} />
+              </div>
+              <p className="text-[11px] text-cacao-soft italic">Los montos originales y su moneda se conservan en la vista <strong>“Por moneda”</strong> y en el detalle de cada egreso (con su tasa). Los pagos en Bs sin equivalente calculado no se convierten.</p>
+            </>
+          ) : (
+            <>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <CajaMonedas titulo="Ingresos" datos={ingByMon} monedas={monedas} />
+                <CajaMonedas titulo="Egresos" datos={egrByMon} monedas={monedas} />
+                <div className="rounded-2xl ring-1 p-4 bg-[#0F0F0F] text-[#EDE7E0] ring-[#0F0F0F]">
+                  <div className="font-display text-[9px] tracking-[0.25em] uppercase text-[#9A938B]">Balance del mes</div>
+                  <div className="mt-1 space-y-0.5">
+                    {monedas.length === 0 ? (
+                      <div className="text-lg font-medium">—</div>
+                    ) : (
+                      monedas.map((k) => {
+                        const bal = (ingByMon[k] ?? 0) - (egrByMon[k] ?? 0);
+                        return <div key={k} className={`text-lg font-medium leading-tight ${bal < 0 ? "text-[#E7A99B]" : ""}`}>{bal < 0 ? `− ${fmtMonto(Math.abs(bal), k)}` : fmtMonto(bal, k)}</div>;
+                      })
+                    )}
+                  </div>
+                  {monedas.length > 1 && <div className="text-[10px] text-[#9A938B] mt-1.5">Balance por moneda (no se mezclan).</div>}
+                </div>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <DesglosePorMoneda titulo="Ingresos por categoría" filas={catPorMoneda(ingresos)} orden={ORDEN} />
+                <DesglosePorMoneda titulo="Egresos por categoría" filas={catPorMoneda(egresos)} orden={ORDEN} />
+              </div>
+            </>
+          )}
 
           {ingresos.length === 0 && egresos.length === 0 && (
             <p className="rounded-2xl bg-white ring-1 ring-marfil p-8 text-center text-cacao-soft italic font-serif">
@@ -2395,6 +2474,29 @@ function CajaMonedas({ titulo, datos, monedas }: { titulo: string; datos: Record
         )}
       </div>
     </div>
+  );
+}
+
+function DesgloseUnico({ titulo, filas, moneda }: { titulo: string; filas: [string, number][]; moneda: string }) {
+  const total = filas.reduce((s, [, v]) => s + v, 0);
+  return (
+    <section className="rounded-2xl bg-white ring-1 ring-marfil overflow-hidden">
+      <div className="px-4 py-2.5 font-display text-[10px] tracking-[0.25em] uppercase text-cacao-mute border-b border-marfil flex items-center justify-between">
+        <span>{titulo}</span><span className="text-cacao tabular-nums normal-case tracking-normal">{fmtMonto(total, moneda)}</span>
+      </div>
+      {filas.length === 0 ? (
+        <p className="p-4 text-sm text-cacao-soft italic font-serif">Nada este mes.</p>
+      ) : (
+        <ul className="divide-y divide-marfil">
+          {filas.map(([nombre, v]) => (
+            <li key={nombre} className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm">
+              <span className="text-cacao-soft">{nombre}</span>
+              <span className="text-cacao text-right whitespace-nowrap tabular-nums">{fmtMonto(v, moneda)}{total > 0.005 ? ` · ${((v / total) * 100).toFixed(0)}%` : ""}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 
