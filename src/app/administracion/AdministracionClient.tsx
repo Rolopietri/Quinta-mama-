@@ -1554,16 +1554,25 @@ type Ingreso = {
 
 function SeccionIngresos() {
   const [vista, setVista] = useState<"ingresos" | "importar" | "factura" | "categorias">("ingresos");
+  // "Por factura (cuadre)" se habilita el 1 de septiembre de 2026 (cuando pasa a
+  // reemplazar la carga). Hasta entonces queda oculta.
+  const habilitarFactura = new Date() >= new Date("2026-09-01T00:00:00");
+  const tabs: [typeof vista, string][] = [
+    ["ingresos", "Ingresos"],
+    ["importar", "Importar (Setux)"],
+    ...(habilitarFactura ? ([["factura", "Por factura (cuadre)"]] as [typeof vista, string][]) : []),
+    ["categorias", "Categorías"],
+  ];
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap gap-1 rounded-lg ring-1 ring-marfil p-1 w-fit">
-        {([["ingresos", "Ingresos"], ["importar", "Importar (Setux)"], ["factura", "Por factura (cuadre)"], ["categorias", "Categorías"]] as const).map(([k, label]) => (
+        {tabs.map(([k, label]) => (
           <button key={k} type="button" onClick={() => setVista(k)} className={`rounded-md px-3 py-1.5 text-xs uppercase tracking-widest ${vista === k ? "bg-cacao text-white" : "text-cacao hover:bg-marfil-soft"}`}>
             {label}
           </button>
         ))}
       </div>
-      {vista === "ingresos" ? <IngresosMes /> : vista === "importar" ? <ImportarSetux /> : vista === "factura" ? <CuadreFacturas /> : <CategoriasIngresoCatalogo />}
+      {vista === "ingresos" ? <IngresosMes /> : vista === "importar" ? <ImportarSetux /> : vista === "factura" && habilitarFactura ? <CuadreFacturas /> : <CategoriasIngresoCatalogo />}
     </div>
   );
 }
