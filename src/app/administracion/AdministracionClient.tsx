@@ -1161,6 +1161,7 @@ function SeccionEgresos() {
 function EgresosMes() {
   const [mes, setMes] = useState<string>(mesActualISO());
   const [egresos, setEgresos] = useState<Egreso[]>([]);
+  const [compras, setCompras] = useState<Compra[]>([]); // compras de insumos (Cocina) reflejadas
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [proveedores, setProveedores] = useState<Proveedor[]>([]);
   const [cargando, setCargando] = useState(true);
@@ -1175,14 +1176,18 @@ function EgresosMes() {
     let a = true;
     (async () => {
       try {
-        const [re, rc, rp] = await Promise.all([
+        const [y, m] = mes.split("-").map((x) => parseInt(x, 10));
+        const finMes = `${mes}-${String(new Date(y, m, 0).getDate()).padStart(2, "0")}`;
+        const [re, rc, rp, cp] = await Promise.all([
           fetch(`/api/admin/egresos?mes=${mes}`, { cache: "no-store" }),
           fetch("/api/admin/categorias", { cache: "no-store" }),
           fetch("/api/admin/proveedores", { cache: "no-store" }),
+          listComprasRango(`${mes}-01`, finMes).catch(() => [] as Compra[]),
         ]);
         const [de, dc, dp] = await Promise.all([re.json(), rc.json(), rp.json()]);
         if (a) {
           setEgresos(de.egresos ?? []);
+          setCompras(cp);
           setCategorias(dc.categorias ?? []);
           setProveedores(dp.proveedores ?? []);
         }
@@ -1195,10 +1200,24 @@ function EgresosMes() {
     return () => { a = false; };
   }, [mes, tick]);
 
-  const totalUSD = egresos.reduce((s, e) => s + (e.monto_usd ?? 0), 0);
-  const fijasUSD = egresos.filter((e) => e.clasificacion === "fija").reduce((s, e) => s + (e.monto_usd ?? 0), 0);
-  const variablesUSD = egresos.filter((e) => e.clasificacion === "variable").reduce((s, e) => s + (e.monto_usd ?? 0), 0);
-  const sinTasa = egresos.some((e) => e.monto != null && e.monto_usd == null);
+  // Compras de insumos (Cocina) reflejadas como egresos en $ (solo lectura).
+  const comprasEgreso: Egreso[] = compras
+    .filter((c) => (c.precioTotalUsd ?? 0) > 0.005)
+    .map((c) => ({
+      id: `compra:${c.id}`, fecha: c.fecha, concepto: "Compra de insumos", categoria_id: null,
+      categoria_nombre: "Insumos (Cocina)", clasificacion: "variable",
+      proveedor_id: null, proveedor_nombre: null,
+      monto: c.precioTotalUsd, moneda: "USD", tasa: null, monto_usd: c.precioTotalUsd,
+      metodo: c.modalidadPago ?? null, factura: null, nota: null, solicitud_linea_id: null,
+    }) as unknown as Egreso);
+  const egresosAll: Egreso[] = [...egresos, ...comprasEgreso]
+    .sort((a2, b2) => (b2.fecha ?? "").localeCompare(a2.fecha ?? ""));
+  const esCocina = (e: Egreso) => e.id.startsWith("compra:");
+
+  const totalUSD = egresosAll.reduce((s, e) => s + (e.monto_usd ?? 0), 0);
+  const fijasUSD = egresosAll.filter((e) => e.clasificacion === "fija").reduce((s, e) => s + (e.monto_usd ?? 0), 0);
+  const variablesUSD = egresosAll.filter((e) => e.clasificacion === "variable").reduce((s, e) => s + (e.monto_usd ?? 0), 0);
+  const sinTasa = egresosAll.some((e) => e.monto != null && e.monto_usd == null);
 
   async function borrar(id: string) {
     try {
@@ -1247,15 +1266,17 @@ function EgresosMes() {
       <section className="rounded-2xl bg-white ring-1 ring-marfil overflow-hidden">
         {cargando ? (
           <p className="p-5 text-cacao-soft italic font-serif">Cargando…</p>
-        ) : egresos.length === 0 ? (
+        ) : egresosAll.length === 0 ? (
           <p className="p-8 text-center text-cacao-soft italic font-serif">No hay egresos en {nombreMes(mes)}.</p>
         ) : (
           <ul className="divide-y divide-marfil">
-            {egresos.map((e) => (
+            {egresosAll.map((e) => {
+              const cocina = esCocina(e);
+              return (
               <li key={e.id} className="flex items-start gap-3 p-3.5">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-baseline justify-between gap-3">
-                    <span className="text-cacao font-medium truncate">{e.proveedor_nombre || e.concepto || "(egreso)"}</span>
+                    <span className="text-cacao font-medium truncate">{e.proveedor_nombre || e.concepto || "(egreso)"}{cocina && <span className="ml-2 align-middle inline-block rounded-full bg-marfil-soft text-cacao-mute text-[9px] uppercase tracking-widest px-2 py-0.5">Cocina</span>}</span>
                     <span className="text-cacao whitespace-nowrap">{e.monto != null ? fmtMonto(e.monto, e.moneda || "Bs") : "—"}</span>
                   </div>
                   <div className="text-[11px] text-cacao-mute mt-1 flex flex-wrap gap-x-2">
@@ -1268,11 +1289,18 @@ function EgresosMes() {
                   {e.concepto && e.proveedor_nombre && <div className="text-xs text-cacao-soft mt-0.5">{e.concepto}</div>}
                 </div>
                 <div className="flex gap-2 shrink-0">
-                  <button type="button" onClick={() => { setEditando(e); setModo("form"); }} className="text-cacao-soft hover:text-cacao text-sm" aria-label="Editar">✎</button>
-                  <button type="button" onClick={() => borrar(e.id)} className="text-cacao-soft hover:text-terracotta text-sm" aria-label="Eliminar">✕</button>
+                  {cocina ? (
+                    <span className="text-cacao-mute text-[10px] uppercase tracking-widest self-center" title="Se gestiona en Cocina → Compras">Cocina ↗</span>
+                  ) : (
+                    <>
+                      <button type="button" onClick={() => { setEditando(e); setModo("form"); }} className="text-cacao-soft hover:text-cacao text-sm" aria-label="Editar">✎</button>
+                      <button type="button" onClick={() => borrar(e.id)} className="text-cacao-soft hover:text-terracotta text-sm" aria-label="Eliminar">✕</button>
+                    </>
+                  )}
                 </div>
               </li>
-            ))}
+              );
+            })}
           </ul>
         )}
       </section>

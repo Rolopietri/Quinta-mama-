@@ -15,7 +15,7 @@ export function AnalisisAdministrativo() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap gap-1 rounded-lg ring-1 ring-marfil p-1 w-fit">
-        {([["ventas", "Ventas"], ["compras", "Compras"], ["resumen", "Resumen · Utilidad real"]] as const).map(([k, label]) => (
+        {([["ventas", "Ingresos"], ["compras", "Egresos"], ["resumen", "Resumen · Utilidad real"]] as const).map(([k, label]) => (
           <button key={k} type="button" onClick={() => setSub(k)} className={`rounded-md px-3 py-1.5 text-xs uppercase tracking-widest ${sub === k ? "bg-cacao text-white" : "text-cacao hover:bg-marfil-soft"}`}>
             {label}
           </button>
