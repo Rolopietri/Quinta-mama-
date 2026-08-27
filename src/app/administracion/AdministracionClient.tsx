@@ -2668,6 +2668,10 @@ type ClienteCXC = {
   cliente: string; key: string; saldo_usd: number; total_cuentas_usd: number; total_pagos_usd: number;
   ultima: string | null; cuentas: CuentaMov[]; pagos: PagoMov[];
 };
+type IncobrableUI = {
+  id: string; fecha: string; deudor: string | null; ref: string | null; descripcion: string | null;
+  monto: number | null; moneda: string | null; monto_usd: number | null; fecha_incobrable: string | null;
+};
 
 // Métodos de pago disponibles (los mismos que reporta el sistema/Setux).
 const METODOS_COBRO = ["Efectivo", "Pago Móvil", "Zelle", "Punto de Venta", "Transferencia", "Dólar", "Tarjeta de crédito", "Tarjeta de débito", "Otro"];
@@ -2736,6 +2740,8 @@ function estadosDeCuentas(cuentas: CuentaMov[]) {
 
 function SeccionCuentasCobrar() {
   const [clientes, setClientes] = useState<ClienteCXC[]>([]);
+  const [incobrables, setIncobrables] = useState<IncobrableUI[]>([]);
+  const [verIncobrables, setVerIncobrables] = useState(false);
   const [tasa, setTasa] = useState(1.17);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -2766,7 +2772,7 @@ function SeccionCuentasCobrar() {
         ]);
         const d = await r.json();
         const da = await ra.json().catch(() => ({}));
-        if (a) { setClientes(d.clientes ?? []); if (d.tasa) setTasa(d.tasa); setAliases(da.aliases ?? []); }
+        if (a) { setClientes(d.clientes ?? []); setIncobrables(d.incobrables ?? []); if (d.tasa) setTasa(d.tasa); setAliases(da.aliases ?? []); }
       } catch {
         if (a) setError("No se pudieron cargar las cuentas por cobrar.");
       } finally {
@@ -2834,6 +2840,27 @@ function SeccionCuentasCobrar() {
       recargar();
     } catch { setError("No se pudo eliminar la cuenta."); }
   }
+  async function marcarIncobrable(cuentaId: string) {
+    if (!confirm("Marcar esta cuenta como INCOBRABLE. Sale del saldo por cobrar y se registra como pérdida (egreso “Incobrables”). ¿Continuar?")) return;
+    setError(null);
+    try {
+      const r = await fetch("/api/admin/cuentas-cobrar", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accion: "incobrable", cuenta: cuentaId }) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "No se pudo marcar incobrable.");
+      setMsg("Cuenta marcada incobrable (registrada como pérdida).");
+      recargar();
+    } catch (e) { setError(e instanceof Error ? e.message : "No se pudo marcar incobrable."); }
+  }
+  async function reactivarIncobrable(cuentaId: string) {
+    setError(null);
+    try {
+      const r = await fetch("/api/admin/cuentas-cobrar", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accion: "reactivar", cuenta: cuentaId }) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "No se pudo reactivar.");
+      setMsg("Cuenta reactivada (se revirtió la pérdida).");
+      recargar();
+    } catch (e) { setError(e instanceof Error ? e.message : "No se pudo reactivar."); }
+  }
   async function unirCliente(alias: string, canonico: string) {
     setError(null);
     try {
@@ -2881,11 +2908,37 @@ function SeccionCuentasCobrar() {
         <ResumenCaja titulo="Por cobrar" valor={fmtMonto(eurDe(totalUsd), "EUR")} sub={`≈ ${fmtMonto(totalUsd, "USD")} · ${deudores.length} cliente${deudores.length === 1 ? "" : "s"}`} fuerte />
         <div className="sm:col-span-2 rounded-2xl bg-white ring-1 ring-marfil p-4 flex items-center justify-between gap-3">
           <p className="text-sm text-cacao-soft">{deudores.length} cliente{deudores.length === 1 ? "" : "s"} con saldo pendiente. Selecciona uno para ver su detalle o cobrarle. El historial se conserva siempre.</p>
-          {saldados.length > 0 && (
-            <button type="button" onClick={() => setVerSaldados((v) => !v)} className="rounded-lg ring-1 ring-marfil text-cacao px-3 py-1.5 text-[11px] uppercase tracking-widest hover:bg-marfil-soft shrink-0">{verSaldados ? "Ocultar saldados" : `Ver saldados (${saldados.length})`}</button>
-          )}
+          <div className="flex items-center gap-2 shrink-0">
+            {incobrables.length > 0 && (
+              <button type="button" onClick={() => setVerIncobrables((v) => !v)} className="rounded-lg ring-1 ring-[#E8C5BC] text-[#7A2419] px-3 py-1.5 text-[11px] uppercase tracking-widest hover:bg-[#F9EBE7]">{verIncobrables ? "Ocultar incobrables" : `Incobrables (${incobrables.length})`}</button>
+            )}
+            {saldados.length > 0 && (
+              <button type="button" onClick={() => setVerSaldados((v) => !v)} className="rounded-lg ring-1 ring-marfil text-cacao px-3 py-1.5 text-[11px] uppercase tracking-widest hover:bg-marfil-soft">{verSaldados ? "Ocultar saldados" : `Ver saldados (${saldados.length})`}</button>
+            )}
+          </div>
         </div>
       </div>
+
+      {/* Incobrables (pérdidas) */}
+      {verIncobrables && incobrables.length > 0 && (
+        <div className="rounded-2xl bg-white ring-1 ring-[#E8C5BC] overflow-hidden">
+          <div className="px-4 py-2.5 bg-[#F9EBE7] flex items-center justify-between gap-2">
+            <span className="font-display text-[10px] tracking-[0.25em] uppercase text-[#7A2419]">Incobrables · pérdidas ({incobrables.length})</span>
+            <span className="text-[12px] text-[#7A2419] tabular-nums">{fmtMonto(incobrables.reduce((s, x) => s + (x.monto ?? 0), 0), "EUR")}</span>
+          </div>
+          <ul className="divide-y divide-marfil">
+            {incobrables.map((x) => (
+              <li key={x.id} className="px-4 py-2 grid grid-cols-[auto_1fr_auto_auto] gap-3 items-center text-[12px]">
+                <span className="text-cacao-mute tabular-nums">{fmtFecha(x.fecha_incobrable || x.fecha)}</span>
+                <span className="text-cacao min-w-0 truncate">{x.deudor || "—"}{x.ref ? ` · ${x.ref}` : ""}</span>
+                <span className="text-right text-[#7A2419] tabular-nums">{x.monto != null ? fmtMonto(x.monto, x.moneda || "EUR") : "—"}</span>
+                <button type="button" onClick={() => reactivarIncobrable(x.id)} className="text-cacao-soft hover:text-cacao text-[10px] uppercase tracking-widest" title="Reactivar (revierte la pérdida)">Reactivar</button>
+              </li>
+            ))}
+          </ul>
+          <p className="px-4 py-2 text-[11px] text-cacao-mute">Cada incobrable queda registrado como egreso “Incobrables” (pérdida) en su fecha. Reactivar revierte esa pérdida y la vuelve a poner por cobrar.</p>
+        </div>
+      )}
 
       {/* Aviso de devaluación (visible; es una alerta, no un ajuste) */}
       {devalPct != null && devalPct > 0 && perdidaTotal > 0.005 && (
@@ -2991,6 +3044,7 @@ function SeccionCuentasCobrar() {
                               <span className="text-right text-cacao tabular-nums text-[12px]">{cu.monto != null ? fmtMonto(cu.monto, cu.moneda || "EUR") : "—"}</span>
                               <span className="text-right">
                                 <span className={`inline-block rounded-full px-2 py-0.5 text-[9px] uppercase tracking-widest ${estado === "Pagada" ? "bg-[#F1F4ED] text-[#2F4A1F]" : estado === "Parcial" ? "bg-[#FBF3E2] text-[#7A5A18]" : estado === "A favor" ? "bg-[#EAF0EA] text-[#2F4A1F]" : "bg-[#F9EBE7] text-[#7A2419]"}`}>{estado}</span>
+                                {estado !== "Pagada" && <button type="button" onClick={() => marcarIncobrable(cu.id)} className="ml-2 text-cacao-soft hover:text-terracotta text-[10px] uppercase tracking-widest" title="Marcar incobrable (pérdida)">Incobrable</button>}
                                 <button type="button" onClick={() => borrarCuenta(cu.id)} className="ml-2 text-cacao-soft hover:text-terracotta text-xs" aria-label="Eliminar cuenta">✕</button>
                               </span>
                             </li>

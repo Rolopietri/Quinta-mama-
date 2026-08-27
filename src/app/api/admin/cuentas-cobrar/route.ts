@@ -36,7 +36,8 @@ const r2 = (n: number) => Math.round(n * 100) / 100;
 type CuentaRow = {
   id: string; fecha: string; descripcion: string | null; deudor: string | null; ref: string | null;
   monto: number | null; moneda: string | null; tasa: number | null; monto_usd: number | null;
-  cobrada: boolean; fuente: string | null;
+  cobrada: boolean; fuente: string | null; incobrable?: boolean | null; fecha_incobrable?: string | null;
+  incobrable_egreso_id?: string | null;
 };
 type Asignacion = { cuenta_id: string; ref: string | null; eur: number; usd: number };
 type PagoRow = {
@@ -52,7 +53,8 @@ async function cargarClientes(sb: ReturnType<typeof createServiceClient>) {
     sb!.from("admin_cxc_pago").select("*").order("fecha", { ascending: true }),
     sb!.from("admin_cliente_alias").select("alias_key, canonico"),
   ]);
-  const cuentas = (cuentasD as CuentaRow[]) ?? [];
+  // Excluye las marcadas incobrables (son pérdida, ya no cuentan como por cobrar).
+  const cuentas = ((cuentasD as CuentaRow[]) ?? []).filter((c) => !c.incobrable);
   // Ignora pagos huérfanos: cobros cuyo ingreso fue eliminado en el módulo de
   // Ingresos (ingreso_id quedó nulo). Así el saldo vuelve a reflejar la deuda.
   const pagos = ((pagosD as PagoRow[]) ?? []).filter((p) => p.ingreso_id != null);
@@ -126,7 +128,17 @@ export async function GET(req: NextRequest) {
   if (!sb) return NextResponse.json({ error: "servidor no configurado" }, { status: 500 });
   const clientes = await cargarClientes(sb);
   const tasa = await getTasaEurUsd(sb);
-  return NextResponse.json({ clientes, tasa });
+  // Cuentas marcadas incobrables (pérdidas), para verlas/revertirlas aparte.
+  const { data: incD } = await sb
+    .from("admin_cuenta_cobrar")
+    .select("id, fecha, deudor, ref, descripcion, monto, moneda, monto_usd, fecha_incobrable")
+    .eq("incobrable", true)
+    .order("fecha_incobrable", { ascending: false });
+  const incobrables = ((incD as CuentaRow[]) ?? []).map((c) => ({
+    id: c.id, fecha: c.fecha, deudor: c.deudor, ref: c.ref, descripcion: c.descripcion,
+    monto: c.monto, moneda: c.moneda, monto_usd: c.monto_usd, fecha_incobrable: c.fecha_incobrable,
+  }));
+  return NextResponse.json({ clientes, tasa, incobrables });
 }
 
 // POST { accion: 'cobro' | 'cuenta' }
@@ -238,6 +250,55 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: falta ? "Falta la tabla de pagos o la columna 'asignaciones'. Corre 'supabase/admin-cxc-v2.sql' y 'supabase/admin-cxc-asignaciones.sql'." : ePago.message }, { status: 500 });
     }
     return NextResponse.json({ ok: true, pago_id: pago.id, ingreso_id: ingreso.id, cobrado_eur: r2(montoEur), favor_eur: favorEur });
+  }
+
+  // ── Marcar una cuenta INCOBRABLE (pérdida) ──
+  if (b.accion === "incobrable") {
+    const cuentaId = texto(b.cuenta);
+    if (!cuentaId) return NextResponse.json({ error: "Falta la cuenta." }, { status: 400 });
+    const { data: cu, error: eCu } = await sb.from("admin_cuenta_cobrar").select("*").eq("id", cuentaId).single();
+    if (eCu || !cu) return NextResponse.json({ error: "No encontré la cuenta." }, { status: 404 });
+    if ((cu as CuentaRow).incobrable) return NextResponse.json({ ok: true, ya: true });
+    const fecha = new Date().toISOString().slice(0, 10);
+    // Registra la pérdida como egreso (categoría "Incobrables").
+    const { data: eg, error: eEg } = await sb.from("admin_egreso").insert({
+      fecha,
+      concepto: `Incobrable — ${cu.deudor ?? "cliente"}${cu.ref ? ` (${cu.ref})` : ""}`,
+      categoria_nombre: "Incobrables",
+      clasificacion: "variable",
+      monto: cu.monto,
+      moneda: cu.moneda ?? "EUR",
+      tasa: cu.tasa,
+      monto_usd: cu.monto_usd,
+      metodo: null,
+      factura: cu.ref,
+      nota: "Cuenta por cobrar dada por incobrable (pérdida para la empresa)",
+      fuente: "cxc-incobrable",
+    }).select("id").single();
+    if (eEg) return NextResponse.json({ error: eEg.message }, { status: 500 });
+    const { error: eUp } = await sb.from("admin_cuenta_cobrar")
+      .update({ incobrable: true, fecha_incobrable: fecha, incobrable_egreso_id: eg.id })
+      .eq("id", cuentaId);
+    if (eUp) {
+      await sb.from("admin_egreso").delete().eq("id", eg.id); // rollback
+      const falta = (eUp as { code?: string }).code === "42703" || /incobrable|schema cache|column/i.test(eUp.message);
+      return NextResponse.json({ error: falta ? "Faltan columnas de incobrable. Corre 'supabase/admin-cxc-incobrable.sql'." : eUp.message }, { status: 500 });
+    }
+    return NextResponse.json({ ok: true });
+  }
+
+  // ── Reactivar una cuenta incobrable (revierte la pérdida) ──
+  if (b.accion === "reactivar") {
+    const cuentaId = texto(b.cuenta);
+    if (!cuentaId) return NextResponse.json({ error: "Falta la cuenta." }, { status: 400 });
+    const { data: cu } = await sb.from("admin_cuenta_cobrar").select("incobrable_egreso_id").eq("id", cuentaId).single();
+    const egId = (cu as CuentaRow | null)?.incobrable_egreso_id;
+    if (egId) await sb.from("admin_egreso").delete().eq("id", egId);
+    const { error } = await sb.from("admin_cuenta_cobrar")
+      .update({ incobrable: false, fecha_incobrable: null, incobrable_egreso_id: null })
+      .eq("id", cuentaId);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ ok: true });
   }
 
   // ── Agregar una cuenta a mano (deuda) ──
