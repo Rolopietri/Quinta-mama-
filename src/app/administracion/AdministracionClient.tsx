@@ -13,14 +13,14 @@ import { AnalisisAdministrativo } from "./AnalisisAdministrativo";
 
 type Seccion = "proveedores" | "solicitudes" | "ingresos" | "analisis-ventas" | "cobrar" | "egresos" | "estado" | "historico";
 const SECCIONES: { id: Seccion; label: string; grupo?: string }[] = [
+  { id: "estado", label: "Estado de Cuenta" },
+  { id: "analisis-ventas", label: "Análisis administrativo" },
+  { id: "ingresos", label: "Ingresos" },
+  { id: "egresos", label: "Egresos" },
+  { id: "cobrar", label: "Cuentas por cobrar" },
+  { id: "historico", label: "Históricos y comparación" },
   { id: "proveedores", label: "Proveedores", grupo: "Proveedores" },
   { id: "solicitudes", label: "Generar solicitud de pagos", grupo: "Proveedores" },
-  { id: "ingresos", label: "Ingresos" },
-  { id: "analisis-ventas", label: "Análisis administrativo" },
-  { id: "cobrar", label: "Cuentas por cobrar" },
-  { id: "egresos", label: "Egresos" },
-  { id: "estado", label: "Estado de Cuenta" },
-  { id: "historico", label: "Históricos y comparación" },
 ];
 
 export function AdministracionClient() {
@@ -108,7 +108,7 @@ function Puerta({ onEntrar }: { onEntrar: () => void }) {
 }
 
 function Panel({ onSalir }: { onSalir: () => void }) {
-  const [seccion, setSeccion] = useState<Seccion>("proveedores");
+  const [seccion, setSeccion] = useState<Seccion>("estado");
   const [menuAbierto, setMenuAbierto] = useState(false);
   const actual = SECCIONES.find((s) => s.id === seccion)!;
 
