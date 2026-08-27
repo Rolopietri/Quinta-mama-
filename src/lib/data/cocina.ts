@@ -534,6 +534,26 @@ type TasaRow = {
   fuente: string | null;
 };
 
+/** Tasas BCV (usd_bs, eur_bs) por fecha dentro de un rango — para convertir
+ *  cada registro con la tasa real de SU día. */
+export async function listTasasBcvRango(desde: string, hasta: string): Promise<TasaBcv[]> {
+  const sb = createSupabaseBrowserClient();
+  const { data, error } = await sb
+    .from("tasa_bcv")
+    .select("fecha, usd_bs, eur_bs, paralela_bs, fuente")
+    .gte("fecha", desde)
+    .lte("fecha", hasta)
+    .order("fecha", { ascending: true });
+  if (error) return [];
+  return (data as TasaRow[]).map((r) => ({
+    fecha: r.fecha,
+    usdBs: Number(r.usd_bs),
+    eurBs: r.eur_bs === null ? undefined : Number(r.eur_bs),
+    paralelaBs: r.paralela_bs === null ? undefined : Number(r.paralela_bs),
+    fuente: r.fuente ?? "bcv",
+  }));
+}
+
 export async function getTasaBcvActual(): Promise<TasaBcv | null> {
   const sb = createSupabaseBrowserClient();
   const { data, error } = await sb

@@ -7,6 +7,8 @@
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { totalesVentasPorMes } from "@/lib/data/ventas";
+import { listTasasBcvRango } from "@/lib/data/cocina";
+import type { TasaBcv } from "@/lib/types";
 import { AnalisisAdministrativo } from "./AnalisisAdministrativo";
 
 type Seccion = "proveedores" | "solicitudes" | "ingresos" | "analisis-ventas" | "cobrar" | "egresos" | "estado" | "historico";
@@ -2289,20 +2291,25 @@ function SeccionEstado() {
   const [error, setError] = useState<string | null>(null);
   // Vista de moneda: unificada en € (por defecto), en $, o cada moneda por separado.
   const [vista, setVista] = useState<"eur" | "usd" | "moneda">("eur");
-  const [eurUsd, setEurUsd] = useState(1.17); // 1 € = X $
+  const [eurUsd, setEurUsd] = useState(1.17); // 1 € = X $ (respaldo si no hay tasa BCV)
+  const [tasasBcv, setTasasBcv] = useState<TasaBcv[]>([]); // tasas BCV del mes (por fecha)
 
   useEffect(() => {
     let a = true;
     (async () => {
       try {
-        const [ri, re] = await Promise.all([
+        const [y, m] = mes.split("-").map((x) => parseInt(x, 10));
+        const finMes = `${mes}-${String(new Date(y, m, 0).getDate()).padStart(2, "0")}`;
+        const [ri, re, tb] = await Promise.all([
           fetch(`/api/admin/ingresos?mes=${mes}`, { cache: "no-store" }),
           fetch(`/api/admin/egresos?mes=${mes}`, { cache: "no-store" }),
+          listTasasBcvRango(`${mes}-01`, finMes).catch(() => [] as TasaBcv[]),
         ]);
         const [di, de] = await Promise.all([ri.json(), re.json()]);
         if (a) {
           setIngresos(di.ingresos ?? []);
           setEgresos(de.egresos ?? []);
+          setTasasBcv(tb);
         }
       } catch {
         if (a) setError("No se pudo cargar el estado de cuenta.");
@@ -2352,18 +2359,26 @@ function SeccionEstado() {
 
   // ── Conversión a moneda única (conserva el original abajo) ──
   // Cada registro guarda monto_usd (equivalente calculado a la tasa con que se
-  // pagó). Para € usamos ese equivalente ÷ (1€=X$); para € nativos, el monto tal cual.
+  // pagó). El paso €↔$ usa el CRUCE BCV REAL del día del registro
+  // (eur_bs ÷ usd_bs); si falta, la última tasa disponible; si no, el 1,17 fijo.
+  const crossMap = new Map<string, number>();
+  let ultimoCross = eurUsd;
+  for (const t of tasasBcv) {
+    if (t.eurBs != null && t.usdBs > 0) { const c = t.eurBs / t.usdBs; crossMap.set(t.fecha, c); ultimoCross = c; }
+  }
+  const crossDe = (fecha: string): number => crossMap.get(fecha) ?? ultimoCross ?? eurUsd;
   const enUSD = (e: Ingreso | Egreso): number => {
     if (e.monto_usd != null) return e.monto_usd;
     const mon = e.moneda || "EUR";
     if (mon === "USD") return e.monto ?? 0;
-    if (mon === "EUR") return (e.monto ?? 0) * eurUsd;
+    if (mon === "EUR") return (e.monto ?? 0) * crossDe(e.fecha);
     return 0; // Bs sin equivalente: no se puede convertir con fiabilidad
   };
   const enEUR = (e: Ingreso | Egreso): number => {
     const mon = e.moneda || "EUR";
     if (mon === "EUR") return e.monto ?? 0;
-    return eurUsd > 0 ? enUSD(e) / eurUsd : 0;
+    const cross = crossDe(e.fecha);
+    return cross > 0 ? enUSD(e) / cross : 0;
   };
   const conv = vista === "usd" ? enUSD : enEUR;
   const monedaUni = vista === "usd" ? "USD" : "EUR";
@@ -2415,7 +2430,7 @@ function SeccionEstado() {
                 <div className="rounded-2xl ring-1 p-4 bg-[#0F0F0F] text-[#EDE7E0] ring-[#0F0F0F]">
                   <div className="font-display text-[9px] tracking-[0.25em] uppercase text-[#9A938B]">Balance del mes</div>
                   <div className={`mt-1 text-lg font-medium leading-tight ${balUni < 0 ? "text-[#E7A99B]" : ""}`}>{balUni < 0 ? `− ${fmtMonto(Math.abs(balUni), monedaUni)}` : fmtMonto(balUni, monedaUni)}</div>
-                  <div className="text-[10px] text-[#9A938B] mt-1.5">Convertido con 1 € = {eurUsd} $. La tasa de cada pago se conserva en su registro.</div>
+                  <div className="text-[10px] text-[#9A938B] mt-1.5">Convertido con la tasa BCV real de cada fecha ({crossMap.size > 0 ? `≈ 1 € = ${ultimoCross.toFixed(2)} $` : `1 € = ${eurUsd} $`}). La tasa de cada pago se conserva en su registro.</div>
                 </div>
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
