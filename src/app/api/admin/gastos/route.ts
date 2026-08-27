@@ -38,8 +38,27 @@ export async function GET(req: NextRequest) {
   const prevDesde = `${iniPrev.getFullYear()}-${String(iniPrev.getMonth() + 1).padStart(2, "0")}-${String(iniPrev.getDate()).padStart(2, "0")}`;
   const prevHasta = `${finPrev.getFullYear()}-${String(finPrev.getMonth() + 1).padStart(2, "0")}-${String(finPrev.getDate()).padStart(2, "0")}`;
 
-  const tasa = await getTasaEurUsd(sb); // € → $
-  const eurDe = (e: EgRow) => ((e.moneda ?? "EUR") === "EUR" ? n(e.monto) : (tasa > 0 ? n(e.monto_usd) / tasa : n(e.monto_usd)));
+  const tasa = await getTasaEurUsd(sb); // € → $ (respaldo si no hay tasa BCV)
+  // Cruce BCV real por fecha (eur_bs ÷ usd_bs) para el paso €↔$. Histórico.
+  const { data: tbData } = await sb
+    .from("tasa_bcv")
+    .select("fecha, usd_bs, eur_bs")
+    .gte("fecha", prevDesde)
+    .lte("fecha", hasta)
+    .order("fecha", { ascending: true });
+  const crossMap = new Map<string, number>();
+  let ultimoCross = tasa;
+  for (const t of (tbData ?? []) as { fecha: string; usd_bs: number | null; eur_bs: number | null }[]) {
+    const usd = n(t.usd_bs), eur = n(t.eur_bs);
+    if (eur > 0 && usd > 0) { const c = eur / usd; crossMap.set(t.fecha, c); ultimoCross = c; }
+  }
+  const crossDe = (fecha: string | null) => (fecha && crossMap.get(fecha)) || ultimoCross || tasa;
+  // Egreso a €: los EUR tal cual; los demás con su monto_usd ÷ cruce BCV del día.
+  const eurDe = (e: EgRow) => {
+    if ((e.moneda ?? "EUR") === "EUR") return n(e.monto);
+    const c = crossDe(e.fecha);
+    return c > 0 ? n(e.monto_usd) / c : n(e.monto_usd);
+  };
   const esCortesia = (e: EgRow) => norm(e.categoria_nombre).includes("cortesia");
   const esInsumo = (e: EgRow) => norm(e.categoria_nombre) === "insumos";
   const esFijo = (e: EgRow) => norm(e.clasificacion) === "fija" || norm(e.clasificacion) === "fijo";
