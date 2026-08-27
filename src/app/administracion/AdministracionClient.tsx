@@ -2326,8 +2326,8 @@ function SeccionEstado() {
   const [egresos, setEgresos] = useState<Egreso[]>([]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  // Vista de moneda: unificada en € (por defecto), en $, o cada moneda por separado.
-  const [vista, setVista] = useState<"eur" | "usd" | "moneda">("eur");
+  // Vista de moneda: todo en € (por defecto) o todo en $.
+  const [vista, setVista] = useState<"eur" | "usd">("eur");
   const [eurUsd, setEurUsd] = useState(1.17); // 1 € = X $ (respaldo si no hay tasa BCV)
   const [tasasBcv, setTasasBcv] = useState<TasaBcv[]>([]); // tasas BCV del mes (por fecha)
   const [compras, setCompras] = useState<Compra[]>([]); // compras de insumos (Cocina) = egresos en $
@@ -2400,16 +2400,6 @@ function SeccionEstado() {
     [...new Set([...Object.keys(ingByMon), ...Object.keys(egrByMon)])].filter((k) => !ORDEN.includes(k) && conValor(k)),
   );
 
-  const catPorMoneda = (arr: (Ingreso | Egreso)[]): [string, Record<string, number>][] => {
-    const o: Record<string, Record<string, number>> = {};
-    for (const e of arr) {
-      const cat = e.categoria_nombre || "Sin categoría";
-      const k = e.moneda || "EUR";
-      (o[cat] ??= {})[k] = (o[cat][k] ?? 0) + (e.monto ?? 0);
-    }
-    return Object.entries(o);
-  };
-
   // ── Conversión a moneda única (conserva el original abajo) ──
   // Cada registro guarda monto_usd (equivalente calculado a la tasa con que se
   // pagó). El paso €↔$ usa el CRUCE BCV REAL del día del registro
@@ -2435,7 +2425,6 @@ function SeccionEstado() {
   };
   const conv = vista === "usd" ? enUSD : enEUR;
   const monedaUni = vista === "usd" ? "USD" : "EUR";
-  const unificado = vista !== "moneda";
   const ingUni = ingresos.reduce((s, e) => s + conv(e), 0);
   const egrUni = egresosAll.reduce((s, e) => s + conv(e), 0);
   const balUni = ingUni - egrUni;
@@ -2456,7 +2445,7 @@ function SeccionEstado() {
         <span className="font-cinzel text-base text-cacao min-w-[9rem] text-center">{nombreMes(mes)}</span>
         <button type="button" onClick={() => { setCargando(true); setMes((m) => moverMes(m, 1)); }} className="rounded-lg ring-1 ring-marfil px-2.5 py-1.5 text-cacao hover:bg-marfil-soft" aria-label="Mes siguiente">→</button>
         <div className="ml-auto flex gap-1 rounded-lg ring-1 ring-marfil p-1">
-          {([["eur", "Todo en €"], ["usd", "Todo en $"], ["moneda", "Por moneda"]] as const).map(([k, label]) => (
+          {([["eur", "Todo en €"], ["usd", "Todo en $"]] as const).map(([k, label]) => (
             <button key={k} type="button" onClick={() => setVista(k)} className={btn(vista === k)}>{label}</button>
           ))}
         </div>
@@ -2468,7 +2457,7 @@ function SeccionEstado() {
         <p className="rounded-2xl bg-white ring-1 ring-marfil p-5 text-cacao-soft italic font-serif">Cargando…</p>
       ) : (
         <>
-          {unificado ? (
+          {(
             <>
               <div className="grid gap-3 sm:grid-cols-3">
                 <div className="rounded-2xl bg-white ring-1 ring-marfil p-4">
@@ -2490,46 +2479,7 @@ function SeccionEstado() {
                 <DesgloseUnico titulo="Ingresos por categoría" filas={catUni(ingresos)} moneda={monedaUni} />
                 <DesgloseUnico titulo="Egresos por categoría" filas={catUni(egresosAll)} moneda={monedaUni} />
               </div>
-              <p className="text-[11px] text-cacao-soft italic">Los montos originales y su moneda se conservan en la vista <strong>“Por moneda”</strong> y en el detalle de cada egreso (con su tasa). Los pagos en Bs sin equivalente calculado no se convierten.</p>
-            </>
-          ) : (
-            <>
-              <div className="grid gap-3 sm:grid-cols-3">
-                <CajaMonedas titulo="Ingresos" datos={ingByMon} monedas={monedas} />
-                <CajaMonedas titulo="Egresos" datos={egrByMon} monedas={monedas} />
-                <div className="rounded-2xl ring-1 p-4 bg-[#0F0F0F] text-[#EDE7E0] ring-[#0F0F0F]">
-                  <div className="font-display text-[9px] tracking-[0.25em] uppercase text-[#9A938B]">Balance del mes</div>
-                  <div className="mt-1 space-y-0.5">
-                    {monedas.length === 0 ? (
-                      <div className="text-lg font-medium">—</div>
-                    ) : (
-                      monedas.map((k) => {
-                        const bal = (ingByMon[k] ?? 0) - (egrByMon[k] ?? 0);
-                        return <div key={k} className={`text-lg font-medium leading-tight ${bal < 0 ? "text-[#E7A99B]" : ""}`}>{bal < 0 ? `− ${fmtMonto(Math.abs(bal), k)}` : fmtMonto(bal, k)}</div>;
-                      })
-                    )}
-                  </div>
-                  {monedas.length > 1 && <div className="text-[10px] text-[#9A938B] mt-1.5">Balance por moneda (no se mezclan).</div>}
-                </div>
-              </div>
-
-              {/* Total REAL: todo convertido a € (tasa BCV real) para el número final */}
-              <div className="rounded-2xl bg-marfil-soft ring-1 ring-marfil p-4">
-                <div className="flex items-center justify-between gap-3 mb-2">
-                  <span className="font-display text-[9px] tracking-[0.25em] uppercase text-cacao-mute">Total real del mes (todo en €)</span>
-                  <span className="text-[10px] text-cacao-mute">tasa BCV real por fecha</span>
-                </div>
-                <div className="grid grid-cols-3 gap-3 text-center">
-                  <div><div className="text-[10px] uppercase tracking-widest text-cacao-mute">Ingresos</div><div className="text-lg font-medium text-cacao">{fmtMonto(ingUni, "EUR")}</div></div>
-                  <div><div className="text-[10px] uppercase tracking-widest text-cacao-mute">Egresos</div><div className="text-lg font-medium text-cacao">{fmtMonto(egrUni, "EUR")}</div></div>
-                  <div><div className="text-[10px] uppercase tracking-widest text-cacao-mute">Balance</div><div className={`text-lg font-medium ${balUni < 0 ? "text-[#7A2419]" : "text-[#2F4A1F]"}`}>{balUni < 0 ? `− ${fmtMonto(Math.abs(balUni), "EUR")}` : fmtMonto(balUni, "EUR")}</div></div>
-                </div>
-              </div>
-
-              <div className="grid gap-4 sm:grid-cols-2">
-                <DesglosePorMoneda titulo="Ingresos por categoría" filas={catPorMoneda(ingresos)} orden={ORDEN} />
-                <DesglosePorMoneda titulo="Egresos por categoría" filas={catPorMoneda(egresosAll)} orden={ORDEN} />
-              </div>
+              <p className="text-[11px] text-cacao-soft italic">Cada egreso conserva su moneda y tasa originales en su registro; el detalle por moneda está en Análisis administrativo. Los pagos en Bs sin equivalente calculado no se convierten.</p>
             </>
           )}
 
@@ -2540,21 +2490,6 @@ function SeccionEstado() {
           )}
         </>
       )}
-    </div>
-  );
-}
-
-function CajaMonedas({ titulo, datos, monedas }: { titulo: string; datos: Record<string, number>; monedas: string[] }) {
-  return (
-    <div className="rounded-2xl bg-white ring-1 ring-marfil p-4">
-      <div className="font-display text-[9px] tracking-[0.25em] uppercase text-cacao-mute">{titulo}</div>
-      <div className="mt-1 space-y-0.5">
-        {monedas.length === 0 ? (
-          <div className="text-lg font-medium text-cacao">—</div>
-        ) : (
-          monedas.map((k) => <div key={k} className="text-lg font-medium text-cacao leading-tight">{fmtMonto(datos[k] ?? 0, k)}</div>)
-        )}
-      </div>
     </div>
   );
 }
@@ -2574,28 +2509,6 @@ function DesgloseUnico({ titulo, filas, moneda }: { titulo: string; filas: [stri
             <li key={nombre} className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm">
               <span className="text-cacao-soft">{nombre}</span>
               <span className="text-cacao text-right whitespace-nowrap tabular-nums">{fmtMonto(v, moneda)}{total > 0.005 ? ` · ${((v / total) * 100).toFixed(0)}%` : ""}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
-  );
-}
-
-function DesglosePorMoneda({ titulo, filas, orden }: { titulo: string; filas: [string, Record<string, number>][]; orden: string[] }) {
-  return (
-    <section className="rounded-2xl bg-white ring-1 ring-marfil overflow-hidden">
-      <div className="px-4 py-2.5 font-display text-[10px] tracking-[0.25em] uppercase text-cacao-mute border-b border-marfil">{titulo}</div>
-      {filas.length === 0 ? (
-        <p className="p-4 text-sm text-cacao-soft italic font-serif">Nada este mes.</p>
-      ) : (
-        <ul className="divide-y divide-marfil">
-          {filas.map(([nombre, pm]) => (
-            <li key={nombre} className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm">
-              <span className="text-cacao-soft">{nombre}</span>
-              <span className="text-cacao text-right whitespace-nowrap">
-                {orden.filter((k) => (pm[k] ?? 0) > 0.005).concat(Object.keys(pm).filter((k) => !orden.includes(k) && (pm[k] ?? 0) > 0.005)).map((k) => fmtMonto(pm[k], k)).join(" · ")}
-              </span>
             </li>
           ))}
         </ul>
