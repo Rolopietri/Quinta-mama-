@@ -7,8 +7,8 @@
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { totalesVentasPorMes } from "@/lib/data/ventas";
-import { listTasasBcvRango } from "@/lib/data/cocina";
-import type { TasaBcv } from "@/lib/types";
+import { listTasasBcvRango, listComprasRango } from "@/lib/data/cocina";
+import type { TasaBcv, Compra } from "@/lib/types";
 import { AnalisisAdministrativo } from "./AnalisisAdministrativo";
 
 type Seccion = "proveedores" | "solicitudes" | "ingresos" | "analisis-ventas" | "cobrar" | "egresos" | "estado" | "historico";
@@ -2293,6 +2293,7 @@ function SeccionEstado() {
   const [vista, setVista] = useState<"eur" | "usd" | "moneda">("eur");
   const [eurUsd, setEurUsd] = useState(1.17); // 1 € = X $ (respaldo si no hay tasa BCV)
   const [tasasBcv, setTasasBcv] = useState<TasaBcv[]>([]); // tasas BCV del mes (por fecha)
+  const [compras, setCompras] = useState<Compra[]>([]); // compras de insumos (Cocina) = egresos en $
 
   useEffect(() => {
     let a = true;
@@ -2300,16 +2301,18 @@ function SeccionEstado() {
       try {
         const [y, m] = mes.split("-").map((x) => parseInt(x, 10));
         const finMes = `${mes}-${String(new Date(y, m, 0).getDate()).padStart(2, "0")}`;
-        const [ri, re, tb] = await Promise.all([
+        const [ri, re, tb, cp] = await Promise.all([
           fetch(`/api/admin/ingresos?mes=${mes}`, { cache: "no-store" }),
           fetch(`/api/admin/egresos?mes=${mes}`, { cache: "no-store" }),
           listTasasBcvRango(`${mes}-01`, finMes).catch(() => [] as TasaBcv[]),
+          listComprasRango(`${mes}-01`, finMes).catch(() => [] as Compra[]),
         ]);
         const [di, de] = await Promise.all([ri.json(), re.json()]);
         if (a) {
           setIngresos(di.ingresos ?? []);
           setEgresos(de.egresos ?? []);
           setTasasBcv(tb);
+          setCompras(cp);
         }
       } catch {
         if (a) setError("No se pudo cargar el estado de cuenta.");
@@ -2333,6 +2336,19 @@ function SeccionEstado() {
     return () => { a = false; };
   }, []);
 
+  // Las compras de insumos (Cocina) son egresos en $ (precio canónico en USD).
+  // Se suman al Estado de Cuenta como egresos, categoría "Insumos (Cocina)".
+  const comprasEgreso: Egreso[] = compras
+    .filter((c) => (c.precioTotalUsd ?? 0) > 0.005)
+    .map((c) => ({
+      id: c.id, fecha: c.fecha, concepto: "Compra de insumos", categoria_id: null,
+      categoria_nombre: "Insumos (Cocina)", clasificacion: "variable",
+      proveedor_id: null, proveedor_nombre: null,
+      monto: c.precioTotalUsd, moneda: "USD", tasa: null, monto_usd: c.precioTotalUsd,
+      metodo: c.modalidadPago ?? null, factura: null, nota: null, solicitud_linea_id: null,
+    }) as unknown as Egreso);
+  const egresosAll: Egreso[] = [...egresos, ...comprasEgreso];
+
   // Totales por moneda (sin forzar conversión): Setux en €, alquileres en $, etc.
   const sumaMoneda = (arr: (Ingreso | Egreso)[]) => {
     const m: Record<string, number> = {};
@@ -2340,7 +2356,7 @@ function SeccionEstado() {
     return m;
   };
   const ingByMon = sumaMoneda(ingresos);
-  const egrByMon = sumaMoneda(egresos);
+  const egrByMon = sumaMoneda(egresosAll);
   const ORDEN = ["EUR", "USD", "Bs"];
   const conValor = (k: string) => (ingByMon[k] ?? 0) > 0.005 || (egrByMon[k] ?? 0) > 0.005;
   const monedas = ORDEN.filter(conValor).concat(
@@ -2384,7 +2400,7 @@ function SeccionEstado() {
   const monedaUni = vista === "usd" ? "USD" : "EUR";
   const unificado = vista !== "moneda";
   const ingUni = ingresos.reduce((s, e) => s + conv(e), 0);
-  const egrUni = egresos.reduce((s, e) => s + conv(e), 0);
+  const egrUni = egresosAll.reduce((s, e) => s + conv(e), 0);
   const balUni = ingUni - egrUni;
   // Categorías en moneda única (para la vista unificada).
   const catUni = (arr: (Ingreso | Egreso)[]): [string, number][] => {
@@ -2435,7 +2451,7 @@ function SeccionEstado() {
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
                 <DesgloseUnico titulo="Ingresos por categoría" filas={catUni(ingresos)} moneda={monedaUni} />
-                <DesgloseUnico titulo="Egresos por categoría" filas={catUni(egresos)} moneda={monedaUni} />
+                <DesgloseUnico titulo="Egresos por categoría" filas={catUni(egresosAll)} moneda={monedaUni} />
               </div>
               <p className="text-[11px] text-cacao-soft italic">Los montos originales y su moneda se conservan en la vista <strong>“Por moneda”</strong> y en el detalle de cada egreso (con su tasa). Los pagos en Bs sin equivalente calculado no se convierten.</p>
             </>
@@ -2461,12 +2477,12 @@ function SeccionEstado() {
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
                 <DesglosePorMoneda titulo="Ingresos por categoría" filas={catPorMoneda(ingresos)} orden={ORDEN} />
-                <DesglosePorMoneda titulo="Egresos por categoría" filas={catPorMoneda(egresos)} orden={ORDEN} />
+                <DesglosePorMoneda titulo="Egresos por categoría" filas={catPorMoneda(egresosAll)} orden={ORDEN} />
               </div>
             </>
           )}
 
-          {ingresos.length === 0 && egresos.length === 0 && (
+          {ingresos.length === 0 && egresosAll.length === 0 && (
             <p className="rounded-2xl bg-white ring-1 ring-marfil p-8 text-center text-cacao-soft italic font-serif">
               Sin movimientos en {nombreMes(mes)}. Registra ingresos y egresos y aquí verás el balance.
             </p>
