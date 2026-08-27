@@ -3232,6 +3232,7 @@ function ModalCobro({ cliente, tasaGlobal, onCerrar, onListo }: { cliente: Clien
 
   const seleccionadas = filas.filter((x) => sel[x.c.id]);
   const selRemEur = Math.round(seleccionadas.reduce((s, x) => s + x.restEur, 0) * 100) / 100;
+  const esIncobrable = /incobrable/i.test(metodo);
   const tasaBs = parseTasa(tasaBsStr) ?? 0;
   const faltaTasaBs = moneda === "Bs" && tasaBs <= 0;
   // El $ (efectivo/Zelle) se toma 1:1 con el € → factor 1 en dólares.
@@ -3253,6 +3254,27 @@ function ModalCobro({ cliente, tasaGlobal, onCerrar, onListo }: { cliente: Clien
       sugerir(Math.round(base * 100) / 100);
       return ns;
     });
+  }
+
+  // "Incobrable" como método: no entra dinero, se asume pérdida (write-off).
+  async function marcarIncobrables() {
+    if (seleccionadas.length === 0) { setError("Selecciona al menos una cuenta."); return; }
+    setGuardando(true); setError(null);
+    try {
+      for (const x of seleccionadas) {
+        const r = await fetch("/api/admin/cuentas-cobrar", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ accion: "incobrable", cuenta: x.c.id }),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error || "No se pudo marcar incobrable.");
+      }
+      onListo(`${seleccionadas.length} cuenta${seleccionadas.length === 1 ? "" : "s"} de ${cliente.cliente} marcada${seleccionadas.length === 1 ? "" : "s"} incobrable${seleccionadas.length === 1 ? "" : "s"} (pérdida de ${fmtMonto(selRemEur, "EUR")}).`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo marcar incobrable.");
+    } finally {
+      setGuardando(false);
+    }
   }
 
   async function cobrar() {
@@ -3313,53 +3335,68 @@ function ModalCobro({ cliente, tasaGlobal, onCerrar, onListo }: { cliente: Clien
           <div className="px-3 py-1.5 border-t border-marfil text-[11px] text-cacao-mute">Seleccionado: {fmtMonto(selRemEur, "EUR")} · <button type="button" onClick={() => sugerir()} className="underline decoration-dotted hover:text-cacao">usar como monto</button></div>
         </div>
 
-        {/* Monto que paga el cliente */}
-        <div className="grid grid-cols-2 gap-3">
-          <Campo label="Monto que paga el cliente">
-            <input inputMode="decimal" value={montoStr} onChange={(e) => setMontoStr(e.target.value)} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao text-right" />
-          </Campo>
-          <Campo label="Moneda del pago">
-            <select value={moneda} onChange={(e) => { const m = e.target.value as "EUR" | "USD" | "Bs"; setMoneda(m); sugerir(selRemEur, m); }} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
-              <option value="EUR">€ Euro</option>
-              <option value="USD">$ Dólar</option>
-              <option value="Bs">Bs Bolívares</option>
-            </select>
-          </Campo>
-        </div>
-
-        {moneda === "Bs" && (
-          <Campo label="Tasa del día · Bs por €">
-            <input inputMode="decimal" value={tasaBsStr} onChange={(e) => { setTasaBsStr(e.target.value); }} placeholder="ej. 320,00 Bs = 1 €" className="w-52 border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
-          </Campo>
-        )}
-        {moneda === "USD" && (
-          <p className="text-[11px] text-cacao-mute">El dólar se toma 1:1 con el euro ($1 abona €1).</p>
-        )}
-
+        {/* Método de pago (incluye "Incobrable" = pérdida, no entra dinero) */}
         <div className="grid grid-cols-2 gap-3">
           <Campo label="Método de pago">
             <select value={metodo} onChange={(e) => { const m = e.target.value; setMetodo(m); if (/zelle|d[oó]lar/i.test(m) && moneda !== "USD") { setMoneda("USD"); sugerir(selRemEur, "USD"); } }} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
               {METODOS_COBRO.map((m) => <option key={m} value={m}>{m}</option>)}
+              <option value="Incobrable">Incobrable (pérdida)</option>
             </select>
           </Campo>
-          <Campo label="Fecha del cobro">
+          <Campo label="Fecha">
             <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
           </Campo>
         </div>
 
-        <Campo label="Referencia (opcional)">
-          <input value={referencia} onChange={(e) => setReferencia(e.target.value)} placeholder="nº recibo / operación" className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
-        </Campo>
+        {!esIncobrable && (
+          <>
+            <div className="grid grid-cols-2 gap-3">
+              <Campo label="Monto que paga el cliente">
+                <input inputMode="decimal" value={montoStr} onChange={(e) => setMontoStr(e.target.value)} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao text-right" />
+              </Campo>
+              <Campo label="Moneda del pago">
+                <select value={moneda} onChange={(e) => { const m = e.target.value as "EUR" | "USD" | "Bs"; setMoneda(m); sugerir(selRemEur, m); }} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
+                  <option value="EUR">€ Euro</option>
+                  <option value="USD">$ Dólar</option>
+                  <option value="Bs">Bs Bolívares</option>
+                </select>
+              </Campo>
+            </div>
 
-        <div className={`rounded-lg p-3 text-sm ${faltaTasaBs ? "bg-[#F9EBE7] text-[#7A2419]" : favorEur > 0.005 ? "bg-[#EAF0EA] text-[#2F4A1F]" : "bg-marfil-soft text-cacao-soft"}`}>
-          {faltaTasaBs
-            ? "Pon la tasa del día (Bs por €) para calcular el equivalente."
-            : <>El cliente entrega <strong>{fmtMonto(monto, moneda)}</strong>{moneda !== "EUR" ? ` (= ${fmtMonto(montoEur, "EUR")})` : ""}. Abona {fmtMonto(aplicadoEur, "EUR")} a la deuda{favorEur > 0.005 ? <> y quedan <strong>{fmtMonto(favorEur, "EUR")} a favor</strong> del cliente</> : ""}. Ingreso del {fmtFecha(fecha)} · {metodo}.</>}
-        </div>
+            {moneda === "Bs" && (
+              <Campo label="Tasa del día · Bs por €">
+                <input inputMode="decimal" value={tasaBsStr} onChange={(e) => { setTasaBsStr(e.target.value); }} placeholder="ej. 320,00 Bs = 1 €" className="w-52 border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
+              </Campo>
+            )}
+            {moneda === "USD" && (
+              <p className="text-[11px] text-cacao-mute">El dólar se toma 1:1 con el euro ($1 abona €1).</p>
+            )}
+
+            <Campo label="Referencia (opcional)">
+              <input value={referencia} onChange={(e) => setReferencia(e.target.value)} placeholder="nº recibo / operación" className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
+            </Campo>
+          </>
+        )}
+
+        {esIncobrable ? (
+          <div className="rounded-lg p-3 text-sm bg-[#F9EBE7] text-[#7A2419]">
+            Se asumirá como <strong>pérdida</strong> la deuda seleccionada (<strong>{fmtMonto(selRemEur, "EUR")}</strong> de {seleccionadas.length} cuenta{seleccionadas.length === 1 ? "" : "s"}). Sale del saldo por cobrar y se registra como egreso “Incobrables” el {fmtFecha(fecha)}. No entra dinero. Reversible desde el panel de incobrables.
+          </div>
+        ) : (
+          <div className={`rounded-lg p-3 text-sm ${faltaTasaBs ? "bg-[#F9EBE7] text-[#7A2419]" : favorEur > 0.005 ? "bg-[#EAF0EA] text-[#2F4A1F]" : "bg-marfil-soft text-cacao-soft"}`}>
+            {faltaTasaBs
+              ? "Pon la tasa del día (Bs por €) para calcular el equivalente."
+              : <>El cliente entrega <strong>{fmtMonto(monto, moneda)}</strong>{moneda !== "EUR" ? ` (= ${fmtMonto(montoEur, "EUR")})` : ""}. Abona {fmtMonto(aplicadoEur, "EUR")} a la deuda{favorEur > 0.005 ? <> y quedan <strong>{fmtMonto(favorEur, "EUR")} a favor</strong> del cliente</> : ""}. Ingreso del {fmtFecha(fecha)} · {metodo}.</>}
+          </div>
+        )}
 
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onCerrar} className="rounded-lg ring-1 ring-marfil text-cacao px-4 py-2 text-xs uppercase tracking-widest hover:bg-marfil-soft">Cancelar</button>
-          <button type="button" onClick={cobrar} disabled={guardando || faltaTasaBs || monto <= 0} className="rounded-lg bg-cacao text-white px-5 py-2 text-xs uppercase tracking-widest hover:bg-terracotta disabled:bg-marfil disabled:text-cacao-mute">{guardando ? "Registrando…" : "Registrar cobro"}</button>
+          {esIncobrable ? (
+            <button type="button" onClick={marcarIncobrables} disabled={guardando || seleccionadas.length === 0} className="rounded-lg bg-[#7A2419] text-white px-5 py-2 text-xs uppercase tracking-widest hover:opacity-90 disabled:bg-marfil disabled:text-cacao-mute">{guardando ? "Marcando…" : "Marcar incobrable"}</button>
+          ) : (
+            <button type="button" onClick={cobrar} disabled={guardando || faltaTasaBs || monto <= 0} className="rounded-lg bg-cacao text-white px-5 py-2 text-xs uppercase tracking-widest hover:bg-terracotta disabled:bg-marfil disabled:text-cacao-mute">{guardando ? "Registrando…" : "Registrar cobro"}</button>
+          )}
         </div>
       </div>
     </div>
