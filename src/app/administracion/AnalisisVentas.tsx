@@ -1021,13 +1021,12 @@ export function AnalisisVentas() {
           {/* ── Categorías ──────────────────────────────────────── */}
           <div className="grid grid-cols-1 gap-4">
             <PanelCard titulo="Ventas por categoría">
-              <BarrasH
-                rows={porCategoria.map((c, i) => ({
+              <Dona
+                segmentos={porCategoria.map((c, i) => ({
                   key: c.key,
                   label: c.label,
                   value: c.monto,
                   color: colorPorIndice(i),
-                  tip: `${c.label}: ${fUnid(c.unidades)} unid · ${fUSD(c.monto)} · ${fPct(pct(c.monto))} del total`,
                 }))}
                 format={fUSD}
               />

@@ -601,7 +601,7 @@ export function AnalisisCompras() {
           {/* ── Categorías ──────────────────────────────────────── */}
           <div className="grid grid-cols-1 gap-4">
             <PanelCard titulo="Compras por categoría de insumo">
-              <BarrasH rows={porCategoria.map((c, i) => ({ key: c.key, label: c.label, value: c.monto, color: colorPorIndice(i), tip: `${c.label}: ${fUSD(c.monto)} · ${fPct(pct(c.monto))} del total` }))} format={fUSD} />
+              <Dona segmentos={porCategoria.map((c, i) => ({ key: c.key, label: c.label, value: c.monto, color: colorPorIndice(i) }))} format={fUSD} />
               <p className="mt-3 text-[11px] text-cacao-mute">Toca una categoría para ver el desglose de sus insumos.</p>
               <div className="mt-1 overflow-x-auto">
                 <table className="w-full text-xs">
