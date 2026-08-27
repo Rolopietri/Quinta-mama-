@@ -231,6 +231,8 @@ export type SegmentoDona = {
   label: string;
   value: number;
   color?: string;
+  /** Texto extra en la leyenda (ej. unidades), a la derecha del nombre. */
+  sub?: string;
 };
 
 export function Dona({
@@ -238,6 +240,8 @@ export function Dona({
   format,
   centroLabel = "Total",
   sinLeyenda = false,
+  onSelect,
+  activeKey,
 }: {
   segmentos: SegmentoDona[];
   format: (n: number) => string;
@@ -245,6 +249,10 @@ export function Dona({
   /** Oculta la leyenda lateral (útil cuando al lado hay una tabla con el mismo
    *  detalle — evita duplicar y que se monten los textos). */
   sinLeyenda?: boolean;
+  /** Si se pasa, la dona y la leyenda son clicables (para abrir un desglose). */
+  onSelect?: (key: string) => void;
+  /** Resalta el segmento seleccionado. */
+  activeKey?: string;
 }) {
   const [hover, setHover] = useState<number | null>(null);
   const total = segmentos.reduce((s, x) => s + x.value, 0);
@@ -304,6 +312,7 @@ export function Dona({
                 strokeDashoffset={-offsets[i]}
                 transform={`rotate(-90 ${cx} ${cy})`}
                 onMouseEnter={() => setHover(i)}
+                onClick={onSelect ? () => onSelect(s.key) : undefined}
                 style={{ cursor: "pointer", transition: "stroke-width 0.1s" }}
               />
             );
@@ -339,17 +348,19 @@ export function Dona({
         {segmentos.map((s, i) => (
           <li
             key={s.key}
-            className={`flex items-center gap-2 text-xs cursor-default rounded px-1 py-0.5 ${
-              hover === i ? "bg-marfil-soft" : ""
+            className={`flex items-center gap-2 text-xs rounded px-1 py-0.5 ${onSelect ? "cursor-pointer" : "cursor-default"} ${
+              hover === i || activeKey === s.key ? "bg-marfil-soft" : ""
             }`}
             onMouseEnter={() => setHover(i)}
             onMouseLeave={() => setHover(null)}
+            onClick={onSelect ? () => onSelect(s.key) : undefined}
           >
             <span
               className="size-2.5 rounded-full shrink-0"
               style={{ backgroundColor: s.color ?? colorPorIndice(i) }}
             />
-            <span className="text-cacao truncate flex-1 min-w-0">{s.label}</span>
+            <span className="text-cacao truncate flex-1 min-w-0 inline-flex items-center gap-1">{s.label}{onSelect && <span className="text-cacao-mute">›</span>}</span>
+            {s.sub && <span className="text-cacao-mute tabular-nums shrink-0 text-right whitespace-nowrap">{s.sub}</span>}
             <span className="text-cacao-soft tabular-nums shrink-0 w-12 text-right">
               {((s.value / total) * 100).toFixed(1)}%
             </span>
