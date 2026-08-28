@@ -904,7 +904,7 @@ export function AnalisisVentas() {
         const creditoYCortesias = Math.round((conc.cxc + conc.rpp) * 100) / 100;
         const sinExplicar = Math.round((diferencia - creditoYCortesias) * 100) / 100;
         const cuadra = Math.abs(sinExplicar) <= 50; // tolerancia de 50 € (redondeos)
-        const fEUR = (n: number) => `${n.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
+        const fEUR = (n: number) => `${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
         return (
           <section className="rounded-2xl bg-white ring-1 ring-marfil p-4">
             <div className="flex items-center justify-between gap-2 mb-1">
@@ -1165,7 +1165,7 @@ export function AnalisisVentas() {
                     { key: "credito", label: "Crédito (CXC)", value: mixIngreso.credito, color: "#C9A24B" },
                     { key: "cortesias", label: "Cortesías (RPP)", value: mixIngreso.cortesias, color: "#B0784F" },
                   ]}
-                  format={(n) => `${n.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`}
+                  format={(n) => `${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`}
                 />
                 <p className="mt-2 text-[11px] text-cacao-mute">Del período completo (todas las ventas). Muestra cuánto de lo vendido fue dinero real vs crédito y cortesías.</p>
               </PanelCard>

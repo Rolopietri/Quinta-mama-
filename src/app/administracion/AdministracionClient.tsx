@@ -486,12 +486,10 @@ function nuevaLinea(tipo: "proveedor" | "adicional"): LineaForm {
 }
 
 function parseMonto(s: string): number | null {
-  const t = (s ?? "").toString().trim();
-  if (!t) return null;
-  // Acepta "80.265,79" (es-VE) o "80265.79": quita miles y normaliza coma.
-  const limpio = t.replace(/\./g, "").replace(",", ".");
-  const n = Number(/[.,]/.test(t) ? limpio : t.replace(",", "."));
-  return isFinite(n) ? n : null;
+  // El decimal es SIEMPRE punto. Reusamos la lógica de parseTasa (el separador
+  // más a la derecha es el decimal), que acepta "1234.56", "1234,56" y, si
+  // pegan un monto con miles, "1.234,56". Antes el punto se tomaba como miles.
+  return parseTasa(s);
 }
 
 // Lee una TASA o PORCENTAJE (no un monto): aquí el punto y la coma son
@@ -516,7 +514,7 @@ function parseTasa(s: string): number | null {
 
 function fmtMonto(monto: number, moneda: string): string {
   if (moneda === "USD") return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(monto);
-  const n = new Intl.NumberFormat("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(monto);
+  const n = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(monto);
   if (moneda === "EUR") return `${n} €`;
   return `${n} Bs`;
 }
@@ -1625,7 +1623,7 @@ function CuadreFacturas() {
   const [guardando, setGuardando] = useState(false);
   const [ok, setOk] = useState<string | null>(null);
 
-  const fEUR = (v: number) => `${(v ?? 0).toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
+  const fEUR = (v: number) => `${(v ?? 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
   const dif = (a: number, b: number) => Math.round((a - b) * 100) / 100;
 
   async function subir(file: File) {
@@ -1866,8 +1864,8 @@ function IngresosMes() {
         const r = await fetch("/api/admin/config", { cache: "no-store" });
         const d = await r.json();
         const v = d.config?.tasa_eur_usd;
-        if (a && v != null && v !== "") setTasaInput(String(v).replace(".", ","));
-        if (a && d.config?.iva_pct != null && d.config.iva_pct !== "") setIvaInput(String(d.config.iva_pct).replace(".", ","));
+        if (a && v != null && v !== "") setTasaInput(String(v));
+        if (a && d.config?.iva_pct != null && d.config.iva_pct !== "") setIvaInput(String(d.config.iva_pct));
         if (a && d.config?.metodos_sin_iva) setSinIvaInput(String(d.config.metodos_sin_iva));
       } catch {
         /* usa el valor por defecto */
@@ -2621,7 +2619,7 @@ function ImportarSetux() {
       setLineas(ls);
       // Propina por defecto = suma de TODAS las propinas (editable para quitar errores).
       const propAuto = ls.filter((l) => l.destino !== "excluir").reduce((s, l) => s + (l.propina ?? 0), 0);
-      setPropinaEdit(propAuto > 0 ? propAuto.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "");
+      setPropinaEdit(propAuto > 0 ? propAuto.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error");
       limpiar();
@@ -2969,7 +2967,7 @@ function SeccionCuentasCobrar() {
     } catch { setError("No se pudo eliminar la cuenta."); }
   }
   async function editarCuenta(cuentaId: string, montoActual: number | null, moneda: string) {
-    const val = window.prompt(`Nuevo monto de la cuenta (${moneda}):`, montoActual != null ? String(montoActual).replace(".", ",") : "");
+    const val = window.prompt(`Nuevo monto de la cuenta (${moneda}):`, montoActual != null ? String(montoActual) : "");
     if (val == null) return;
     const monto = parseTasa(val);
     if (monto == null || monto < 0) { setError("Monto inválido."); return; }
@@ -3279,7 +3277,7 @@ function ModalCobro({ cliente, tasaGlobal, onCerrar, onListo }: { cliente: Clien
   const [sel, setSel] = useState<Record<string, boolean>>(() => Object.fromEntries(filas.map((x) => [x.c.id, true])));
   const [moneda, setMoneda] = useState<"EUR" | "USD" | "Bs">("EUR");
   const [tasaBsStr, setTasaBsStr] = useState("");
-  const [montoStr, setMontoStr] = useState(totalOpenEur.toFixed(2).replace(".", ","));
+  const [montoStr, setMontoStr] = useState(totalOpenEur.toFixed(2));
   const [metodo, setMetodo] = useState("Efectivo");
   const [fecha, setFecha] = useState(hoyISO());
   const [referencia, setReferencia] = useState("");
@@ -3301,7 +3299,7 @@ function ModalCobro({ cliente, tasaGlobal, onCerrar, onListo }: { cliente: Clien
   // Sugerir el monto (en la moneda elegida) = lo que resta de lo seleccionado.
   function sugerir(base = selRemEur, m = moneda, tb = tasaBs) {
     const f = m === "Bs" ? tb : 1; // € y $ van 1:1 con el euro
-    setMontoStr(f > 0 ? (base * f).toFixed(2).replace(".", ",") : "");
+    setMontoStr(f > 0 ? (base * f).toFixed(2) : "");
   }
   function toggle(id: string) {
     setSel((s) => {

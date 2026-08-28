@@ -43,7 +43,7 @@ const fUnid = (n: number) =>
   Number.isInteger(n) ? n.toLocaleString("en-US") : n.toLocaleString("en-US", { maximumFractionDigits: 2 });
 const fPct = (n: number) => `${n.toFixed(1)}%`;
 // Egresos vienen en € (admin_egreso). Se muestran en € para no mezclar.
-const fEUR = (n: number) => `${(n ?? 0).toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
+const fEUR = (n: number) => `${(n ?? 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
 type GastosResp = { fijos: number; variables: number; insumosEgreso: number; cortesias: number; porCategoria: { categoria: string; clasificacion: string; eur: number }[]; prev: { fijos: number; variables: number } };
 
 function isoLocal(d: Date): string {

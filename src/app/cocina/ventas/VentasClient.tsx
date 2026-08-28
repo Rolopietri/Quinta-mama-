@@ -868,7 +868,7 @@ export function VentasClient() {
                     clasif.forEach((c) => { const f = c.fila.fecha; if (!f) return; porDia[f] = (porDia[f] ?? 0) + (valoresMonto(c.fila, montoEsTotal).total ?? 0); });
                     const dias = Object.keys(porDia).sort();
                     const total = dias.reduce((s, d) => s + porDia[d], 0);
-                    const f2 = (n: number) => n.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                    const f2 = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                     return (
                       <div className="text-[11px] text-cacao-soft border-t border-[#C9D6BC] pt-2">
                         <p className="mb-1">Totales por día que se importarán (verifica contra tu reporte):</p>
@@ -898,10 +898,10 @@ export function VentasClient() {
                     <div className="col-span-2 text-cacao-soft text-xs">
                       {mv.total != null ? (
                         <>
-                          {mv.total.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                          {mv.total.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
                           {mv.precioUnitario != null && (
                             <span className="block text-[10px] text-cacao-mute">
-                              {mv.precioUnitario.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} € c/u
+                              {mv.precioUnitario.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} € c/u
                             </span>
                           )}
                         </>
@@ -1245,7 +1245,7 @@ export function VentasClient() {
           {Object.keys(totalesMes).length > 0 && (
             <div className="rounded-2xl bg-white ring-1 ring-marfil p-4">
               <div className="font-display text-[9px] tracking-[0.25em] uppercase text-cacao-mute mb-2">
-                Total por mes <span className="normal-case tracking-normal text-cacao-mute">(euros · ≈ $ a {tasaEurUsd.toString().replace(".", ",")})</span>
+                Total por mes <span className="normal-case tracking-normal text-cacao-mute">(euros · ≈ $ a {tasaEurUsd.toString()})</span>
               </div>
               <ul className="divide-y divide-marfil">
                 {Object.entries(totalesMes)
@@ -1254,7 +1254,7 @@ export function VentasClient() {
                     <li key={mes} className="flex justify-between py-1.5 text-sm">
                       <span className="text-cacao-soft">{nombreMesVentas(mes)}</span>
                       <span className="text-cacao font-medium tabular-nums text-right">
-                        {total.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                        {total.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
                         <span className="block text-[11px] text-cacao-mute font-normal">≈ ${(total * tasaEurUsd).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                       </span>
                     </li>
@@ -1298,7 +1298,7 @@ export function VentasClient() {
                         {grupo.items.length === 1 ? "venta" : "ventas"}
                       </span>
                       <span className="ml-auto text-sm text-cacao font-medium text-right">
-                        {grupo.totalUsd.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                        {grupo.totalUsd.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
                         <span className="block text-[10px] text-cacao-mute font-normal">≈ ${(grupo.totalUsd * tasaEurUsd).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                       </span>
                     </button>
@@ -1339,7 +1339,7 @@ export function VentasClient() {
                             <div className="text-right shrink-0">
                               <div className="text-cacao font-medium">
                                 {v.cantidad}× ·{" "}
-                                {v.totalUsd ? `${v.totalUsd.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €` : ""}
+                                {v.totalUsd ? `${v.totalUsd.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €` : ""}
                               </div>
                               <button
                                 onClick={() => setPendienteBorrar(v.id)}

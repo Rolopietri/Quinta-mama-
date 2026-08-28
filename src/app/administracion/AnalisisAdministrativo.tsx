@@ -27,7 +27,7 @@ export function AnalisisAdministrativo() {
 }
 
 // ── Resumen / Utilidad real ────────────────────────────────────────────────
-const fEUR = (n: number) => `${(n ?? 0).toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
+const fEUR = (n: number) => `${(n ?? 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
 const fPct = (n: number) => `${n.toFixed(1)}%`;
 function isoLocal(d: Date) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
 function rangoMes() { const h = new Date(); return { desde: isoLocal(new Date(h.getFullYear(), h.getMonth(), 1)), hasta: isoLocal(h) }; }

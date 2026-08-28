@@ -14,8 +14,8 @@ import { ErrorBanner } from "@/components/ErrorBanner";
 // Formatea una cantidad de stock: entero si aplica, si no hasta 2 decimales.
 function fNum(n: number): string {
   return Number.isInteger(n)
-    ? n.toLocaleString("es-VE")
-    : n.toLocaleString("es-VE", { maximumFractionDigits: 2 });
+    ? n.toLocaleString("en-US")
+    : n.toLocaleString("en-US", { maximumFractionDigits: 2 });
 }
 function parse(v: string): number | null {
   const s = v.trim().replace(",", ".");
