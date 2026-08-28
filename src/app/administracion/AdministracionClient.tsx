@@ -8,10 +8,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { totalesVentasPorMes } from "@/lib/data/ventas";
 import { listTasasBcvRango, listComprasRango } from "@/lib/data/cocina";
-import { listVentasRango, normPos } from "@/lib/data/ventas";
-import { listRecetas } from "@/lib/data/recetas";
-import { listCategoriasProducto } from "@/lib/data/categorias";
-import { listCategoriasPorNombre } from "@/lib/data/categoriasNombre";
 import type { TasaBcv, Compra } from "@/lib/types";
 import { AnalisisAdministrativo } from "./AnalisisAdministrativo";
 
@@ -2366,9 +2362,6 @@ function SeccionEstado() {
   const [eurUsd, setEurUsd] = useState(1.17); // 1 € = X $ (respaldo si no hay tasa BCV)
   const [tasasBcv, setTasasBcv] = useState<TasaBcv[]>([]); // tasas BCV del mes (por fecha)
   const [compras, setCompras] = useState<Compra[]>([]); // compras de insumos (Cocina) = egresos en $
-  // Ventas por rubro (SOLO para este módulo): consumible → "Ventas"; las
-  // categorías marcadas "Sin ranking" (alquileres, padel, eventos) van aparte.
-  const [ventasRubro, setVentasRubro] = useState<[string, number][]>([]);
 
   useEffect(() => {
     let a = true;
@@ -2411,38 +2404,6 @@ function SeccionEstado() {
     return () => { a = false; };
   }, []);
 
-  // Ventas por rubro del mes (solo lectura, exclusivo de este módulo).
-  useEffect(() => {
-    let a = true;
-    (async () => {
-      try {
-        const [y, m] = mes.split("-").map((x) => parseInt(x, 10));
-        const finMes = `${mes}-${String(new Date(y, m, 0).getDate()).padStart(2, "0")}`;
-        const [ventas, recetas, cats, catsNombre] = await Promise.all([
-          listVentasRango(`${mes}-01`, finMes),
-          listRecetas().catch(() => []),
-          listCategoriasProducto().catch(() => []),
-          listCategoriasPorNombre().catch(() => []),
-        ]);
-        const nc = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim().replace(/\s+/g, " ");
-        const especiales = new Map(cats.filter((c) => c.excluirRanking).map((c) => [nc(c.nombre), c.nombre]));
-        const catPorReceta = new Map(recetas.filter((r) => r.categoria).map((r) => [r.id, r.categoria as string]));
-        const catPorNombre = new Map(catsNombre.map((r) => [r.nombreNorm, r.categoria]));
-        const acc: Record<string, number> = {};
-        for (const v of ventas) {
-          if (v.esMerma) continue;
-          let cat = v.recetaId ? catPorReceta.get(v.recetaId) : undefined;
-          if (!cat) cat = catPorNombre.get(normPos(v.recetaNombre || ""));
-          const esp = cat ? especiales.get(nc(cat)) : undefined;
-          const rubro = esp ?? "Ventas";
-          acc[rubro] = (acc[rubro] ?? 0) + (v.totalUsd ?? 0);
-        }
-        const filas = Object.entries(acc).sort((x, z) => z[1] - x[1]);
-        if (a) setVentasRubro(filas);
-      } catch { if (a) setVentasRubro([]); }
-    })();
-    return () => { a = false; };
-  }, [mes]);
 
   // Las compras de insumos (Cocina) son egresos en $ (precio canónico en USD).
   // Se suman al Estado de Cuenta como egresos, categoría "Insumos (Cocina)".
@@ -2546,8 +2507,7 @@ function SeccionEstado() {
                   <div className="text-[10px] text-[#9A938B] mt-1.5">Convertido con la tasa BCV real de cada fecha ({crossMap.size > 0 ? `≈ 1 € = ${ultimoCross.toFixed(2)} $` : `1 € = ${eurUsd} $`}). La tasa de cada pago se conserva en su registro.</div>
                 </div>
               </div>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <DesgloseUnico titulo="Ventas por rubro" filas={ventasRubro.map(([k, v]) => [k, vista === "usd" ? v * ultimoCross : v] as [string, number])} moneda={monedaUni} />
+              <div className="grid gap-4">
                 <DesgloseUnico titulo="Egresos por categoría" filas={catUni(egresosAll)} moneda={monedaUni} />
               </div>
               <p className="text-[11px] text-cacao-soft italic">Cada egreso conserva su moneda y tasa originales en su registro; el detalle por moneda está en Análisis administrativo. Los pagos en Bs sin equivalente calculado no se convierten.</p>
