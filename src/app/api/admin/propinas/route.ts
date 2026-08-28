@@ -26,6 +26,29 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ propinas: data ?? [] });
 }
 
+// POST → registrar una propina MANUAL (p.ej. un cliente que deja propina al
+// pagar una cuenta por cobrar). No es ingreso; se paga al personal.
+export async function POST(req: NextRequest) {
+  if (!autorizado(req)) return NextResponse.json({ error: "no autorizado" }, { status: 401 });
+  const sb = createServiceClient();
+  if (!sb) return NextResponse.json({ error: "servidor no configurado" }, { status: 500 });
+  const b = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+  const monto = typeof b.monto === "number" ? b.monto : Number(String(b.monto ?? "").replace(",", "."));
+  if (!isFinite(monto) || monto <= 0) {
+    return NextResponse.json({ error: "El monto debe ser mayor a 0." }, { status: 400 });
+  }
+  const fecha = typeof b.fecha === "string" && /^\d{4}-\d{2}-\d{2}$/.test(b.fecha) ? b.fecha : undefined;
+  const moneda = b.moneda === "USD" || b.moneda === "Bs" ? (b.moneda as string) : "EUR";
+  const nota = typeof b.nota === "string" && b.nota.trim() ? b.nota.trim() : null;
+  const { data, error } = await sb
+    .from("admin_propina")
+    .insert({ fecha, monto: Math.round(monto * 100) / 100, moneda, fuente: "manual", nota })
+    .select("*")
+    .single();
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ propina: data });
+}
+
 export async function DELETE(req: NextRequest) {
   if (!autorizado(req)) return NextResponse.json({ error: "no autorizado" }, { status: 401 });
   const sb = createServiceClient();

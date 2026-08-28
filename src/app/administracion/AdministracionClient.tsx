@@ -1808,7 +1808,11 @@ function IngresosMes() {
   const [editando, setEditando] = useState<Ingreso | null>(null);
   const [ventasMes, setVentasMes] = useState<Record<string, number>>({});
   const [propinas, setPropinas] = useState<{ id: string; fecha: string; monto: number | null; moneda: string | null }[]>([]);
-  const [tasaInput, setTasaInput] = useState("1,17");
+  const [propFecha, setPropFecha] = useState(() => new Date().toISOString().slice(0, 10));
+  const [propMonto, setPropMonto] = useState("");
+  const [propNota, setPropNota] = useState("");
+  const [guardandoProp, setGuardandoProp] = useState(false);
+  const [tasaInput, setTasaInput] = useState("1.17");
   const [guardandoTasa, setGuardandoTasa] = useState(false);
   const [recalculando, setRecalculando] = useState(false);
   const [ivaInput, setIvaInput] = useState("16");
@@ -1988,6 +1992,30 @@ function IngresosMes() {
       setError("No se pudo eliminar la propina.");
     }
   }
+  async function agregarPropina(e: React.FormEvent) {
+    e.preventDefault();
+    const monto = parseMonto(propMonto);
+    if (monto == null || monto <= 0) { setError("Pon un monto de propina válido."); return; }
+    setGuardandoProp(true);
+    setError(null);
+    try {
+      const r = await fetch("/api/admin/propinas", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fecha: propFecha || undefined, monto, moneda: "EUR", nota: propNota.trim() || undefined }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "No se pudo registrar la propina.");
+      setPropMonto("");
+      setPropNota("");
+      setMsg("Propina registrada.");
+      recargar();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo registrar la propina.");
+    } finally {
+      setGuardandoProp(false);
+    }
+  }
 
   if (modo === "form") {
     return (
@@ -2103,12 +2131,30 @@ function IngresosMes() {
         </div>
       </div>
 
-      {propinas.length > 0 && (
-        <div className="rounded-2xl bg-white ring-1 ring-marfil p-4">
-          <div className="flex items-center justify-between mb-2">
-            <span className="font-display text-[9px] tracking-[0.25em] uppercase text-cacao-mute">Propinas del mes (no es ingreso)</span>
-            <span className="text-sm font-medium text-cacao">{fmtMonto(propinasMes, "EUR")}</span>
-          </div>
+      <div className="rounded-2xl bg-white ring-1 ring-marfil p-4">
+        <div className="flex items-center justify-between mb-2">
+          <span className="font-display text-[9px] tracking-[0.25em] uppercase text-cacao-mute">Propinas del mes (no es ingreso)</span>
+          <span className="text-sm font-medium text-cacao">{fmtMonto(propinasMes, "EUR")}</span>
+        </div>
+        {/* Registrar propina manual (p.ej. un cliente que deja propina al pagar una CxC). */}
+        <form onSubmit={agregarPropina} className="flex flex-wrap items-end gap-2 mb-3">
+          <label className="text-[11px] text-cacao-soft">
+            Fecha
+            <input type="date" value={propFecha} onChange={(e) => setPropFecha(e.target.value)} className="mt-0.5 block rounded-lg ring-1 ring-marfil px-2 py-1 text-sm" />
+          </label>
+          <label className="text-[11px] text-cacao-soft">
+            Monto (€)
+            <input inputMode="decimal" value={propMonto} onChange={(e) => setPropMonto(e.target.value)} placeholder="0.00" className="mt-0.5 block w-24 rounded-lg ring-1 ring-marfil px-2 py-1 text-sm text-right tabular-nums" />
+          </label>
+          <label className="text-[11px] text-cacao-soft flex-1 min-w-[140px]">
+            Nota (opcional)
+            <input value={propNota} onChange={(e) => setPropNota(e.target.value)} placeholder="Ej: propina de <cliente> al pagar CxC" className="mt-0.5 block w-full rounded-lg ring-1 ring-marfil px-2 py-1 text-sm" />
+          </label>
+          <button type="submit" disabled={guardandoProp || !propMonto.trim()} className="rounded-lg bg-cacao text-white px-3 py-1.5 text-xs uppercase tracking-widest hover:bg-terracotta disabled:opacity-40">
+            {guardandoProp ? "Guardando…" : "+ Propina"}
+          </button>
+        </form>
+        {propinas.length > 0 ? (
           <ul className="divide-y divide-marfil">
             {propinas.map((p) => (
               <li key={p.id} className="flex items-center justify-between gap-3 py-1.5 text-sm">
@@ -2120,9 +2166,11 @@ function IngresosMes() {
               </li>
             ))}
           </ul>
-          <p className="text-[11px] text-cacao-mute mt-2">Si borras las ventas de un día, borra también su propina aquí (son registros separados).</p>
-        </div>
-      )}
+        ) : (
+          <p className="text-[12px] text-cacao-soft italic">Sin propinas registradas este mes.</p>
+        )}
+        <p className="text-[11px] text-cacao-mute mt-2">La propina no es ingreso: se cobra para el personal. Si borras las ventas de un día, borra también su propina aquí (son registros separados).</p>
+      </div>
 
       <section className="rounded-2xl bg-white ring-1 ring-marfil overflow-hidden">
         {cargando ? (
