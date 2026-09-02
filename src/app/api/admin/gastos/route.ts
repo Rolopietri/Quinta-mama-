@@ -71,15 +71,16 @@ export async function GET(req: NextRequest) {
 
   const rows = (cur.data ?? []) as EgRow[];
   let fijos = 0, variables = 0, insumosEgreso = 0, cortesias = 0;
-  const porCat = new Map<string, { categoria: string; clasificacion: string; eur: number }>();
+  const porCat = new Map<string, { categoria: string; clasificacion: string; eur: number; usd: number }>();
   for (const e of rows) {
     const eur = eurDe(e);
+    const usd = (e.moneda ?? "EUR") === "EUR" ? n(e.monto) * crossDe(e.fecha) : n(e.monto_usd);
     if (esCortesia(e)) { cortesias += eur; continue; }
     if (esInsumo(e)) { insumosEgreso += eur; continue; }
     if (esFijo(e)) fijos += eur; else variables += eur;
     const key = norm(e.categoria_nombre) || "otros";
-    const cell = porCat.get(key) ?? { categoria: e.categoria_nombre || "Otros", clasificacion: esFijo(e) ? "fija" : "variable", eur: 0 };
-    cell.eur += eur; porCat.set(key, cell);
+    const cell = porCat.get(key) ?? { categoria: e.categoria_nombre || "Otros", clasificacion: esFijo(e) ? "fija" : "variable", eur: 0, usd: 0 };
+    cell.eur += eur; cell.usd += usd; porCat.set(key, cell);
   }
   let pFijos = 0, pVariables = 0;
   for (const e of (prev.data ?? []) as EgRow[]) {
@@ -90,7 +91,7 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     desde, hasta,
     fijos: r2(fijos), variables: r2(variables), insumosEgreso: r2(insumosEgreso), cortesias: r2(cortesias),
-    porCategoria: Array.from(porCat.values()).map((c) => ({ ...c, eur: r2(c.eur) })).sort((a, b) => b.eur - a.eur),
+    porCategoria: Array.from(porCat.values()).map((c) => ({ ...c, eur: r2(c.eur), usd: r2(c.usd) })).sort((a, b) => b.eur - a.eur),
     prev: { fijos: r2(pFijos), variables: r2(pVariables) },
   });
 }

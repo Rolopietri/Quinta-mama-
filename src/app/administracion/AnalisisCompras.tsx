@@ -44,7 +44,7 @@ const fUnid = (n: number) =>
 const fPct = (n: number) => `${n.toFixed(1)}%`;
 // Egresos vienen en € (admin_egreso). Se muestran en € para no mezclar.
 const fEUR = (n: number) => `${(n ?? 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
-type GastosResp = { fijos: number; variables: number; insumosEgreso: number; cortesias: number; porCategoria: { categoria: string; clasificacion: string; eur: number }[]; prev: { fijos: number; variables: number } };
+type GastosResp = { fijos: number; variables: number; insumosEgreso: number; cortesias: number; porCategoria: { categoria: string; clasificacion: string; eur: number; usd: number }[]; prev: { fijos: number; variables: number } };
 
 function isoLocal(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -271,6 +271,17 @@ export function AnalisisCompras() {
 
   // Comparación vs período anterior (global, sin filtros — igual que Ventas).
   const globalTotal = useMemo(() => compras.reduce((s, c) => s + (c.precioTotalUsd || 0), 0), [compras]);
+
+  // Egresos por categoría (gráfico principal): compras de Cocina englobadas como
+  // "Cafetería/comedor" + los egresos operativos (nómina, alquiler…), todo en $.
+  const egresoRubros = useMemo(() => {
+    const rows: { key: string; label: string; monto: number }[] = [];
+    if (totalMonto > 0.005) rows.push({ key: "cafeteria", label: "Cafetería/comedor", monto: totalMonto });
+    for (const c of gastos?.porCategoria ?? []) if (c.usd > 0.005) rows.push({ key: `eg-${c.categoria}`, label: c.categoria, monto: c.usd });
+    return rows.sort((a, b) => b.monto - a.monto);
+  }, [totalMonto, gastos]);
+  const egresoTotal = egresoRubros.reduce((s, r) => s + r.monto, 0);
+  const pctEg = (m: number) => (egresoTotal > 0 ? (m / egresoTotal) * 100 : 0);
   const prevTotal = useMemo(() => comprasPrev.reduce((s, c) => s + (c.precioTotalUsd || 0), 0), [comprasPrev]);
   const delta = prevTotal > 0 ? (globalTotal - prevTotal) / prevTotal : null;
 
@@ -598,7 +609,49 @@ export function AnalisisCompras() {
             <LineaEvolucion puntos={porDia} format={fUSD} />
           </PanelCard>
 
-          {/* ── Categorías ──────────────────────────────────────── */}
+          {/* ── Egresos por categoría (gráfico principal) ─────────── */}
+          <PanelCard titulo="Egresos por categoría">
+            <p className="text-[11px] text-cacao-mute mb-3">Todas las compras de Cocina englobadas como “Cafetería/comedor”, más los egresos operativos (nómina, alquiler, servicios…). En $.</p>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+              <Dona
+                segmentos={egresoRubros.map((r, i) => ({ key: r.key, label: r.label, value: r.monto, color: colorPorIndice(i) }))}
+                format={fUSD}
+                sinLeyenda
+              />
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-cacao-mute uppercase tracking-widest text-left">
+                      <th className="py-1 font-normal">Rubro</th>
+                      <th className="py-1 font-normal text-right">Monto</th>
+                      <th className="py-1 font-normal text-right">%</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {egresoRubros.length === 0 && <tr><td colSpan={3} className="py-3 text-center text-cacao-soft italic">Sin egresos en el período.</td></tr>}
+                    {egresoRubros.map((r) => (
+                      <tr key={r.key} className="border-t border-marfil">
+                        <td className="py-1 text-cacao">{r.label}</td>
+                        <td className="py-1 text-right tabular-nums text-cacao">{fUSD(r.monto)}</td>
+                        <td className="py-1 text-right tabular-nums text-cacao-soft">{fPct(pctEg(r.monto))}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t-2 border-marfil font-medium">
+                      <td className="py-1 text-cacao">Total egresos</td>
+                      <td className="py-1 text-right tabular-nums text-cacao">{fUSD(egresoTotal)}</td>
+                      <td className="py-1 text-right tabular-nums text-cacao-soft">100%</td>
+                    </tr>
+                  </tfoot>
+                </table>
+                {!gastos && <p className="mt-2 text-[11px] text-[#7A5A18]">No pude leer los egresos operativos de Administración (solo se muestran las compras de Cocina).</p>}
+              </div>
+            </div>
+          </PanelCard>
+
+          {/* ── Detalle de Cafetería/comedor por insumo (plegable) ── */}
+          <Plegable titulo="Cafetería/comedor · compras por categoría de insumo">
           <div className="grid grid-cols-1 gap-4">
             <PanelCard titulo="Compras por categoría de insumo">
               <p className="text-[11px] text-cacao-mute mb-3">Toca una categoría (en el gráfico o en la lista) para ver su desglose.</p>
@@ -674,6 +727,7 @@ export function AnalisisCompras() {
               )}
             </section>
           )}
+          </Plegable>
 
           {/* ── Top proveedores e insumos (plegable) ── */}
           <Plegable titulo="Top proveedores e insumos">
