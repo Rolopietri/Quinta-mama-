@@ -1167,6 +1167,8 @@ function EgresosMes() {
   const [msg, setMsg] = useState<string | null>(null);
   const [modo, setModo] = useState<"lista" | "form">("lista");
   const [editando, setEditando] = useState<Egreso | null>(null);
+  const [reclasificando, setReclasificando] = useState<string | null>(null);
+  const [mostrarClasif, setMostrarClasif] = useState(false);
   const [tick, setTick] = useState(0);
   const recargar = useCallback(() => setTick((t) => t + 1), []);
 
@@ -1217,6 +1219,22 @@ function EgresosMes() {
   const variablesUSD = egresosAll.filter((e) => e.clasificacion === "variable").reduce((s, e) => s + (e.monto_usd ?? 0), 0);
   const sinTasa = egresosAll.some((e) => e.monto != null && e.monto_usd == null);
 
+  // Reclasificar un egreso (asignar/cambiar categoría) sin tocar el resto.
+  async function reclasificar(egresoId: string, categoriaId: string) {
+    const cat = categorias.find((c) => c.id === categoriaId);
+    if (!cat) return;
+    setReclasificando(egresoId);
+    try {
+      const r = await fetch("/api/admin/egresos", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ solo_categoria: true, id: egresoId, categoria_id: cat.id, categoria_nombre: cat.nombre, clasificacion: cat.clasificacion }),
+      });
+      if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || "No se pudo reclasificar."); }
+      recargar();
+    } catch (e) { setError(e instanceof Error ? e.message : "No se pudo reclasificar."); }
+    finally { setReclasificando(null); }
+  }
+
   async function borrar(id: string) {
     try {
       await fetch(`/api/admin/egresos?id=${id}`, { method: "DELETE" });
@@ -1260,6 +1278,49 @@ function EgresosMes() {
         <ResumenCaja titulo="Variables" valor={fmtMonto(variablesUSD, "USD")} />
       </div>
       {sinTasa && <p className="text-[11px] text-cacao-mute">Hay egresos sin tasa: no se suman al total en USD hasta que les pongas la tasa.</p>}
+
+      {/* Clasificar egresos: asigna/cambia la categoría de cada egreso cargado. */}
+      {egresos.length > 0 && (() => {
+        const sinCat = egresos.filter((e) => !e.categoria_id).length;
+        const ordenados = [...egresos].sort((x, z) => (x.categoria_id ? 1 : 0) - (z.categoria_id ? 1 : 0) || (z.fecha ?? "").localeCompare(x.fecha ?? ""));
+        return (
+          <section className="rounded-2xl bg-white ring-1 ring-marfil p-4">
+            <button type="button" onClick={() => setMostrarClasif((v) => !v)} className="w-full flex items-center justify-between gap-2 text-left">
+              <span className="font-cinzel text-base text-cacao">Clasificar egresos</span>
+              <span className="flex items-center gap-2">
+                {sinCat > 0 && <span className="rounded-full bg-amber-50 text-amber-800 ring-1 ring-amber-300 px-2 py-0.5 text-[10px] uppercase tracking-widest">{sinCat} sin categoría</span>}
+                <span className={`text-cacao-mute transition-transform ${mostrarClasif ? "rotate-90" : ""}`}>›</span>
+              </span>
+            </button>
+            {mostrarClasif && (
+              <div className="mt-3">
+                <p className="text-[12px] text-cacao-soft mb-2">Asigna la categoría de cada egreso cargado (sin categoría primero). Se guarda al instante y se refleja en el análisis.</p>
+                <div className="rounded-xl ring-1 ring-marfil overflow-hidden max-h-[28rem] overflow-y-auto">
+                  <table className="w-full text-xs">
+                    <thead className="sticky top-0 bg-white"><tr className="text-cacao-mute uppercase tracking-widest text-left"><th className="py-1.5 px-2 font-normal">Fecha</th><th className="py-1.5 px-2 font-normal">Concepto / Proveedor</th><th className="py-1.5 px-2 font-normal text-right">Monto</th><th className="py-1.5 px-2 font-normal">Categoría</th></tr></thead>
+                    <tbody>
+                      {ordenados.map((e) => (
+                        <tr key={e.id} className={`border-t border-marfil ${!e.categoria_id ? "bg-amber-50/50" : ""}`}>
+                          <td className="py-1 px-2 text-cacao-soft whitespace-nowrap">{fmtFecha(e.fecha)}</td>
+                          <td className="py-1 px-2 text-cacao min-w-0">{e.proveedor_nombre || e.concepto || "(egreso)"}</td>
+                          <td className="py-1 px-2 text-right tabular-nums text-cacao">{e.monto != null ? fmtMonto(e.monto, e.moneda || "Bs") : "—"}</td>
+                          <td className="py-1 px-2">
+                            <select value={e.categoria_id ?? ""} disabled={reclasificando === e.id || categorias.length === 0} onChange={(ev) => reclasificar(e.id, ev.target.value)} className={`rounded-lg ring-1 px-2 py-1 text-xs bg-white disabled:opacity-50 ${!e.categoria_id ? "ring-amber-300 text-amber-800" : "ring-marfil text-cacao"}`}>
+                              <option value="" disabled>{reclasificando === e.id ? "Guardando…" : "Sin categoría"}</option>
+                              <optgroup label="Fijas">{categorias.filter((c) => c.clasificacion === "fija").map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}</optgroup>
+                              <optgroup label="Variables">{categorias.filter((c) => c.clasificacion === "variable").map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}</optgroup>
+                            </select>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </section>
+        );
+      })()}
 
       <section className="rounded-2xl bg-white ring-1 ring-marfil overflow-hidden">
         {cargando ? (
