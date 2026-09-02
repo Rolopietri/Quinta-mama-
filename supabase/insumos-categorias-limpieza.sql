@@ -18,6 +18,12 @@ update public.insumos set categoria_compra = 'Panadería'
   where categoria_compra = 'Panadería y harinas';
 update public.insumos set categoria_compra = 'Proteínas'
   where categoria_compra = 'Adicionales/Extras';
+-- Gatorade (todas las variantes) son bebidas.
+update public.insumos set categoria_compra = 'Bebidas'
+  where nombre like 'GATORADE%';
+-- Suplementos: proteína / colágeno en polvo.
+update public.insumos set categoria_compra = 'Suplementos'
+  where nombre in ('COLAGENO', 'PROTEINA (ISO 100 DYMATIZE)');
 
 -- 2) Clasificar los ex-"Otros" (los que la cascada mandó a "Alquileres fijos").
 update public.insumos set categoria_compra = 'Granos y Cereales'
@@ -37,6 +43,7 @@ insert into public.categoria_insumo (nombre, orden) values
   ('Frutas & Vegetales', 30),
   ('Panadería', 40),
   ('Proteínas', 50),
+  ('Suplementos', 55),
   ('Salsas & Aderezos', 60),
   ('Bebidas', 70),
   ('Bebidas Alcohólicas', 80),
