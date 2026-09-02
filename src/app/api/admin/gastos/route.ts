@@ -13,7 +13,7 @@ const n = (v: unknown) => (v == null ? 0 : Number(v) || 0);
 const norm = (s: string | null) => (s ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 const r2 = (x: number) => Math.round(x * 100) / 100;
 
-type EgRow = { fecha: string | null; monto: number | null; moneda: string | null; monto_usd: number | null; categoria_nombre: string | null; clasificacion: string | null };
+type EgRow = { id?: string; concepto?: string | null; proveedor_nombre?: string | null; categoria_id?: string | null; fecha: string | null; monto: number | null; moneda: string | null; monto_usd: number | null; categoria_nombre: string | null; clasificacion: string | null };
 
 // GET ?desde&hasta → gastos operativos (admin_egreso) en € para el P&L:
 //   • fijos / variables (excluye 'Insumos' → el costo de insumos sale de Cocina
@@ -64,12 +64,19 @@ export async function GET(req: NextRequest) {
   const esFijo = (e: EgRow) => norm(e.clasificacion) === "fija" || norm(e.clasificacion) === "fijo";
 
   const [cur, prev] = await Promise.all([
-    sb.from("admin_egreso").select("fecha, monto, moneda, monto_usd, categoria_nombre, clasificacion").gte("fecha", desde).lte("fecha", hasta),
+    sb.from("admin_egreso").select("id, concepto, proveedor_nombre, categoria_id, fecha, monto, moneda, monto_usd, categoria_nombre, clasificacion").gte("fecha", desde).lte("fecha", hasta),
     sb.from("admin_egreso").select("fecha, monto, moneda, monto_usd, categoria_nombre, clasificacion").gte("fecha", prevDesde).lte("fecha", prevHasta),
   ]);
   if (cur.error) return NextResponse.json({ error: cur.error.message }, { status: 500 });
 
   const rows = (cur.data ?? []) as EgRow[];
+  // Egresos individuales (sin insumos ni cortesías) para el detalle por rubro.
+  const items = rows.filter((e) => !esCortesia(e) && !esInsumo(e)).map((e) => ({
+    id: e.id, fecha: e.fecha, concepto: e.concepto ?? null, proveedor: e.proveedor_nombre ?? null,
+    categoria: e.categoria_nombre || "Otros", categoria_id: e.categoria_id ?? null,
+    usd: r2((e.moneda ?? "EUR") === "EUR" ? n(e.monto) * crossDe(e.fecha) : n(e.monto_usd)),
+    moneda: e.moneda ?? "EUR", monto: n(e.monto),
+  })).sort((a, b) => (b.fecha ?? "").localeCompare(a.fecha ?? ""));
   let fijos = 0, variables = 0, insumosEgreso = 0, cortesias = 0;
   const porCat = new Map<string, { categoria: string; clasificacion: string; eur: number; usd: number }>();
   for (const e of rows) {
@@ -92,6 +99,7 @@ export async function GET(req: NextRequest) {
     desde, hasta,
     fijos: r2(fijos), variables: r2(variables), insumosEgreso: r2(insumosEgreso), cortesias: r2(cortesias),
     porCategoria: Array.from(porCat.values()).map((c) => ({ ...c, eur: r2(c.eur), usd: r2(c.usd) })).sort((a, b) => b.eur - a.eur),
+    items,
     prev: { fijos: r2(pFijos), variables: r2(pVariables) },
   });
 }

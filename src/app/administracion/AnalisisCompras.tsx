@@ -44,7 +44,8 @@ const fUnid = (n: number) =>
 const fPct = (n: number) => `${n.toFixed(1)}%`;
 // Egresos vienen en € (admin_egreso). Se muestran en € para no mezclar.
 const fEUR = (n: number) => `${(n ?? 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
-type GastosResp = { fijos: number; variables: number; insumosEgreso: number; cortesias: number; porCategoria: { categoria: string; clasificacion: string; eur: number; usd: number }[]; prev: { fijos: number; variables: number } };
+type EgItem = { id: string; fecha: string; concepto: string | null; proveedor: string | null; categoria: string; categoria_id: string | null; usd: number; moneda: string; monto: number };
+type GastosResp = { fijos: number; variables: number; insumosEgreso: number; cortesias: number; porCategoria: { categoria: string; clasificacion: string; eur: number; usd: number }[]; items?: EgItem[]; prev: { fijos: number; variables: number } };
 
 function isoLocal(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -138,6 +139,10 @@ export function AnalisisCompras() {
   const [error, setError] = useState<string | null>(null);
   const [asignando, setAsignando] = useState<string | null>(null);
   const [gastos, setGastos] = useState<GastosResp | null>(null);
+  const [catsEg, setCatsEg] = useState<{ id: string; nombre: string; clasificacion: string }[]>([]);
+  const [egTick, setEgTick] = useState(0); // refresca gastos tras reclasificar
+  const [reasignando, setReasignando] = useState<string | null>(null);
+  const [egDrill, setEgDrill] = useState<{ key: string; label: string } | null>(null);
   const [catDrill, setCatDrill] = useState<{ key: string; label: string } | null>(null);
   const [mostrarDetalle, setMostrarDetalle] = useState(false);
   const [mostrarClasif, setMostrarClasif] = useState(false);
@@ -196,7 +201,34 @@ export function AnalisisCompras() {
       .then((g) => { if (!cancel) setGastos(g && !g.error ? g : null); })
       .catch(() => { if (!cancel) setGastos(null); });
     return () => { cancel = true; };
-  }, [desde, hasta]);
+  }, [desde, hasta, egTick]);
+
+  // Categorías de egreso (para reclasificar desde el detalle del rubro).
+  useEffect(() => {
+    let cancel = false;
+    fetch("/api/admin/categorias", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (!cancel && d) setCatsEg(d.categorias ?? []); })
+      .catch(() => {});
+    return () => { cancel = true; };
+  }, []);
+
+  // Reasignar la categoría de un egreso (categorizar desde el detalle).
+  async function reasignarEgreso(egresoId: string, categoriaId: string) {
+    const cat = catsEg.find((c) => c.id === categoriaId);
+    if (!cat) return;
+    setReasignando(egresoId);
+    try {
+      const r = await fetch("/api/admin/egresos", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ solo_categoria: true, id: egresoId, categoria_id: cat.id, categoria_nombre: cat.nombre, clasificacion: cat.clasificacion }),
+      });
+      if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || "No se pudo reclasificar."); }
+      setEgTick((t) => t + 1);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo reclasificar.");
+    } finally { setReasignando(null); }
+  }
 
   const insMap = useMemo(() => new Map(insumos.map((i) => [i.id, i])), [insumos]);
   const provMap = useMemo(() => new Map(proveedores.map((p) => [p.id, p.nombre])), [proveedores]);
@@ -611,12 +643,13 @@ export function AnalisisCompras() {
 
           {/* ── Egresos por categoría (gráfico principal) ─────────── */}
           <PanelCard titulo="Egresos por categoría">
-            <p className="text-[11px] text-cacao-mute mb-3">Todas las compras de Cocina englobadas como “Cafetería/comedor”, más los egresos operativos (nómina, alquiler, servicios…). En $.</p>
+            <p className="text-[11px] text-cacao-mute mb-3">Todas las compras de Cocina englobadas como “Cafetería/comedor”, más los egresos operativos (nómina, alquiler, servicios…). En $. Toca un rubro para ver su detalle.</p>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
               <Dona
                 segmentos={egresoRubros.map((r, i) => ({ key: r.key, label: r.label, value: r.monto, color: colorPorIndice(i) }))}
                 format={fUSD}
                 sinLeyenda
+                onSelect={(k) => { const r = egresoRubros.find((x) => x.key === k); if (r) setEgDrill({ key: r.key, label: r.label }); }}
               />
               <div className="overflow-x-auto">
                 <table className="w-full text-xs">
@@ -630,8 +663,8 @@ export function AnalisisCompras() {
                   <tbody>
                     {egresoRubros.length === 0 && <tr><td colSpan={3} className="py-3 text-center text-cacao-soft italic">Sin egresos en el período.</td></tr>}
                     {egresoRubros.map((r) => (
-                      <tr key={r.key} className="border-t border-marfil">
-                        <td className="py-1 text-cacao">{r.label}</td>
+                      <tr key={r.key} onClick={() => setEgDrill({ key: r.key, label: r.label })} className={`border-t border-marfil cursor-pointer hover:bg-marfil-soft ${egDrill?.key === r.key ? "bg-marfil-soft" : ""}`}>
+                        <td className="py-1 text-cacao"><span className="inline-flex items-center gap-1">{r.label}<span className="text-cacao-mute">›</span></span></td>
                         <td className="py-1 text-right tabular-nums text-cacao">{fUSD(r.monto)}</td>
                         <td className="py-1 text-right tabular-nums text-cacao-soft">{fPct(pctEg(r.monto))}</td>
                       </tr>
@@ -649,6 +682,59 @@ export function AnalisisCompras() {
               </div>
             </div>
           </PanelCard>
+
+          {/* ── Detalle del rubro seleccionado ── */}
+          {egDrill && (
+            <section className="rounded-2xl bg-white ring-1 ring-terracotta/40 p-4">
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <h3 className="font-cinzel text-base text-cacao">Detalle: {egDrill.label}</h3>
+                <button type="button" onClick={() => setEgDrill(null)} className="text-xs uppercase tracking-widest text-cacao-soft hover:text-terracotta">✕ Cerrar</button>
+              </div>
+              {egDrill.key === "cafeteria" ? (
+                <>
+                  <p className="text-[11px] text-cacao-mute mb-2">Compras de Cocina por categoría de insumo. El detalle por insumo está en la sección plegable de abajo.</p>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead><tr className="text-cacao-mute uppercase tracking-widest text-left"><th className="py-1 font-normal">Categoría de insumo</th><th className="py-1 font-normal text-right">Compras</th><th className="py-1 font-normal text-right">Gasto</th><th className="py-1 font-normal text-right">%</th></tr></thead>
+                      <tbody>
+                        {porCategoria.map((c) => (
+                          <tr key={c.key} className="border-t border-marfil"><td className="py-1 text-cacao">{c.label}</td><td className="py-1 text-right tabular-nums text-cacao-soft">{fUnid(c.veces)}</td><td className="py-1 text-right tabular-nums text-cacao">{fUSD(c.monto)}</td><td className="py-1 text-right tabular-nums text-cacao-soft">{fPct(pct(c.monto))}</td></tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              ) : (() => {
+                const items = (gastos?.items ?? []).filter((it) => it.categoria === egDrill.label);
+                return (
+                  <>
+                    <p className="text-[11px] text-cacao-mute mb-2">{items.length} egreso(s). Cambia la categoría en cualquier fila para reclasificarlo (se guarda al instante).</p>
+                    <div className="rounded-xl ring-1 ring-marfil overflow-hidden max-h-[26rem] overflow-y-auto">
+                      <table className="w-full text-xs">
+                        <thead className="sticky top-0 bg-white"><tr className="text-cacao-mute uppercase tracking-widest text-left"><th className="py-1.5 px-2 font-normal">Fecha</th><th className="py-1.5 px-2 font-normal">Concepto / Proveedor</th><th className="py-1.5 px-2 font-normal text-right">Monto</th><th className="py-1.5 px-2 font-normal">Categoría</th></tr></thead>
+                        <tbody>
+                          {items.length === 0 && <tr><td colSpan={4} className="py-3 text-center text-cacao-soft italic">Sin egresos en este rubro.</td></tr>}
+                          {items.map((it) => (
+                            <tr key={it.id} className="border-t border-marfil">
+                              <td className="py-1 px-2 text-cacao-soft whitespace-nowrap">{it.fecha}</td>
+                              <td className="py-1 px-2 text-cacao min-w-0">{it.proveedor || it.concepto || "—"}</td>
+                              <td className="py-1 px-2 text-right tabular-nums text-cacao">{fUSD(it.usd)}</td>
+                              <td className="py-1 px-2">
+                                <select defaultValue={it.categoria_id ?? ""} disabled={reasignando === it.id || catsEg.length === 0} onChange={(e) => reasignarEgreso(it.id, e.target.value)} className="rounded-lg ring-1 ring-marfil px-2 py-1 text-xs bg-white disabled:opacity-50">
+                                  <option value="" disabled>{reasignando === it.id ? "Guardando…" : "Elegir…"}</option>
+                                  {catsEg.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+                                </select>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                );
+              })()}
+            </section>
+          )}
 
           {/* ── Detalle de Cafetería/comedor por insumo (plegable) ── */}
           <Plegable titulo="Cafetería/comedor · compras por categoría de insumo">

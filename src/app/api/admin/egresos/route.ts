@@ -97,7 +97,15 @@ export async function PATCH(req: NextRequest) {
   const b = (await req.json().catch(() => ({}))) as Record<string, unknown>;
   const id = texto(b.id);
   if (!id) return NextResponse.json({ error: "falta id" }, { status: 400 });
-  const { data, error } = await sb.from("admin_egreso").update(fila(b)).eq("id", id).select("*").single();
+  // Modo "solo categoría": reclasificar sin tocar el resto del egreso.
+  const cambios = b.solo_categoria === true
+    ? {
+        categoria_id: texto(b.categoria_id),
+        categoria_nombre: texto(b.categoria_nombre),
+        clasificacion: b.clasificacion === "fija" ? "fija" : b.clasificacion === "variable" ? "variable" : null,
+      }
+    : fila(b);
+  const { data, error } = await sb.from("admin_egreso").update(cambios).eq("id", id).select("*").single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ egreso: data });
 }
