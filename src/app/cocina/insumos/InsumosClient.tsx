@@ -2,8 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
-  CATEGORIAS_INSUMO_SUGERIDAS,
-  categoriaInsumoLabel,
   frescuraPrecio,
   SECCIONES,
   TIPOS_PERDIDA,
@@ -22,6 +20,10 @@ import {
   listProveedores,
   createProveedor,
 } from "@/lib/data/cocina";
+import {
+  listCategoriasInsumo,
+  type CategoriaInsumo,
+} from "@/lib/data/categoriasInsumo";
 import { UnitCalculator } from "@/components/UnitCalculator";
 import { UnidadSelect } from "@/components/UnidadSelect";
 import {
@@ -91,7 +93,7 @@ type FormState = {
 
 const emptyForm: FormState = {
   nombre: "",
-  categoria: "Otros",
+  categoria: "",
   seccion: "ambos",
   unidadCompra: "",
   cantidadPorCompra: "1",
@@ -138,6 +140,10 @@ export function InsumosClient() {
     null,
   );
   const [devolverStock, setDevolverStock] = useState(true);
+  // Lista de categorías de insumo (tipo de materia prima). Se gestiona desde
+  // Análisis de Compras → Clasificar insumos. Es la lista LIMPIA, separada de
+  // las categorías de venta de Administración.
+  const [categoriasInsumo, setCategoriasInsumo] = useState<CategoriaInsumo[]>([]);
   // Fecha de hoy (YYYY-MM-DD) para medir la frescura de cada precio.
   const hoy = useMemo(() => hoyISO(), []);
 
@@ -152,6 +158,12 @@ export function InsumosClient() {
         if (!cancelled) {
           setItems(ins);
           setProveedores(prov);
+        }
+        try {
+          const cats = await listCategoriasInsumo();
+          if (!cancelled) setCategoriasInsumo(cats);
+        } catch {
+          // tabla pendiente
         }
         try {
           const mv = await listMovimientos({ limit: 60 });
@@ -218,7 +230,8 @@ export function InsumosClient() {
     setNuevoProveedor("");
     setForm({
       nombre: ins.nombre,
-      categoria: ins.categoria,
+      // El form gestiona la categoría de INSUMO (tipo), no la de ventas.
+      categoria: ins.categoriaCompra ?? "",
       seccion: ins.seccion,
       unidadCompra: ins.unidadCompra,
       cantidadPorCompra: String(ins.cantidadPorCompra),
@@ -270,9 +283,14 @@ export function InsumosClient() {
     const precioC = form.precioCompraUsd === "" ? null : Number(form.precioCompraUsd);
     const precioB = precioC === null ? null : cantPC > 0 ? precioC / cantPC : precioC;
 
+    const original = editingId ? items.find((x) => x.id === editingId) : undefined;
     const input = {
       nombre: form.nombre.trim(),
-      categoria: form.categoria.trim() || "Otros",
+      // La categoría de INSUMO (tipo) va en categoria_compra. El campo `categoria`
+      // (usado por Análisis de Ventas para reventa) se preserva tal cual: este
+      // form ya no lo maneja, para no volver a mezclar las taxonomías.
+      categoria: original?.categoria ?? "",
+      categoriaCompra: form.categoria.trim() || undefined,
       seccion: form.seccion,
       unidadCompra: form.unidadCompra.trim() || "unidad",
       cantidadPorCompra: cantPC,
@@ -308,7 +326,6 @@ export function InsumosClient() {
         // No pisar el stock físico si NO lo cambiaste: entre que abriste el form
         // y guardaste, pudieron entrar ventas/mermas que bajaron stock_actual;
         // reescribirlo con el valor viejo del form las perdería (lost update).
-        const original = items.find((x) => x.id === editingId);
         if (
           original &&
           Math.abs((input.stockTotal ?? 0) - original.stockTotal) < 0.00005
@@ -372,7 +389,10 @@ export function InsumosClient() {
     return items.filter(
       (i) =>
         (showInactivos || i.activo) &&
-        (filterCat === "todas" || i.categoria === filterCat) &&
+        (filterCat === "todas" ||
+          (filterCat === "__sin__"
+            ? !i.categoriaCompra?.trim()
+            : i.categoriaCompra === filterCat)) &&
         (filterSec === "todas" ||
           i.seccion === filterSec ||
           i.seccion === "ambos") &&
@@ -388,29 +408,33 @@ export function InsumosClient() {
   const grouped = useMemo(() => {
     const map = new Map<string, Insumo[]>();
     filtered.forEach((i) => {
-      if (!map.has(i.categoria)) map.set(i.categoria, []);
-      map.get(i.categoria)!.push(i);
+      const k = i.categoriaCompra?.trim() || "Sin categoría";
+      if (!map.has(k)) map.set(k, []);
+      map.get(k)!.push(i);
     });
     return Array.from(map.entries());
   }, [filtered]);
 
-  // Categorías que YA existen en el catálogo (para los pills de filtro).
+  // Categorías que YA existen en el catálogo (para los pills de filtro). Usa la
+  // categoría de INSUMO (categoria_compra), no la de ventas.
+  const haySinCat = useMemo(
+    () => items.some((i) => i.activo && !i.categoriaCompra?.trim()),
+    [items],
+  );
   const categoriasReales = useMemo(() => {
     const set = new Set<string>();
-    items.forEach((i) => i.categoria && set.add(i.categoria));
-    return Array.from(set).sort((a, b) =>
-      categoriaInsumoLabel(a).localeCompare(categoriaInsumoLabel(b)),
-    );
+    items.forEach((i) => i.categoriaCompra?.trim() && set.add(i.categoriaCompra));
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [items]);
 
-  // Categorías sugeridas para el formulario: las existentes + las predefinidas.
+  // Categorías sugeridas para el formulario: la lista gestionada (categoria_insumo)
+  // + las que ya usan los insumos. Separada de las categorías de venta.
   const categoriasDisponibles = useMemo(() => {
-    const set = new Set<string>(categoriasReales);
-    CATEGORIAS_INSUMO_SUGERIDAS.forEach((c) => set.add(c));
-    return Array.from(set).sort((a, b) =>
-      categoriaInsumoLabel(a).localeCompare(categoriaInsumoLabel(b)),
-    );
-  }, [categoriasReales]);
+    const set = new Set<string>();
+    categoriasInsumo.forEach((c) => set.add(c.nombre));
+    categoriasReales.forEach((c) => set.add(c));
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [categoriasInsumo, categoriasReales]);
 
   const itemsById = useMemo(
     () => new Map(items.map((i) => [i.id, i] as const)),
@@ -519,9 +543,21 @@ export function InsumosClient() {
                 : "bg-white text-cacao-soft ring-marfil hover:bg-marfil-soft"
             }`}
           >
-            {categoriaInsumoLabel(c)}
+            {c}
           </button>
         ))}
+        {haySinCat && (
+          <button
+            onClick={() => setFilterCat("__sin__")}
+            className={`px-3 py-1 rounded-full text-[11px] uppercase tracking-widest ring-1 ${
+              filterCat === "__sin__"
+                ? "bg-cacao text-white ring-cacao"
+                : "bg-amber-50 text-amber-800 ring-amber-300 hover:bg-amber-100"
+            }`}
+          >
+            Sin categoría
+          </button>
+        )}
       </div>
 
       {inactivosCount > 0 && (
@@ -585,9 +621,10 @@ export function InsumosClient() {
                 }}
                 className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2 bg-white"
               >
+                <option value="">— Sin categoría —</option>
                 {categoriasDisponibles.map((c) => (
                   <option key={c} value={c}>
-                    {categoriaInsumoLabel(c)}
+                    {c}
                   </option>
                 ))}
                 <option value="__nueva__">+ Nueva categoría…</option>
@@ -962,7 +999,7 @@ export function InsumosClient() {
               className="rounded-2xl bg-white ring-1 ring-marfil p-5"
             >
               <h2 className="font-display text-xs tracking-[0.3em] uppercase text-cacao-mute mb-3">
-                {categoriaInsumoLabel(cat)}
+                {cat}
               </h2>
               <ul className="divide-y divide-marfil">
                 {ins.map((i) => {
