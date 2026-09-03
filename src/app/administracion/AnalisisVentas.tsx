@@ -473,8 +473,8 @@ export function AnalisisVentas() {
     const vendidas = new Set(ventas.filter((v) => v.recetaId).map((v) => v.recetaId));
     return recetas
       .filter((r) => !r.esSubreceta && r.activo && !vendidas.has(r.id))
-      .map((r) => r.nombre)
-      .sort((a, b) => a.localeCompare(b));
+      .map((r) => ({ id: r.id, nombre: r.nombre, categoria: (r.categoria || "").trim() || "Sin categoría" }))
+      .sort((a, b) => a.categoria.localeCompare(b.categoria) || a.nombre.localeCompare(b.nombre));
   }, [recetas, ventas]);
 
   // Alquileres/eventos y demás categorías excluidas, en panel aparte.
@@ -1273,11 +1273,14 @@ export function AnalisisVentas() {
                 </span>
               </button>
               {mostrarSinVenta && (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {productosSinVenta.map((n) => (
-                    <span key={n} className="rounded-full bg-marfil-soft ring-1 ring-marfil px-2.5 py-1 text-xs text-cacao-soft">{n}</span>
+                <ul className="mt-3 rounded-xl ring-1 ring-marfil divide-y divide-marfil overflow-hidden max-h-96 overflow-y-auto">
+                  {productosSinVenta.map((p) => (
+                    <li key={p.id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
+                      <span className="text-cacao min-w-0 truncate">{p.nombre}</span>
+                      <span className="text-[11px] text-cacao-mute shrink-0">{p.categoria}</span>
+                    </li>
                   ))}
-                </div>
+                </ul>
               )}
             </section>
           )}
