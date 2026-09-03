@@ -38,12 +38,16 @@ export type DiaFactura = {
 export type MetodoAgg = { metodo: string; categoria: CategoriaPago; neto: number; iva: number; monto: number; tickets: number };
 // Detalle de cuentas por cobrar por cliente (crédito del reporte).
 export type CxCDetalleCliente = { cliente: string; total: number; docs: { ref: string; fecha: string; monto: number }[] };
+// Factura pagada con DOS o más métodos distintos: el reporte no trae el monto
+// por método, así que el usuario lo especifica antes de importar.
+export type FacturaMixta = { nro: string; fecha: string; cliente: string; total: number; ventaNeta: number; impuesto: number; metodos: string[] };
 
 export type ReporteFacturas = {
   filas: FilaFactura[];
   dias: DiaFactura[];
   porMetodo: MetodoAgg[];
   cxcDetalle: CxCDetalleCliente[];
+  mixtas: FacturaMixta[];
   desde: string; hasta: string;
   totales: {
     ingresoNeto: number; ingresoBruto: number;
@@ -129,10 +133,15 @@ export function canonMetodo(raw: string): string {
   return raw.trim().toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+// Métodos canónicos distintos de una forma de pago (colapsa los repetidos).
+export function metodosDe(forma: string): string[] {
+  return [...new Set(forma.split("|").map((p) => canonMetodo(p)).filter((p) => p !== "—"))];
+}
+
 // Método(s) canónicos de una forma de pago: colapsa los del mismo método;
 // los pagos partidos entre métodos distintos quedan como "Mixto (A + B)".
 export function metodoCanonico(forma: string): string {
-  const partes = [...new Set(forma.split("|").map((p) => canonMetodo(p)).filter((p) => p !== "—"))];
+  const partes = metodosDe(forma);
   if (partes.length === 0) return "—";
   if (partes.length === 1) return partes[0];
   return `Mixto (${partes.join(" + ")})`;
@@ -259,5 +268,11 @@ export function parseReporteFacturas(buf: Buffer): ReporteFacturas {
   }
   const cxcDetalle = Array.from(cm.values()).map((c) => ({ ...c, total: r2(c.total) })).sort((a, b) => b.total - a.total);
 
-  return { filas, dias, porMetodo, cxcDetalle, desde: dias[0]?.fecha ?? "", hasta: dias[dias.length - 1]?.fecha ?? "", totales };
+  // Facturas con pago mixto (2+ métodos distintos) — para especificar el split.
+  const mixtas: FacturaMixta[] = filas
+    .map((f) => ({ f, ms: metodosDe(f.formaPago) }))
+    .filter((x) => x.ms.length > 1)
+    .map(({ f, ms }) => ({ nro: f.nro || f.orden, fecha: f.fecha, cliente: f.cliente, total: r2(f.total), ventaNeta: r2(f.ventaNeta), impuesto: r2(f.impuesto), metodos: ms }));
+
+  return { filas, dias, porMetodo, cxcDetalle, mixtas, desde: dias[0]?.fecha ?? "", hasta: dias[dias.length - 1]?.fecha ?? "", totales };
 }

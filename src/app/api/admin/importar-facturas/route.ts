@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { tokenValido, ADMIN_COOKIE } from "@/lib/admin-auth";
 import { createServiceClient } from "@/lib/supabase/admin-service";
-import { parseReporteFacturas, metodoCanonico } from "@/lib/admin/factura";
+import { parseReporteFacturas, metodoCanonico, metodosDe } from "@/lib/admin/factura";
 import { getTasaEurUsd } from "@/lib/admin/tasa";
 
 export const runtime = "nodejs";
@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
   const { desde, hasta } = reporte;
 
   return NextResponse.json({
-    reporte: { desde, hasta, dias: reporte.dias, totales: reporte.totales, porMetodo: reporte.porMetodo, cxcDetalle: reporte.cxcDetalle },
+    reporte: { desde, hasta, dias: reporte.dias, totales: reporte.totales, porMetodo: reporte.porMetodo, cxcDetalle: reporte.cxcDetalle, mixtas: reporte.mixtas },
   });
 }
 
@@ -68,16 +68,57 @@ export async function PUT(req: NextRequest) {
   const tasa = await getTasaEurUsd(sb);
   const usd = (eur: number) => r2(eur * tasa);
 
-  // ── Ingresos (contado): 1 fila por (día, forma de pago) con neto+IVA reales ──
+  // Split manual de facturas mixtas: { [nro]: { [metodo canónico]: monto } }.
+  const splits = (b.splits && typeof b.splits === "object" ? b.splits : {}) as Record<string, Record<string, number>>;
+  const catDe = (m: string): "CXC" | "RPP" | "INGRESO" => (m === "CXC" ? "CXC" : m === "RPP" ? "RPP" : "INGRESO");
+
+  // Acumuladores. Cada factura se reparte a su(s) método(s): los de contado van
+  // a ingresos (neto+IVA), las CXC a cuentas por cobrar, las RPP a cortesías.
   const ingMap = new Map<string, { fecha: string; metodo: string; net: number; iva: number }>();
+  const addIngreso = (fecha: string, metodo: string, net: number, iva: number) => {
+    const k = `${fecha}||${metodo}`;
+    const cur = ingMap.get(k) ?? { fecha, metodo, net: 0, iva: 0 };
+    cur.net += net; cur.iva += iva; ingMap.set(k, cur);
+  };
+  type CxcRow = { fecha: string; descripcion: string; deudor: string; ref: string | null; monto: number; moneda: string; tasa: number; monto_usd: number; cobrada: boolean; fuente: string; import_hash: string };
+  const cxc: CxcRow[] = [];
+  const addCxc = (fecha: string, cliente: string, ref: string | null, monto: number) => {
+    cxc.push({ fecha, descripcion: ref ? `Venta a crédito ${ref}` : "Venta a crédito", deudor: cliente || "—", ref, monto: r2(monto), moneda: "EUR", tasa, monto_usd: usd(monto), cobrada: false, fuente: "factura", import_hash: `factura|${ref ? ref.toLowerCase() : `${clave(cliente)}|${fecha}`}|${r2(monto)}` });
+  };
+  type RppRow = { fecha: string; concepto: string; categoria_id: null; categoria_nombre: string; clasificacion: string; proveedor_id: null; proveedor_nombre: null; monto: number; moneda: string; tasa: number; monto_usd: number; metodo: string; factura: string | null; nota: string; fuente: string };
+  const rpp: RppRow[] = [];
+  const addRpp = (fecha: string, cliente: string, ref: string | null, monto: number) => {
+    rpp.push({ fecha, concepto: `Cortesías (RPP)${ref ? ` ${ref}` : ""}`, categoria_id: null, categoria_nombre: "Cortesías", clasificacion: "variable", proveedor_id: null, proveedor_nombre: null, monto: r2(monto), moneda: "EUR", tasa, monto_usd: usd(monto), metodo: "RPP", factura: ref, nota: cliente ? `Cortesía a ${cliente}` : "Cortesía", fuente: "factura" });
+  };
+
   for (const f of filas) {
-    if (f.categoria !== "INGRESO") continue;
-    const metodo = metodoCanonico(f.formaPago); // nombre unificado
-    const k = `${f.fecha}||${metodo}`;
-    const cur = ingMap.get(k) ?? { fecha: f.fecha, metodo, net: 0, iva: 0 };
-    cur.net += f.ventaNeta; cur.iva += f.impuesto;
-    ingMap.set(k, cur);
+    const ms = metodosDe(f.formaPago);
+    const ref = f.nro || f.orden || null;
+    const tot = f.total || 0;
+    const sp = ref ? splits[ref] : undefined;
+    if (ms.length > 1 && sp && Object.keys(sp).length) {
+      // Pago mixto con split especificado por el usuario: cada parte a su rubro.
+      for (const [m, montoRaw] of Object.entries(sp)) {
+        const a = Number(montoRaw) || 0;
+        if (a <= 0.005) continue;
+        const c = catDe(m);
+        if (c === "CXC") addCxc(f.fecha, f.cliente, ref, a);
+        else if (c === "RPP") addRpp(f.fecha, f.cliente, ref, a);
+        else addIngreso(f.fecha, m, tot > 0 ? f.ventaNeta * (a / tot) : 0, tot > 0 ? f.impuesto * (a / tot) : 0);
+      }
+    } else if (ms.length <= 1) {
+      // Un solo método: directo a su rubro.
+      const m = ms[0] ?? "—";
+      const c = catDe(m);
+      if (c === "CXC") addCxc(f.fecha, f.cliente, ref, tot);
+      else if (c === "RPP") addRpp(f.fecha, f.cliente, ref, tot);
+      else addIngreso(f.fecha, m, f.ventaNeta, f.impuesto);
+    } else {
+      // Mixto sin split: entra como "Mixto (…)" en ingresos (fallback).
+      addIngreso(f.fecha, metodoCanonico(f.formaPago), f.ventaNeta, f.impuesto);
+    }
   }
+
   const ingresos = Array.from(ingMap.values()).map((g) => ({
     fecha: g.fecha,
     concepto: `Ventas ${g.metodo}`.trim(),
@@ -94,46 +135,6 @@ export async function PUT(req: NextRequest) {
     nota: "Reporte por factura",
     fuente: "setux",
   }));
-
-  // ── CXC → cuentas por cobrar (una por factura, bruto) ──
-  const cxc = filas.filter((f) => f.categoria === "CXC").map((f) => {
-    const ref = f.nro || f.orden || null;
-    return {
-      fecha: f.fecha,
-      descripcion: ref ? `Venta a crédito ${ref}` : "Venta a crédito",
-      deudor: f.cliente || "—",
-      ref,
-      monto: r2(f.total),
-      moneda: "EUR",
-      tasa,
-      monto_usd: usd(f.total),
-      cobrada: false,
-      fuente: "factura",
-      import_hash: `factura|${ref ? ref.toLowerCase() : `${clave(f.cliente)}|${f.fecha}|${f.total}`}`,
-    };
-  });
-
-  // ── RPP → egresos (cortesías, bruto) ──
-  const rpp = filas.filter((f) => f.categoria === "RPP").map((f) => {
-    const ref = f.nro || f.orden || null;
-    return {
-      fecha: f.fecha,
-      concepto: `Cortesías (RPP)${ref ? ` ${ref}` : ""}`,
-      categoria_id: null,
-      categoria_nombre: "Cortesías",
-      clasificacion: "variable",
-      proveedor_id: null,
-      proveedor_nombre: null,
-      monto: r2(f.total),
-      moneda: "EUR",
-      tasa,
-      monto_usd: usd(f.total),
-      metodo: "RPP",
-      factura: ref,
-      nota: f.cliente ? `Cortesía a ${f.cliente}` : "Cortesía",
-      fuente: "factura",
-    };
-  });
 
   // ── Propina y tickets por día ──
   const propinas = dias.filter((d) => d.propina > 0.005).map((d) => ({

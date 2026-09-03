@@ -1670,11 +1670,14 @@ type DiaFacturaUI = { fecha: string; ingresoNeto: number; ingresoBruto: number; 
 type TotalesFacturaUI = { ingresoNeto: number; ingresoBruto: number; cxcNeto: number; cxcBruto: number; rppNeto: number; rppBruto: number; totalNeto: number; totalBruto: number; propina: number; tickets: number; ticketPromedioBruto: number; ticketPromedioNeto: number };
 type MetodoUI = { metodo: string; categoria: "INGRESO" | "CXC" | "RPP"; neto: number; iva: number; monto: number; tickets: number };
 type CxCClienteUI = { cliente: string; total: number; docs: { ref: string; fecha: string; monto: number }[] };
+type MixtaUI = { nro: string; fecha: string; cliente: string; total: number; ventaNeta: number; impuesto: number; metodos: string[] };
 
 function CuadreFacturas() {
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [rep, setRep] = useState<{ desde: string; hasta: string; dias: DiaFacturaUI[]; totales: TotalesFacturaUI; porMetodo?: MetodoUI[]; cxcDetalle?: CxCClienteUI[] } | null>(null);
+  const [rep, setRep] = useState<{ desde: string; hasta: string; dias: DiaFacturaUI[]; totales: TotalesFacturaUI; porMetodo?: MetodoUI[]; cxcDetalle?: CxCClienteUI[]; mixtas?: MixtaUI[] } | null>(null);
+  // Split de pagos mixtos: nro de factura → { método: montoStr }.
+  const [splits, setSplits] = useState<Record<string, Record<string, string>>>({});
   const [archivoB64, setArchivoB64] = useState<string | null>(null);
   const [guardando, setGuardando] = useState(false);
   const [ok, setOk] = useState<string | null>(null);
@@ -1694,18 +1697,36 @@ function CuadreFacturas() {
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || "No se pudo leer el archivo.");
       setRep(d.reporte);
+      // Inicializa el split de cada mixta repartiendo el total en partes iguales.
+      const ini: Record<string, Record<string, string>> = {};
+      for (const m of (d.reporte.mixtas ?? []) as MixtaUI[]) {
+        const n = m.metodos.length || 1;
+        const base = Math.floor((m.total / n) * 100) / 100;
+        const obj: Record<string, string> = {};
+        m.metodos.forEach((met, i) => { const v = i === n - 1 ? Math.round((m.total - base * (n - 1)) * 100) / 100 : base; obj[met] = String(v).replace(".", ","); });
+        ini[m.nro] = obj;
+      }
+      setSplits(ini);
       setArchivoB64(b64);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error");
     } finally { setCargando(false); }
   }
 
+  const parseNum = (s: string) => Number((s || "").replace(/\./g, "").replace(",", ".")) || 0;
+  // Suma del split de una mixta y si cuadra con su total.
+  const sumaSplit = (m: MixtaUI) => m.metodos.reduce((s, met) => s + parseNum(splits[m.nro]?.[met] ?? ""), 0);
+  const mixtasDescuadradas = (rep?.mixtas ?? []).filter((m) => Math.abs(sumaSplit(m) - m.total) > 0.02);
+
   async function guardar() {
     if (!archivoB64 || !rep) return;
+    if (mixtasDescuadradas.length > 0) { setError(`Hay ${mixtasDescuadradas.length} pago(s) mixto(s) cuyo desglose no suma el total de la factura. Ajústalos antes de importar.`); return; }
     if (!confirm(`Se importará el reporte (${rep.desde} → ${rep.hasta}): Ingresos, CXC, RPP, propina y tickets. Si reimportas los mismos días, se actualizan (no se duplican). ¿Continuar?`)) return;
     setGuardando(true); setError(null); setOk(null);
     try {
-      const r = await fetch("/api/admin/importar-facturas", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ file_base64: archivoB64 }) });
+      const splitsNum: Record<string, Record<string, number>> = {};
+      for (const m of rep.mixtas ?? []) { splitsNum[m.nro] = {}; for (const met of m.metodos) splitsNum[m.nro][met] = parseNum(splits[m.nro]?.[met] ?? ""); }
+      const r = await fetch("/api/admin/importar-facturas", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ file_base64: archivoB64, splits: splitsNum }) });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || "No se pudo guardar.");
       setOk(`Importado ${d.desde} → ${d.hasta}: ${d.ingresos} ingreso(s), ${d.cxc} CXC, ${d.rpp} RPP, ${d.dias} día(s) de tickets. Ticket promedio ${fEUR(d.ticketPromedio)}.`);
@@ -1734,7 +1755,7 @@ function CuadreFacturas() {
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <span className="font-display text-[10px] tracking-[0.25em] uppercase text-cacao-mute">Período {rep.desde} → {rep.hasta} · {rep.totales.tickets} facturas</span>
             <div className="flex items-center gap-2">
-              <button type="button" onClick={guardar} disabled={guardando || !archivoB64} className="rounded-lg bg-terracotta text-white px-4 py-2 text-xs uppercase tracking-widest hover:opacity-90 disabled:opacity-40">
+              <button type="button" onClick={guardar} disabled={guardando || !archivoB64 || mixtasDescuadradas.length > 0} title={mixtasDescuadradas.length > 0 ? "Ajusta los pagos mixtos: deben sumar el total de su factura" : undefined} className="rounded-lg bg-terracotta text-white px-4 py-2 text-xs uppercase tracking-widest hover:opacity-90 disabled:opacity-40">
                 {guardando ? "Importando…" : "Importar"}
               </button>
               <button type="button" onClick={() => { setRep(null); setArchivoB64(null); setOk(null); }} className="text-xs uppercase tracking-widest text-cacao-soft hover:text-cacao">Cambiar archivo</button>
@@ -1792,6 +1813,39 @@ function CuadreFacturas() {
                     ))}
                   </tbody>
                 </table>
+              </div>
+            </div>
+          )}
+
+          {/* Pagos mixtos: el reporte no trae el monto por método → especifícalo */}
+          {rep.mixtas && rep.mixtas.length > 0 && (
+            <div className="rounded-xl ring-1 ring-[#E7D3A1] overflow-hidden">
+              <div className="px-3 py-2 bg-[#FBF3E2] font-display text-[10px] tracking-[0.25em] uppercase text-[#7A5A18] flex items-center justify-between">
+                <span>Pagos mixtos — especifica el monto por método ({rep.mixtas.length})</span>
+                {mixtasDescuadradas.length > 0 && <span className="normal-case tracking-normal text-[11px]">{mixtasDescuadradas.length} sin cuadrar</span>}
+              </div>
+              <p className="px-3 py-2 text-[11px] text-cacao-mute">Estas facturas se pagaron con 2+ métodos y el reporte no dice cuánto fue a cada uno. Reparte el total; cada parte irá a su rubro (Punto de Venta → ingreso, CXC → cuenta por cobrar, etc.). Debe sumar el total de la factura.</p>
+              <div className="max-h-80 overflow-y-auto divide-y divide-marfil">
+                {rep.mixtas.map((m) => {
+                  const suma = m.metodos.reduce((s, met) => s + parseNum(splits[m.nro]?.[met] ?? ""), 0);
+                  const cuadra = Math.abs(suma - m.total) <= 0.02;
+                  return (
+                    <div key={m.nro} className="px-3 py-2">
+                      <div className="flex items-center justify-between gap-2 text-[12px]">
+                        <span className="text-cacao min-w-0 truncate">{fmtFecha(m.fecha)} · {m.cliente || m.nro || "factura"}</span>
+                        <span className={`tabular-nums whitespace-nowrap ${cuadra ? "text-[#2F4A1F]" : "text-[#7A2419]"}`}>Total {fEUR(m.total)}{cuadra ? " ✓" : ` · suma ${fEUR(suma)}`}</span>
+                      </div>
+                      <div className="mt-1 flex flex-wrap gap-2">
+                        {m.metodos.map((met) => (
+                          <label key={met} className="flex items-center gap-1 text-[11px] text-cacao-soft">
+                            <span className="whitespace-nowrap">{met}</span>
+                            <input inputMode="decimal" value={splits[m.nro]?.[met] ?? ""} onChange={(e) => setSplits((s) => ({ ...s, [m.nro]: { ...s[m.nro], [met]: e.target.value } }))} className="w-24 border border-marfil rounded-lg px-2 py-1 text-right text-cacao" />
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
