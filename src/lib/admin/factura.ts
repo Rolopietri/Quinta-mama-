@@ -114,7 +114,7 @@ function col(headers: string[], ...alias: string[]): number {
 
 // Nombre CANÓNICO de un método de pago: unifica sinónimos, casing y acentos de
 // Xetux y de los importadores viejos. Efectivo y Dólar se tratan como el MISMO
-// método (pago en divisa/efectivo). Ajusta aquí si cambian los criterios.
+// método, bajo el nombre "Dólar". Ajusta aquí si cambian los criterios.
 export function canonMetodo(raw: string): string {
   const k = (raw || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase().trim().replace(/\s+/g, " ");
   if (!k) return "—";
@@ -122,7 +122,7 @@ export function canonMetodo(raw: string): string {
   if (k.includes("PAGO MOVIL") || k === "PM") return "Pago Móvil";
   if (k === "ZELLE") return "Zelle";
   if (k === "TRANSFERENCIA" || k === "TRANSF" || k.includes("TRANSFEREN")) return "Transferencia";
-  if (k === "DOLAR" || k === "DOLARES" || k === "USD" || k === "DIVISA" || k === "EFECTIVO" || k === "CASH" || k === "$") return "Efectivo";
+  if (k === "DOLAR" || k === "DOLARES" || k === "USD" || k === "DIVISA" || k === "EFECTIVO" || k === "CASH" || k === "$") return "Dólar";
   if (k === "BS" || k.includes("BOLIVAR")) return "Bolívares";
   if (k === "CXC") return "CXC";
   if (k === "RPP") return "RPP";
