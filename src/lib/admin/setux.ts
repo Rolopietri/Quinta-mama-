@@ -160,9 +160,11 @@ const NOMBRES: Record<string, string> = {
   "PTO VENTA": "Punto de Venta",
   "PUNTO DE VENTA": "Punto de Venta",
   "ZELLE": "Zelle",
+  // Efectivo y Dólar (USD cash) se muestran unidos como "Efectivo". El método
+  // CRUDO se conserva para el IVA (Dólar sigue exento; ver separaIva).
   "EFECTIVO": "Efectivo",
-  "DOLAR": "Dólar",
-  "DÓLAR": "Dólar",
+  "DOLAR": "Efectivo",
+  "DÓLAR": "Efectivo",
   "DIVISAS": "Divisas",
   "CXC": "CXC (por cobrar)",
   "RPP": "RPP",

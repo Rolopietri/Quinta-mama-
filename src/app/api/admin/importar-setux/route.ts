@@ -105,11 +105,12 @@ export async function PUT(req: NextRequest) {
     const metodo = typeof l.metodo === "string" ? l.metodo : "";
     if (destinoDe(metodo) !== "ingreso") continue; // CXC/RPP/notas → aparte
     const cantidad = typeof l.cantidad === "number" ? l.cantidad : null;
-    // Separa el IVA: el ingreso es el NETO; el IVA va aparte.
+    // Separa el IVA usando el método CRUDO (Dólar sigue exento). El concepto usa
+    // el nombre "bonito" (Dólar/Efectivo → "Efectivo"), sin afectar el IVA.
     const { net, iva } = separaIva(total, metodo, ivaCfg);
     ingresos.push({
       fecha,
-      concepto: `Ventas ${metodo}`.trim(),
+      concepto: `Ventas ${nombreMetodo(metodo)}`.trim(),
       categoria_id: categoriaId,
       categoria_nombre: categoriaNombre,
       pagador: null,
@@ -120,7 +121,7 @@ export async function PUT(req: NextRequest) {
       monto_usd: usdDe(net),
       metodo,
       factura: null,
-      nota: cantidad != null ? `${cantidad} transacciones (Setux)` : "Setux",
+      nota: cantidad != null ? `${cantidad} transacciones (Xetux)` : "Xetux",
       fuente: "setux",
     });
   }
