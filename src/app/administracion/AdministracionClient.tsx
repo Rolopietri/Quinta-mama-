@@ -2918,6 +2918,11 @@ type IncobrableUI = {
 // Métodos de pago disponibles (los mismos que reporta el sistema/Setux).
 const METODOS_COBRO = ["Efectivo", "Pago Móvil", "Zelle", "Punto de Venta", "Transferencia", "Dólar", "Tarjeta de crédito", "Tarjeta de débito", "Otro"];
 
+// Un saldo a favor de hasta este monto (EUR) se considera sobrante de redondeo
+// (pagó de más, sin vuelto) → se ofrece "Marcar sobrante" en la fila. Por encima,
+// se trata como crédito real del cliente.
+const SOBRANTE_MAX_EUR = 2;
+
 function hoyISO(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -3095,15 +3100,22 @@ function SeccionCuentasCobrar() {
       setMsg("Monto de la cuenta actualizado."); recargar();
     } catch (e) { setError(e instanceof Error ? e.message : "No se pudo editar."); }
   }
-  async function ajustarSaldo(clienteNombre: string) {
-    if (!confirm("Se creará una deuda de ajuste que cuadra el pago existente y deja el saldo en cero (NO borra el pago ni su ingreso). Úsalo cuando el cliente pagó cuentas que luego se eliminaron. ¿Continuar?")) return;
+  async function ajustarSaldo(clienteNombre: string, motivo?: "sobrante") {
+    if (!motivo && !confirm("Se creará una deuda de ajuste que cuadra el pago existente y deja el saldo en cero (NO borra el pago ni su ingreso). Úsalo cuando el cliente pagó cuentas que luego se eliminaron. ¿Continuar?")) return;
     setError(null);
     try {
-      const r = await fetch("/api/admin/cuentas-cobrar", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accion: "ajustar", cliente: clienteNombre }) });
+      const r = await fetch("/api/admin/cuentas-cobrar", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accion: "ajustar", cliente: clienteNombre, motivo }) });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || "No se pudo ajustar.");
-      setMsg("Saldo ajustado a cero."); recargar();
+      setMsg(motivo === "sobrante" ? "Sobrante marcado; el saldo a favor pasó a cero." : "Saldo ajustado a cero."); recargar();
     } catch (e) { setError(e instanceof Error ? e.message : "No se pudo ajustar."); }
+  }
+  // Sobrante de redondeo: el cliente pagó de más y no pidió vuelto. La Quinta se
+  // queda el excedente (ya está en ingresos); solo se cierra el falso "a favor".
+  async function marcarSobrante(c: ClienteCXC) {
+    const eur = eurDe(Math.abs(c.saldo_usd));
+    if (!confirm(`${c.cliente} pagó de más ${fmtMonto(eur, "EUR")} y no pidió vuelto. Se marca como sobrante (la Quinta se queda ese dinero, ya contado en ingresos) y el saldo a favor pasa a cero. ¿Continuar?`)) return;
+    await ajustarSaldo(c.cliente, "sobrante");
   }
   async function marcarIncobrable(cuentaId: string) {
     if (!confirm("Marcar esta cuenta como INCOBRABLE. Sale del saldo por cobrar y se registra como pérdida (egreso “Incobrables”). ¿Continuar?")) return;
@@ -3290,6 +3302,9 @@ function SeccionCuentasCobrar() {
                     <span className="text-right text-cacao-mute tabular-nums hidden sm:block">{c.ultima ? fmtFecha(c.ultima) : "—"}</span>
                     <div className="flex items-center gap-2 justify-end">
                       <button type="button" onClick={() => setAbierto(abiertoAqui ? null : c.key)} className="rounded-lg ring-1 ring-marfil text-cacao px-3 py-1.5 text-[11px] uppercase tracking-widest hover:bg-marfil-soft">{abiertoAqui ? "Ocultar" : "Ver"}</button>
+                      {enFavor && eurDe(Math.abs(c.saldo_usd)) <= SOBRANTE_MAX_EUR && (
+                        <button type="button" onClick={() => marcarSobrante(c)} title="Pagó de más y no pidió vuelto: la Quinta se queda el sobrante" className="rounded-lg ring-1 ring-[#CBD9BC] text-[#2F4A1F] px-3 py-1.5 text-[11px] uppercase tracking-widest hover:bg-[#F1F4ED]">Marcar sobrante</button>
+                      )}
                       {c.saldo_usd > 0.005 && <button type="button" onClick={() => setCobrando(c)} className="rounded-lg bg-cacao text-white px-3 py-1.5 text-[11px] uppercase tracking-widest hover:bg-terracotta">Cobrar</button>}
                     </div>
                   </div>
@@ -3343,9 +3358,18 @@ function SeccionCuentasCobrar() {
                         <span className="font-medium text-cacao">Saldo: {fmtMonto(eurDe(c.saldo_usd), "EUR")} <span className="text-cacao-mute font-normal">(≈ {fmtMonto(c.saldo_usd, "USD")})</span></span>
                       </div>
                       {enFavor && (
-                        <div className="px-1">
-                          <button type="button" onClick={() => ajustarSaldo(c.cliente)} className="rounded-lg ring-1 ring-marfil text-cacao px-3 py-1.5 text-[11px] uppercase tracking-widest hover:bg-marfil-soft">Ajustar saldo a cero</button>
-                          <span className="ml-2 text-[11px] text-cacao-mute">Si pagó cuentas que luego se eliminaron: cuadra el pago sin borrarlo.</span>
+                        <div className="px-1 flex flex-wrap items-center gap-2">
+                          {eurDe(Math.abs(c.saldo_usd)) <= SOBRANTE_MAX_EUR ? (
+                            <>
+                              <button type="button" onClick={() => marcarSobrante(c)} className="rounded-lg ring-1 ring-[#CBD9BC] text-[#2F4A1F] px-3 py-1.5 text-[11px] uppercase tracking-widest hover:bg-[#F1F4ED]">Marcar sobrante</button>
+                              <span className="text-[11px] text-cacao-mute">Pagó de más y no pidió vuelto: la Quinta se queda el sobrante (ya está en ingresos); el saldo pasa a cero.</span>
+                            </>
+                          ) : (
+                            <>
+                              <button type="button" onClick={() => ajustarSaldo(c.cliente)} className="rounded-lg ring-1 ring-marfil text-cacao px-3 py-1.5 text-[11px] uppercase tracking-widest hover:bg-marfil-soft">Ajustar saldo a cero</button>
+                              <span className="text-[11px] text-cacao-mute">Si pagó cuentas que luego se eliminaron: cuadra el pago sin borrarlo.</span>
+                            </>
+                          )}
                         </div>
                       )}
 
