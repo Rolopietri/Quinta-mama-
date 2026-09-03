@@ -148,13 +148,18 @@ export async function PUT(req: NextRequest) {
     fuente: "factura",
   }));
 
-  // ── Reemplazo por RANGO (solo lo de este importador) ──
+  // Importación idempotente: refresca SOLO los días que trae el reporte (y solo
+  // lo que carga este importador). Reimportar el mismo reporte no duplica; los
+  // días que no vienen en el archivo no se tocan.
+  const fechas = [...new Set(dias.map((d) => d.fecha))];
   try {
-    await sb.from("admin_ingreso").delete().eq("fuente", "setux").gte("fecha", desde).lte("fecha", hasta);
-    await sb.from("admin_propina").delete().in("fuente", ["setux", "factura"]).gte("fecha", desde).lte("fecha", hasta);
-    await sb.from("admin_cuenta_cobrar").delete().eq("fuente", "factura").gte("fecha", desde).lte("fecha", hasta);
-    await sb.from("admin_egreso").delete().eq("fuente", "factura").eq("categoria_nombre", "Cortesías").gte("fecha", desde).lte("fecha", hasta);
-    await sb.from("admin_ticket_dia").delete().gte("fecha", desde).lte("fecha", hasta);
+    if (fechas.length) {
+      await sb.from("admin_ingreso").delete().eq("fuente", "setux").in("fecha", fechas);
+      await sb.from("admin_propina").delete().in("fuente", ["setux", "factura"]).in("fecha", fechas);
+      await sb.from("admin_cuenta_cobrar").delete().eq("fuente", "factura").in("fecha", fechas);
+      await sb.from("admin_egreso").delete().eq("fuente", "factura").eq("categoria_nombre", "Cortesías").in("fecha", fechas);
+      await sb.from("admin_ticket_dia").delete().in("fecha", fechas);
+    }
 
     if (ingresos.length) { const { error } = await sb.from("admin_ingreso").insert(ingresos); if (error) throw error; }
     if (cxc.length) { const { error } = await sb.from("admin_cuenta_cobrar").insert(cxc); if (error) throw error; }

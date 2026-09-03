@@ -1650,7 +1650,7 @@ function SeccionIngresos() {
   const tabs: [typeof vista, string][] = [
     ["ingresos", "Ingresos"],
     ["importar", "Importar (Xetux)"],
-    ...(habilitarFactura ? ([["factura", "Por factura (cuadre)"]] as [typeof vista, string][]) : []),
+    ...(habilitarFactura ? ([["factura", "Por factura"]] as [typeof vista, string][]) : []),
     ["categorias", "Categorías"],
   ];
   return (
@@ -1706,13 +1706,13 @@ function CuadreFacturas() {
 
   async function guardar() {
     if (!archivoB64 || !rep) return;
-    if (!confirm(`Se guardará el período ${rep.desde} → ${rep.hasta}, reemplazando lo que este importador haya cargado en ese rango (Ingresos, CXC, RPP, propina y tickets). ¿Continuar?`)) return;
+    if (!confirm(`Se importará el reporte (${rep.desde} → ${rep.hasta}): Ingresos, CXC, RPP, propina y tickets. Si reimportas los mismos días, se actualizan (no se duplican). ¿Continuar?`)) return;
     setGuardando(true); setError(null); setOk(null);
     try {
       const r = await fetch("/api/admin/importar-facturas", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ file_base64: archivoB64 }) });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || "No se pudo guardar.");
-      setOk(`Guardado ${d.desde} → ${d.hasta}: ${d.ingresos} ingreso(s), ${d.cxc} CXC, ${d.rpp} RPP, ${d.dias} día(s) de tickets. Ticket promedio ${fEUR(d.ticketPromedio)}.`);
+      setOk(`Importado ${d.desde} → ${d.hasta}: ${d.ingresos} ingreso(s), ${d.cxc} CXC, ${d.rpp} RPP, ${d.dias} día(s) de tickets. Ticket promedio ${fEUR(d.ticketPromedio)}.`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error");
     } finally { setGuardando(false); }
@@ -1725,7 +1725,7 @@ function CuadreFacturas() {
 
       {!rep ? (
         <div className="text-center py-4">
-          <p className="font-display text-[11px] tracking-[0.3em] uppercase text-cacao-mute mb-1">Cuadre por factura</p>
+          <p className="font-display text-[11px] tracking-[0.3em] uppercase text-cacao-mute mb-1">Importar por factura</p>
           <p className="text-sm text-cacao-soft mb-4 font-serif italic max-w-xl mx-auto">Sube el <strong>“Reporte Detallado por Factura”</strong> (Excel .xlsx/.xls o CSV). De un solo archivo salen Ingresos (por método, con IVA), CXC, RPP y el ticket promedio, fechados por la <strong>fecha de orden</strong>. Verás el desglose y con “Guardar” se carga todo.</p>
           <p className="text-[11px] text-cacao-mute mb-3">En iOS: en Numbers usa Compartir → Exportar → Excel (o CSV). En Windows: Excel directo.</p>
           <label className="inline-block rounded-lg bg-cacao text-white px-5 py-2.5 text-xs uppercase tracking-widest hover:bg-terracotta cursor-pointer">
@@ -1739,7 +1739,7 @@ function CuadreFacturas() {
             <span className="font-display text-[10px] tracking-[0.25em] uppercase text-cacao-mute">Período {rep.desde} → {rep.hasta} · {rep.totales.tickets} facturas</span>
             <div className="flex items-center gap-2">
               <button type="button" onClick={guardar} disabled={guardando || !archivoB64} className="rounded-lg bg-terracotta text-white px-4 py-2 text-xs uppercase tracking-widest hover:opacity-90 disabled:opacity-40">
-                {guardando ? "Guardando…" : "Guardar (reemplaza el rango)"}
+                {guardando ? "Importando…" : "Importar"}
               </button>
               <button type="button" onClick={() => { setRep(null); setArchivoB64(null); setOk(null); }} className="text-xs uppercase tracking-widest text-cacao-soft hover:text-cacao">Cambiar archivo</button>
             </div>
@@ -1800,7 +1800,7 @@ function CuadreFacturas() {
             </div>
           )}
 
-          <p className="text-[11px] text-cacao-soft">Con <strong>“Guardar”</strong> se escribe este rango ({rep.desde} → {rep.hasta}): Ingresos (por método, neto + IVA), CXC (por cliente), RPP, propina y tickets. Reemplaza solo lo que este importador haya cargado antes en esas fechas; no toca cargas hechas por otros medios.</p>
+          <p className="text-[11px] text-cacao-soft">Con <strong>“Importar”</strong> se cargan los días del reporte ({rep.desde} → {rep.hasta}): Ingresos (por método, neto + IVA), CXC (por cliente), RPP, propina y tickets. Es idempotente: reimportar los mismos días los actualiza (no duplica), y los días que no vienen en el archivo no se tocan.</p>
         </div>
       )}
     </div>
