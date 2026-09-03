@@ -194,11 +194,13 @@ export function RecetaForm({
   // categoría nueva que ya exista en otras recetas. Cada opción se muestra con
   // su etiqueta legible vía categoriaRecetaLabel().
   const categoriasDisponibles = useMemo(() => {
-    // Base: las categorías definidas por el usuario (Administración). Si aún no
-    // hay ninguna (tabla vacía o sin migrar), caemos a la lista fija de código.
+    // Base: solo las categorías marcadas como de RECETA (aplica_receta). Las de
+    // solo-venta (alquileres, pádel, reventa, consignación) no salen aquí.
+    // Si la tabla está vacía o sin migrar, caemos a la lista fija de código.
+    const recetaCats = categoriasUser.filter((c) => c.aplicaReceta !== false);
     const conocidas =
       categoriasUser.length > 0
-        ? categoriasUser.map((c) => c.nombre)
+        ? recetaCats.map((c) => c.nombre)
         : CATEGORIAS_RECETA.map((c) => c.value as string);
     const conocidasNorm = new Set(
       conocidas.map((c) => c.trim().toLowerCase()),
@@ -494,7 +496,8 @@ export function RecetaForm({
         )
       ) {
         try {
-          const c = await createCategoriaProducto(catNueva);
+          // Creada desde el Recetario → es categoría de receta.
+          const c = await createCategoriaProducto(catNueva, 500, true);
           setCategoriasUser((prev) => [...prev, c]);
         } catch {
           /* si falla (tabla ausente, duplicada), la receta igual se guarda */
