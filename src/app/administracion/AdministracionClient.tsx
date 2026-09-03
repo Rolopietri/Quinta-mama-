@@ -1297,7 +1297,7 @@ function EgresosMes() {
                 <p className="text-[12px] text-cacao-soft mb-2">Asigna la categoría de cada egreso cargado (sin categoría primero). Se guarda al instante y se refleja en el análisis.</p>
                 <div className="rounded-xl ring-1 ring-marfil overflow-hidden max-h-[28rem] overflow-y-auto">
                   <table className="w-full text-xs">
-                    <thead className="sticky top-0 bg-white"><tr className="text-cacao-mute uppercase tracking-widest text-left"><th className="py-1.5 px-2 font-normal">Fecha</th><th className="py-1.5 px-2 font-normal">Concepto / Proveedor</th><th className="py-1.5 px-2 font-normal text-right">Monto</th><th className="py-1.5 px-2 font-normal">Categoría</th></tr></thead>
+                    <thead><tr className="text-cacao-mute uppercase tracking-widest text-left"><th className="sticky top-0 z-10 bg-white py-1.5 px-2 font-normal">Fecha</th><th className="sticky top-0 z-10 bg-white py-1.5 px-2 font-normal">Concepto / Proveedor</th><th className="sticky top-0 z-10 bg-white py-1.5 px-2 font-normal text-right">Monto</th><th className="sticky top-0 z-10 bg-white py-1.5 px-2 font-normal">Categoría</th></tr></thead>
                     <tbody>
                       {ordenados.map((e) => (
                         <tr key={e.id} className={`border-t border-marfil ${!e.categoria_id ? "bg-amber-50/50" : ""}`}>
