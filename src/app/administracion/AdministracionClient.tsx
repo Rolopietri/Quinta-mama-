@@ -1677,21 +1677,7 @@ function CuadreFacturas() {
   const [rep, setRep] = useState<{ desde: string; hasta: string; dias: DiaFacturaUI[]; totales: TotalesFacturaUI; porMetodo?: MetodoUI[]; cxcDetalle?: CxCClienteUI[] } | null>(null);
   const [archivoB64, setArchivoB64] = useState<string | null>(null);
   const [guardando, setGuardando] = useState(false);
-  const [unificando, setUnificando] = useState(false);
   const [ok, setOk] = useState<string | null>(null);
-
-  async function unificarMetodos() {
-    if (!confirm("Renombra los métodos de pago de TODOS los ingresos cargados a su nombre canónico (unifica los duplicados de meses anteriores). ¿Continuar?")) return;
-    setUnificando(true); setError(null); setOk(null);
-    try {
-      const r = await fetch("/api/admin/normalizar-metodos", { method: "POST" });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error || "No se pudo unificar.");
-      setOk(d.renombrados > 0 ? `Métodos unificados: ${d.detalle.map((x: { de: string; a: string }) => `${x.de}→${x.a}`).join(", ")}.` : "Los métodos ya estaban unificados.");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Error");
-    } finally { setUnificando(false); }
-  }
 
   const fEUR = (v: number) => `${(v ?? 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
 
@@ -1742,10 +1728,6 @@ function CuadreFacturas() {
             {cargando ? "Leyendo…" : "Elegir archivo (Excel o CSV)"}
             <input type="file" accept=".xls,.xlsx,.csv,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" className="hidden" disabled={cargando} onChange={(e) => { const f = e.target.files?.[0]; if (f) subir(f); e.target.value = ""; }} />
           </label>
-          <div className="mt-4 pt-3 border-t border-marfil">
-            <button type="button" onClick={unificarMetodos} disabled={unificando} className="text-[11px] uppercase tracking-widest text-cacao-soft hover:text-terracotta disabled:opacity-50">{unificando ? "Unificando…" : "Unificar métodos de pago ya cargados"}</button>
-            <p className="text-[10px] text-cacao-mute mt-1">Una sola vez: renombra los métodos de meses anteriores a su nombre canónico (Dólar, Punto de Venta…).</p>
-          </div>
         </div>
       ) : (
         <div className="space-y-4">
