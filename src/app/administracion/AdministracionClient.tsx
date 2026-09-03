@@ -1643,14 +1643,10 @@ type Ingreso = {
 };
 
 function SeccionIngresos() {
-  const [vista, setVista] = useState<"ingresos" | "importar" | "factura" | "categorias">("ingresos");
-  // "Por factura (cuadre)" se habilita el 1 de septiembre de 2026 (cuando pasa a
-  // reemplazar la carga). Hasta entonces queda oculta.
-  const habilitarFactura = new Date() >= new Date("2026-09-01T00:00:00");
+  const [vista, setVista] = useState<"ingresos" | "factura" | "categorias">("ingresos");
   const tabs: [typeof vista, string][] = [
     ["ingresos", "Ingresos"],
-    ["importar", "Importar (Xetux)"],
-    ...(habilitarFactura ? ([["factura", "Por factura"]] as [typeof vista, string][]) : []),
+    ["factura", "Importar por factura"],
     ["categorias", "Categorías"],
   ];
   return (
@@ -1662,7 +1658,7 @@ function SeccionIngresos() {
           </button>
         ))}
       </div>
-      {vista === "ingresos" ? <IngresosMes /> : vista === "importar" ? <ImportarSetux /> : vista === "factura" && habilitarFactura ? <CuadreFacturas /> : <CategoriasIngresoCatalogo />}
+      {vista === "ingresos" ? <IngresosMes /> : vista === "factura" ? <CuadreFacturas /> : <CategoriasIngresoCatalogo />}
     </div>
   );
 }
@@ -2621,233 +2617,6 @@ function DesgloseUnico({ titulo, filas, moneda }: { titulo: string; filas: [stri
   );
 }
 
-// ── Importar ventas de Setux ────────────────────────────────────────
-// Beatriz sube el PDF diario de Setux; el servidor lo lee y muestra la vista
-// previa; confirma → crea un ingreso por método (en euros; el USD sale con la
-// tasa fija del panel).
-type LineaSetuxUI = { metodo: string; metodoBonito: string; cantidad: number | null; total: number; propina: number | null; incluir: boolean; destino: "ingreso" | "detalle" | "excluir" };
-type ReporteSetuxUI = { fecha: string | null; desde: string | null; hasta: string | null; usuario: string | null; total: number | null };
-
-function ImportarSetux() {
-  const [cargando, setCargando] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [msg, setMsg] = useState<string | null>(null);
-  const [reporte, setReporte] = useState<ReporteSetuxUI | null>(null);
-  const [lineas, setLineas] = useState<LineaSetuxUI[]>([]);
-  const [fecha, setFecha] = useState("");
-  const [categorias, setCategorias] = useState<CategoriaIngreso[]>([]);
-  const [categoriaId, setCategoriaId] = useState("");
-  const [propinaEdit, setPropinaEdit] = useState("");
-  const [guardando, setGuardando] = useState(false);
-  const [conflicto, setConflicto] = useState<number | null>(null);
-
-  useEffect(() => {
-    let a = true;
-    (async () => {
-      try {
-        const r = await fetch("/api/admin/categorias-ingreso", { cache: "no-store" });
-        const d = await r.json();
-        if (a) {
-          const cats: CategoriaIngreso[] = d.categorias ?? [];
-          setCategorias(cats);
-          const ventas = cats.find((c) => c.nombre.toLowerCase() === "ventas");
-          if (ventas) setCategoriaId(ventas.id);
-        }
-      } catch {
-        /* sin categorías igual se puede guardar */
-      }
-    })();
-    return () => { a = false; };
-  }, []);
-
-  function limpiar() {
-    setReporte(null);
-    setLineas([]);
-    setFecha("");
-    setConflicto(null);
-  }
-
-  async function subir(file: File) {
-    setError(null);
-    setMsg(null);
-    setConflicto(null);
-    setCargando(true);
-    try {
-      const b64 = await new Promise<string>((resolve, reject) => {
-        const fr = new FileReader();
-        fr.onload = () => resolve(String(fr.result));
-        fr.onerror = () => reject(new Error("no se pudo leer"));
-        fr.readAsDataURL(file);
-      });
-      const r = await fetch("/api/admin/importar-setux", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pdf_base64: b64 }),
-      });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error || "No se pudo leer el PDF.");
-      const rep = d.reporte;
-      setReporte({ fecha: rep.fecha, desde: rep.desde, hasta: rep.hasta, usuario: rep.usuario, total: rep.total });
-      setFecha(rep.fecha ?? "");
-      // RPP (cortesías) no se cuenta: llega desmarcado.
-      const ls = (rep.lineas as Omit<LineaSetuxUI, "incluir">[]).map((l) => ({ ...l, incluir: l.destino !== "excluir" && l.destino !== "detalle" }));
-      setLineas(ls);
-      // Propina por defecto = suma de TODAS las propinas (editable para quitar errores).
-      const propAuto = ls.filter((l) => l.destino !== "excluir").reduce((s, l) => s + (l.propina ?? 0), 0);
-      setPropinaEdit(propAuto > 0 ? propAuto.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Error");
-      limpiar();
-    } finally {
-      setCargando(false);
-    }
-  }
-
-  const incluidas = lineas.filter((l) => l.incluir && l.destino === "ingreso");
-  const ingresoEUR = incluidas.filter((l) => l.destino === "ingreso").reduce((s, l) => s + l.total, 0);
-  // Propina: aparte (no es ingreso). El total lo controlas tú (editable).
-  const propinaTotal = parseTasa(propinaEdit) ?? 0;
-  // Métodos con propina para mostrar el desglose de referencia.
-  const propinasPorMetodo = incluidas.filter((l) => l.propina != null && l.propina > 0);
-
-  async function registrar(reemplazar: boolean) {
-    if (!fecha) { setError("Falta la fecha del reporte."); return; }
-    if (incluidas.length === 0) { setError("Marca al menos un método para registrar."); return; }
-    setGuardando(true);
-    setError(null);
-    try {
-      const cat = categorias.find((c) => c.id === categoriaId);
-      const r = await fetch("/api/admin/importar-setux", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          fecha,
-          categoria_id: categoriaId || null,
-          categoria_nombre: cat?.nombre ?? null,
-          propina: propinaTotal,
-          reemplazar,
-          lineas: incluidas.map((l) => ({ metodo: l.metodoBonito, total: l.total, cantidad: l.cantidad })),
-        }),
-      });
-      const d = await r.json();
-      if (r.status === 409 && d.yaExiste) { setConflicto(d.cuantos ?? 0); setGuardando(false); return; }
-      if (!r.ok) throw new Error(d.error || "No se pudo registrar.");
-      const partes = [`${d.creados} ingreso${d.creados === 1 ? "" : "s"}`];
-      let extra = "";
-      if (d.propina > 0) extra = ` Propina registrada aparte: ${fmtMonto(d.propina, "EUR")}.`;
-      setMsg(`Listo (${fmtFecha(fecha)}): ${partes.join(" y ")}.${extra}`);
-      limpiar();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Error");
-    } finally {
-      setGuardando(false);
-    }
-  }
-
-  return (
-    <div className="space-y-4">
-      {error && <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419]">{error}</div>}
-      {msg && <div className="rounded-lg bg-[#F1F4ED] ring-1 ring-[#C9D6BC] p-3 text-sm text-[#2F4A1F]">{msg}</div>}
-
-      {!reporte ? (
-        <div className="rounded-2xl bg-white ring-1 ring-marfil p-6 text-center">
-          <p className="font-display text-[11px] tracking-[0.3em] uppercase text-cacao-mute mb-1">Importar ventas del día</p>
-          <p className="text-sm text-cacao-soft mb-4 font-serif italic">Sube el PDF “Consolidado de ventas por formas de pago” de Xetux.</p>
-          <label className="inline-block rounded-lg bg-cacao text-white px-5 py-2.5 text-xs uppercase tracking-widest hover:bg-terracotta cursor-pointer">
-            {cargando ? "Leyendo…" : "Elegir PDF"}
-            <input type="file" accept="application/pdf,.pdf" className="hidden" disabled={cargando} onChange={(e) => { const f = e.target.files?.[0]; if (f) subir(f); e.target.value = ""; }} />
-          </label>
-        </div>
-      ) : (
-        <div className="space-y-4">
-          <div className="rounded-2xl bg-white ring-1 ring-marfil p-4 space-y-3">
-            <div className="flex items-center justify-between gap-3">
-              <span className="font-display text-[10px] tracking-[0.25em] uppercase text-cacao-mute">Vista previa</span>
-              <button type="button" onClick={limpiar} className="text-xs uppercase tracking-widest text-cacao-soft hover:text-cacao">Cambiar PDF</button>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Campo label="Fecha del reporte"><input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" /></Campo>
-              <Campo label="Categoría">
-                <select value={categoriaId} onChange={(e) => setCategoriaId(e.target.value)} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
-                  <option value="">Sin categoría</option>
-                  {categorias.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-                </select>
-              </Campo>
-            </div>
-            {reporte.usuario && <p className="text-[11px] text-cacao-mute">Usuario: {reporte.usuario}{reporte.desde && reporte.hasta && reporte.desde !== reporte.hasta ? ` · rango ${fmtFecha(reporte.desde)} → ${fmtFecha(reporte.hasta)}` : ""}</p>}
-          </div>
-
-          <section className="rounded-2xl bg-white ring-1 ring-marfil overflow-hidden">
-            <div className="px-4 py-2.5 font-display text-[10px] tracking-[0.25em] uppercase text-cacao-mute border-b border-marfil grid grid-cols-[auto_1fr_auto_auto] gap-3 items-center">
-              <span></span><span>Método</span><span className="text-right">Ventas</span><span className="text-right">Total</span>
-            </div>
-            <ul className="divide-y divide-marfil">
-              {lineas.map((l, i) => (
-                <li key={i} className={`px-4 py-2.5 grid grid-cols-[auto_1fr_auto_auto] gap-3 items-center ${l.incluir && l.destino !== "excluir" ? "" : "opacity-40"}`}>
-                  <input type="checkbox" checked={l.incluir} disabled={l.destino === "excluir"} onChange={() => setLineas((ls) => ls.map((x, j) => (j === i ? { ...x, incluir: !x.incluir } : x)))} className="accent-[#0F0F0F]" />
-                  <span className="text-cacao text-sm">
-                    {l.metodoBonito}
-                    {l.destino === "detalle" && <span className="ml-2 inline-block rounded-full bg-[#FBF3E2] text-[#7A5A18] text-[9px] uppercase tracking-widest px-2 py-0.5 align-middle">→ Archivo aparte (CXC/RPP)</span>}
-                    {l.destino === "excluir" && <span className="ml-2 inline-block rounded-full bg-marfil-soft text-cacao-mute text-[9px] uppercase tracking-widest px-2 py-0.5 align-middle">No cuenta</span>}
-                  </span>
-                  <span className="text-cacao-mute text-sm text-right tabular-nums">{l.cantidad ?? "—"}</span>
-                  <span className="text-cacao text-sm text-right tabular-nums">{fmtMonto(l.total, "EUR")}</span>
-                </li>
-              ))}
-            </ul>
-            <div className="px-4 py-2.5 border-t border-marfil space-y-1 text-sm">
-              <div className="grid grid-cols-[1fr_auto] gap-3">
-                <span className="font-medium text-cacao">Ventas del día (con IVA)</span>
-                <span className="text-right font-medium text-cacao tabular-nums">
-                  {fmtMonto(ingresoEUR, "EUR")}
-                </span>
-              </div>
-              <div className="text-[11px] text-cacao-mute">Al guardar se registra el NETO (sin IVA) y el IVA queda aparte. Zelle y Dólar no llevan IVA.</div>
-              {lineas.some((l) => l.destino === "detalle") && (
-                <div className="grid grid-cols-[1fr_auto] gap-3 text-[#7A5A18]">
-                  <span>CXC y RPP (no son ingreso de contado)</span>
-                  <span className="text-right text-[11px]">Se importan por su archivo aparte (CXC → cuentas por cobrar, RPP → egresos)</span>
-                </div>
-              )}
-              {propinasPorMetodo.length > 0 && (
-                <div className="pt-1 mt-1 border-t border-marfil">
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-cacao-mute">Propina del día (aparte, no es ingreso)</span>
-                    <div className="flex items-center gap-1">
-                      <input inputMode="decimal" value={propinaEdit} onChange={(e) => setPropinaEdit(e.target.value)} className="w-28 border border-marfil rounded-lg px-2 py-1 text-sm text-cacao text-right" />
-                      <span className="text-cacao-mute">€</span>
-                    </div>
-                  </div>
-                  <div className="text-[11px] text-cacao-mute mt-1">
-                    Por método: {propinasPorMetodo.map((l) => `${l.metodoBonito} ${fmtMonto(l.propina!, "EUR")}`).join(" · ")}. Edita el total si hay un error (ej. una propina disparada).
-                  </div>
-                </div>
-              )}
-            </div>
-          </section>
-
-          {reporte.total != null && Math.abs(reporte.total - lineas.reduce((s, l) => s + l.total, 0)) > 0.01 && (
-            <p className="text-[11px] text-cacao-mute">Nota: el total del PDF ({fmtMonto(reporte.total, "EUR")}) no coincide con la suma de las líneas leídas; revisa antes de guardar.</p>
-          )}
-
-          {conflicto != null ? (
-            <div className="rounded-xl bg-[#FBF3E2] ring-1 ring-[#E7D3A1] p-3 flex flex-wrap items-center justify-between gap-3">
-              <span className="text-sm text-[#7A5A18]">Ya importaste ventas de este día ({conflicto} ingreso{conflicto === 1 ? "" : "s"}). ¿Reemplazarlas?</span>
-              <div className="flex gap-2">
-                <button type="button" onClick={() => registrar(true)} disabled={guardando} className="rounded-lg bg-terracotta text-white px-4 py-2 text-xs uppercase tracking-widest">Reemplazar</button>
-                <button type="button" onClick={() => setConflicto(null)} className="rounded-lg ring-1 ring-marfil text-cacao px-4 py-2 text-xs uppercase tracking-widest">Cancelar</button>
-              </div>
-            </div>
-          ) : (
-            <button type="button" onClick={() => registrar(false)} disabled={guardando} className="rounded-lg bg-cacao text-white px-5 py-2.5 text-xs uppercase tracking-widest hover:bg-terracotta disabled:bg-marfil disabled:text-cacao-mute">
-              {guardando ? "Registrando…" : "Registrar ventas del día"}
-            </button>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ── Cuentas por cobrar (CXC) ────────────────────────────────────────
 // ── Cuentas por cobrar (CXC) · saldos por cliente ───────────────────
@@ -2960,7 +2729,6 @@ function SeccionCuentasCobrar() {
   const [correosInput, setCorreosInput] = useState("");
   const [guardandoCorreos, setGuardandoCorreos] = useState(false);
   const [probando, setProbando] = useState(false);
-  const [mostrarImport, setMostrarImport] = useState(false);
   const [verSaldados, setVerSaldados] = useState(false);
   const [mostrarAjustes, setMostrarAjustes] = useState(false);
   const [aliases, setAliases] = useState<{ alias_key: string; canonico: string }[]>([]);
@@ -3130,15 +2898,6 @@ function SeccionCuentasCobrar() {
     <div className="space-y-4">
       {error && <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419]">{error}</div>}
       {msg && <div className="rounded-lg bg-[#F1F4ED] ring-1 ring-[#C9D6BC] p-3 text-sm text-[#2F4A1F]">{msg}</div>}
-
-      <div className="flex justify-end">
-        <button type="button" onClick={() => setMostrarImport((v) => !v)} className="rounded-lg ring-1 ring-marfil text-cacao px-4 py-2 text-xs uppercase tracking-widest hover:bg-marfil-soft">
-          {mostrarImport ? "Cerrar importador" : "Importar por cliente (PDF)"}
-        </button>
-      </div>
-      {mostrarImport && (
-        <ImportarCxC onListo={(r) => { setMostrarImport(false); setMsg(r); recargar(); }} />
-      )}
 
       <div className="grid gap-3 sm:grid-cols-3">
         <ResumenCaja titulo="Por cobrar" valor={fmtMonto(eurDe(totalUsd), "EUR")} sub={`≈ ${fmtMonto(totalUsd, "USD")} · ${deudores.length} cliente${deudores.length === 1 ? "" : "s"}`} fuerte />
@@ -3556,136 +3315,6 @@ function ModalCobro({ cliente, tasaGlobal, onCerrar, onListo }: { cliente: Clien
   );
 }
 
-// ── Importador de cuentas por cobrar por cliente (PDF Estado de Cuentas) ──
-type DocCxCUI = { fecha: string | null; ref: string; monto: number; refAlt?: string };
-type ClienteCxCUI = { codigo: string; nombre: string; saldo: number; documentos: DocCxCUI[]; incluir: boolean };
-
-function ImportarCxC({ onListo }: { onListo: (msg: string) => void }) {
-  const [cargando, setCargando] = useState(false);
-  const [guardando, setGuardando] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [fecha, setFecha] = useState("");
-  const [clientes, setClientes] = useState<ClienteCxCUI[]>([]);
-  const [cortesias, setCortesias] = useState<{ fecha: string | null; ref: string; monto: number; cliente: string | null }[]>([]);
-  const [leido, setLeido] = useState(false);
-
-  function limpiar() { setClientes([]); setCortesias([]); setFecha(""); setLeido(false); }
-
-  async function subir(file: File) {
-    setError(null); setCargando(true);
-    try {
-      const b64 = await new Promise<string>((resolve, reject) => {
-        const fr = new FileReader();
-        fr.onload = () => resolve(String(fr.result));
-        fr.onerror = () => reject(new Error("no se pudo leer"));
-        fr.readAsDataURL(file);
-      });
-      const r = await fetch("/api/admin/importar-cxc", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pdf_base64: b64 }) });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error || "No se pudo leer el PDF.");
-      const rep = d.reporte as { fecha: string | null; clientes: { codigo: string; nombre: string; saldo: number; documentos: DocCxCUI[] }[]; cortesias?: { fecha: string | null; ref: string; monto: number; cliente: string | null }[] };
-      setFecha(rep.fecha ?? hoyISO());
-      setClientes(rep.clientes.map((c) => ({ ...c, incluir: true })));
-      setCortesias(rep.cortesias ?? []);
-      setLeido(true);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Error"); limpiar();
-    } finally { setCargando(false); }
-  }
-
-  const incluidos = clientes.filter((c) => c.incluir);
-  const totalDeben = incluidos.reduce((s, c) => s + (c.saldo > 0 ? c.saldo : 0), 0);
-  const totalFavor = incluidos.reduce((s, c) => s + (c.saldo < 0 ? c.saldo : 0), 0);
-  const totalDocs = incluidos.reduce((s, c) => s + c.documentos.length, 0);
-  const totalRpp = cortesias.reduce((s, c) => s + (c.monto || 0), 0);
-
-  async function guardar() {
-    if (incluidos.length === 0 && cortesias.length === 0) { setError("No hay cuentas ni cortesías que registrar."); return; }
-    setGuardando(true); setError(null);
-    try {
-      const r = await fetch("/api/admin/importar-cxc", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fecha: fecha || hoyISO(), clientes: incluidos.map((c) => ({ nombre: c.nombre, documentos: c.documentos })), cortesias }),
-      });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error || "No se pudo guardar.");
-      const partes: string[] = [];
-      if (d.creados > 0 || incluidos.length > 0) partes.push(`${d.creados} cuenta${d.creados === 1 ? "" : "s"} nueva${d.creados === 1 ? "" : "s"}`);
-      if (d.duplicadas > 0) partes.push(`${d.duplicadas} ya estaba${d.duplicadas === 1 ? "" : "n"}`);
-      if (d.cortesias > 0) partes.push(`${d.cortesias} cortesía${d.cortesias === 1 ? "" : "s"} (egreso)`);
-      onListo(`Importado: ${partes.join(", ") || "sin cambios"}.`);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Error");
-    } finally { setGuardando(false); }
-  }
-
-  return (
-    <div className="rounded-2xl bg-white ring-1 ring-marfil p-4 space-y-4">
-      {error && <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419]">{error}</div>}
-
-      {!leido ? (
-        <div className="text-center py-4">
-          <p className="font-display text-[11px] tracking-[0.3em] uppercase text-cacao-mute mb-1">Importar por cliente</p>
-          <p className="text-sm text-cacao-soft mb-4 font-serif italic">Sube el “detallado por forma de pago” (Excel .xls) filtrado a <strong>CXC y RPP</strong>, o el PDF “Estado de Cuentas Clientes”. Las CXC entran como cuentas por cobrar (por cliente) y las RPP como egresos (cortesías), con su fecha real.</p>
-          <label className="inline-block rounded-lg bg-cacao text-white px-5 py-2.5 text-xs uppercase tracking-widest hover:bg-terracotta cursor-pointer">
-            {cargando ? "Leyendo…" : "Elegir archivo (PDF o Excel)"}
-            <input type="file" accept="application/pdf,.pdf,.xls,.xlsx,application/vnd.ms-excel" className="hidden" disabled={cargando} onChange={(e) => { const f = e.target.files?.[0]; if (f) subir(f); e.target.value = ""; }} />
-          </label>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between gap-3">
-            <span className="font-display text-[10px] tracking-[0.25em] uppercase text-cacao-mute">Vista previa · {incluidos.length} cliente{incluidos.length === 1 ? "" : "s"} · {totalDocs} cuenta{totalDocs === 1 ? "" : "s"}</span>
-            <button type="button" onClick={limpiar} className="text-xs uppercase tracking-widest text-cacao-soft hover:text-cacao">Cambiar PDF</button>
-          </div>
-          <Campo label="Fecha del reporte"><input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} className="w-full max-w-[12rem] border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" /></Campo>
-
-          <div className="rounded-xl ring-1 ring-marfil overflow-hidden max-h-96 overflow-y-auto">
-            <ul className="divide-y divide-marfil">
-              {clientes.map((c, i) => (
-                <li key={`${c.codigo}-${i}`} className={`px-3 py-2 ${c.incluir ? "" : "opacity-40"}`}>
-                  <div className="grid grid-cols-[auto_1fr_auto] gap-3 items-center">
-                    <input type="checkbox" checked={c.incluir} onChange={() => setClientes((cs) => cs.map((x, j) => (j === i ? { ...x, incluir: !x.incluir } : x)))} className="accent-[#0F0F0F]" />
-                    <span className="text-cacao text-sm min-w-0 truncate">{c.nombre}
-                      {c.saldo < 0 && <span className="ml-2 inline-block rounded-full bg-[#F1F4ED] text-[#2F4A1F] text-[9px] uppercase tracking-widest px-2 py-0.5 align-middle">A favor</span>}
-                      <span className="ml-2 text-[11px] text-cacao-mute">{c.documentos.length} cuenta{c.documentos.length === 1 ? "" : "s"}</span>
-                    </span>
-                    <span className={`text-sm text-right tabular-nums ${c.saldo < 0 ? "text-[#2F4A1F]" : "text-cacao"}`}>{fmtMonto(c.saldo, "EUR")}</span>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          <div className="text-sm space-y-1">
-            <div className="grid grid-cols-[1fr_auto] gap-3">
-              <span className="font-medium text-cacao">Por cobrar (deudores)</span>
-              <span className="text-right font-medium text-cacao tabular-nums">{fmtMonto(totalDeben, "EUR")}</span>
-            </div>
-            {totalFavor < 0 && (
-              <div className="grid grid-cols-[1fr_auto] gap-3 text-[#2F4A1F]">
-                <span>A favor de clientes</span>
-                <span className="text-right tabular-nums">{fmtMonto(totalFavor, "EUR")}</span>
-              </div>
-            )}
-            {cortesias.length > 0 && (
-              <div className="grid grid-cols-[1fr_auto] gap-3 text-[#7A2419]">
-                <span>Cortesías (RPP) → egreso · {cortesias.length}</span>
-                <span className="text-right tabular-nums">{fmtMonto(totalRpp, "EUR")}</span>
-              </div>
-            )}
-            <p className="text-[11px] text-cacao-mute pt-1">Las CXC se guardan como cuentas por cobrar (por cliente, con su fecha y referencia; no se duplican al reimportar). Las cortesías (RPP) se guardan como egresos con su fecha; al reimportar reemplazan las de esas fechas. Pagos y cuentas manuales no se tocan.</p>
-          </div>
-
-          <button type="button" onClick={guardar} disabled={guardando} className="rounded-lg bg-cacao text-white px-5 py-2.5 text-xs uppercase tracking-widest hover:bg-terracotta disabled:bg-marfil disabled:text-cacao-mute">
-            {guardando ? "Guardando…" : `Importar ${totalDocs} cuenta${totalDocs === 1 ? "" : "s"}${cortesias.length ? ` + ${cortesias.length} cortesía${cortesias.length === 1 ? "" : "s"}` : ""}`}
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ── Históricos, comparación e indicadores ───────────────────────────
 type MesHist = { mes: string; ingresos: Record<string, number>; egresos: Record<string, number> };
