@@ -111,11 +111,15 @@ export function parseReporteFacturas(buf: Buffer): ReporteFacturas {
   if (!hoja) throw new Error("El archivo no tiene ninguna hoja.");
   const filasCrudas = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[hoja], { header: 1, raw: false, defval: "" });
 
-  // Fila de encabezado: la primera que contenga "Formas de Pago" y "Fecha de Orden".
+  // Fila de encabezado: la primera con una columna de forma(s) de pago y otra de
+  // fecha de orden. Tolerante a singular/plural y a texto extra ("Fecha de la
+  // Orden", "Forma de Pago", etc.) — el matching fino de columnas va luego.
   let hIdx = -1;
   for (let i = 0; i < Math.min(filasCrudas.length, 15); i++) {
     const r = (filasCrudas[i] ?? []).map((c) => norm(c));
-    if (r.includes("formas de pago") && r.some((c) => c.includes("fecha de orden"))) { hIdx = i; break; }
+    const tieneForma = r.some((c) => c.includes("forma") && c.includes("pago"));
+    const tieneFechaOrden = r.some((c) => c.includes("fecha") && c.includes("orden"));
+    if (tieneForma && tieneFechaOrden) { hIdx = i; break; }
   }
   if (hIdx < 0) throw new Error("No reconocí el encabezado. ¿Es el 'Reporte Detallado por Factura' de Xetux?");
   const headers = (filasCrudas[hIdx] ?? []).map((c) => String(c ?? ""));
@@ -128,7 +132,7 @@ export function parseReporteFacturas(buf: Buffer): ReporteFacturas {
   const cTotal = col(headers, "Total Venta");
   const cProp = col(headers, "Propinas", "Propina");
   const cForma = col(headers, "Formas de Pago", "Forma de Pago");
-  const cFOrden = col(headers, "Fecha de Orden");
+  const cFOrden = col(headers, "Fecha de Orden", "Fecha de la Orden", "Fecha de la Órden", "Fecha Orden");
   const cFFactura = col(headers, "Fecha de la factura", "Fecha de la Factura");
   if (cForma < 0 || cFOrden < 0 || cNeta < 0 || cTotal < 0) {
     throw new Error("Faltan columnas clave (Formas de Pago, Venta Neta, Total Venta o Fecha de Orden).");
