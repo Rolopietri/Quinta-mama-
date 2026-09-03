@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { tokenValido, ADMIN_COOKIE } from "@/lib/admin-auth";
 import { createServiceClient } from "@/lib/supabase/admin-service";
-import { parseReporteFacturas } from "@/lib/admin/factura";
+import { parseReporteFacturas, metodoCanonico } from "@/lib/admin/factura";
 import { getTasaEurUsd } from "@/lib/admin/tasa";
 
 export const runtime = "nodejs";
@@ -72,8 +72,9 @@ export async function PUT(req: NextRequest) {
   const ingMap = new Map<string, { fecha: string; metodo: string; net: number; iva: number }>();
   for (const f of filas) {
     if (f.categoria !== "INGRESO") continue;
-    const k = `${f.fecha}||${f.formaPago}`;
-    const cur = ingMap.get(k) ?? { fecha: f.fecha, metodo: f.formaPago, net: 0, iva: 0 };
+    const metodo = metodoCanonico(f.formaPago); // nombre unificado
+    const k = `${f.fecha}||${metodo}`;
+    const cur = ingMap.get(k) ?? { fecha: f.fecha, metodo, net: 0, iva: 0 };
     cur.net += f.ventaNeta; cur.iva += f.impuesto;
     ingMap.set(k, cur);
   }

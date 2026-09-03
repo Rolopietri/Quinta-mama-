@@ -112,6 +112,32 @@ function col(headers: string[], ...alias: string[]): number {
   return -1;
 }
 
+// Nombre CANÓNICO de un método de pago: unifica sinónimos, casing y acentos de
+// Xetux y de los importadores viejos. Efectivo y Dólar se tratan como el MISMO
+// método (pago en divisa/efectivo). Ajusta aquí si cambian los criterios.
+export function canonMetodo(raw: string): string {
+  const k = (raw || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase().trim().replace(/\s+/g, " ");
+  if (!k) return "—";
+  if (k.includes("PUNTO") || k === "PTO DE VENTA" || k === "PTO VENTA" || k === "PDV" || k === "POS") return "Punto de Venta";
+  if (k.includes("PAGO MOVIL") || k === "PM") return "Pago Móvil";
+  if (k === "ZELLE") return "Zelle";
+  if (k === "TRANSFERENCIA" || k === "TRANSF" || k.includes("TRANSFEREN")) return "Transferencia";
+  if (k === "DOLAR" || k === "DOLARES" || k === "USD" || k === "DIVISA" || k === "EFECTIVO" || k === "CASH" || k === "$") return "Efectivo";
+  if (k === "BS" || k.includes("BOLIVAR")) return "Bolívares";
+  if (k === "CXC") return "CXC";
+  if (k === "RPP") return "RPP";
+  return raw.trim().toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+// Método(s) canónicos de una forma de pago: colapsa los del mismo método;
+// los pagos partidos entre métodos distintos quedan como "Mixto (A + B)".
+export function metodoCanonico(forma: string): string {
+  const partes = [...new Set(forma.split("|").map((p) => canonMetodo(p)).filter((p) => p !== "—"))];
+  if (partes.length === 0) return "—";
+  if (partes.length === 1) return partes[0];
+  return `Mixto (${partes.join(" + ")})`;
+}
+
 export function parseReporteFacturas(buf: Buffer): ReporteFacturas {
   const wb = XLSX.read(buf, { type: "buffer", cellDates: true });
   const hoja = wb.SheetNames[0];
@@ -211,13 +237,8 @@ export function parseReporteFacturas(buf: Buffer): ReporteFacturas {
     ticketPromedioNeto: r2(tickets > 0 ? totalNeto / tickets : 0),
   };
 
-  // Desglose por método de pago (bruto = Total Venta). Los pagos del mismo
-  // método (p.ej. "PTO | PTO") se colapsan; los mixtos van como "Mixto (…)".
-  const metodoDe = (forma: string): string => {
-    const partes = [...new Set(forma.split("|").map((p) => p.trim()).filter(Boolean))];
-    if (partes.length === 1) return partes[0];
-    return `Mixto (${partes.join(" + ")})`;
-  };
+  // Desglose por método de pago (bruto = Total Venta), con nombres CANÓNICOS.
+  const metodoDe = metodoCanonico;
   const mm = new Map<string, MetodoAgg>();
   for (const f of filas) {
     const metodo = metodoDe(f.formaPago);
