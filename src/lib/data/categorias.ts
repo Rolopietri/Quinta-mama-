@@ -14,22 +14,35 @@ export type CategoriaProducto = {
    *  Ventas (alquileres, pádel, reventa, consignación). undefined = la columna
    *  aún no existe en DB (migración pendiente) → se trata como visible. */
   aplicaReceta?: boolean;
+  /** Rubro administrativo: nombre bajo el que esta categoría se AGRUPA en el
+   *  análisis de Administración (p. ej. Smoothies + Bebidas naturales → un solo
+   *  rubro). En Recetas/Cocina la categoría se usa tal cual. null/undefined = no
+   *  se agrupa (se muestra con su propio nombre). */
+  rubro?: string | null;
 };
 
-type Row = { id: string; nombre: string; orden: number | string | null; excluir_ranking?: boolean | null; aplica_receta?: boolean | null };
+type Row = { id: string; nombre: string; orden: number | string | null; excluir_ranking?: boolean | null; aplica_receta?: boolean | null; rubro?: string | null };
 const toCat = (r: Row): CategoriaProducto => ({
   id: r.id,
   nombre: r.nombre,
   orden: Number(r.orden ?? 0),
   excluirRanking: !!r.excluir_ranking,
   aplicaReceta: r.aplica_receta == null ? undefined : !!r.aplica_receta,
+  rubro: r.rubro && r.rubro.trim() ? r.rubro.trim() : null,
 });
 
 /** Lista las categorías (ordenadas). Si la tabla aún no existe, devuelve []. */
 export async function listCategoriasProducto(): Promise<CategoriaProducto[]> {
   const sb = createSupabaseBrowserClient();
-  // Intento con las columnas nuevas (excluir_ranking, aplica_receta). Si la
-  // migración aún no corrió, reintento con menos columnas para no romper.
+  // Intento con TODAS las columnas nuevas (excluir_ranking, aplica_receta,
+  // rubro). Si alguna migración aún no corrió, reintento con menos columnas
+  // para no romper (sin perder las que sí existen).
+  const conRubro = await sb
+    .from("categoria_producto")
+    .select("id, nombre, orden, excluir_ranking, aplica_receta, rubro")
+    .order("orden", { ascending: true })
+    .order("nombre", { ascending: true });
+  if (!conRubro.error) return (conRubro.data as Row[]).map(toCat);
   const full = await sb
     .from("categoria_producto")
     .select("id, nombre, orden, excluir_ranking, aplica_receta")

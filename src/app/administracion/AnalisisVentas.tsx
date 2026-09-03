@@ -105,6 +105,7 @@ function categoriaDeVenta(
   catPorReceta: Map<string, string>,
   catPorInsumo: Map<string, string>,
   catPorNombre: Map<string, string>,
+  rubroMap: Map<string, string>,
 ): { key: string; label: string } {
   let label: string | null = null;
   if (v.recetaId) {
@@ -125,7 +126,11 @@ function categoriaDeVenta(
   if (!label && v.tipoItem === "servicio") label = "Servicio";
   if (!label) label = "Sin categoría";
   const canon = CANON_CATEGORIA[normCat(label)] ?? label;
-  return { key: normCat(canon), label: canon };
+  // Rollup administrativo: si la categoría tiene un "rubro" definido, se agrupa
+  // bajo ese rubro (p. ej. Smoothies + Bebidas naturales → un solo rubro). En
+  // Recetas/Cocina la categoría sigue usándose tal cual; esto es solo la vista.
+  const rubro = rubroMap.get(normCat(canon)) ?? canon;
+  return { key: normCat(rubro), label: rubro };
 }
 
 type OrdenTabla = "monto" | "unidades" | "pct";
@@ -283,13 +288,23 @@ export function AnalisisVentas() {
     return m;
   }, [insumos]);
 
+  // Mapa categoría (nombre normalizado) → rubro administrativo, para agrupar en
+  // el análisis (Smoothies + Bebidas naturales → un solo rubro). Solo la vista.
+  const rubroMap = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const c of categorias) {
+      if (c.rubro && c.rubro.trim()) m.set(normCat(c.nombre), c.rubro.trim());
+    }
+    return m;
+  }, [categorias]);
+
   // Enriquecer cada venta con producto/categoría/unidades/monto/costo.
   // costo = costo de la línea completa (todas las unidades); null si no se puede
   // costear (consignación, servicios, receta sin costo).
   const enriquecidas = useMemo(
     () =>
       ventas.map((v) => {
-        const cat = categoriaDeVenta(v, catPorReceta, catPorInsumo, catNombre);
+        const cat = categoriaDeVenta(v, catPorReceta, catPorInsumo, catNombre, rubroMap);
         const unidades = v.cantidad || 0;
         let costo: number | null = null;
         if (v.recetaId) {
