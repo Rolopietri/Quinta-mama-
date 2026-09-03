@@ -10,8 +10,6 @@ export const dynamic = "force-dynamic";
 function autorizado(req: NextRequest): boolean {
   return tokenValido(req.cookies.get(ADMIN_COOKIE)?.value);
 }
-const n = (v: unknown) => (v == null ? 0 : Number(v) || 0);
-const norm = (s: string | null) => (s ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 const r2 = (x: number) => Math.round(x * 100) / 100;
 const clave = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").trim().toLowerCase().replace(/\s+/g, " ");
 
@@ -35,37 +33,8 @@ export async function POST(req: NextRequest) {
   }
   const { desde, hasta } = reporte;
 
-  // Lo ya cargado en Administración para el mismo rango (por día).
-  const sb = createServiceClient();
-  let cargado: { porDia: Record<string, { ingreso: number; cxc: number; rpp: number }>; totales: { ingreso: number; cxc: number; rpp: number } } | null = null;
-  if (sb && desde && hasta) {
-    const [ingR, egrR, cxcR] = await Promise.all([
-      sb.from("admin_ingreso").select("fecha, monto, moneda, fuente").gte("fecha", desde).lte("fecha", hasta),
-      sb.from("admin_egreso").select("fecha, monto, moneda, categoria_nombre").gte("fecha", desde).lte("fecha", hasta),
-      sb.from("admin_cuenta_cobrar").select("fecha, monto, moneda").gte("fecha", desde).lte("fecha", hasta),
-    ]);
-    const porDia: Record<string, { ingreso: number; cxc: number; rpp: number }> = {};
-    const get = (f: string) => (porDia[f] ??= { ingreso: 0, cxc: 0, rpp: 0 });
-    for (const e of ingR.data ?? []) {
-      if (e.fuente === "setux" && (e.moneda ?? "EUR") === "EUR" && e.fecha) get(String(e.fecha)).ingreso += n(e.monto);
-    }
-    for (const e of egrR.data ?? []) {
-      if (norm(e.categoria_nombre).includes("cortesia") && (e.moneda ?? "EUR") === "EUR" && e.fecha) get(String(e.fecha)).rpp += n(e.monto);
-    }
-    for (const c of cxcR.data ?? []) {
-      if ((c.moneda ?? "EUR") === "EUR" && c.fecha) get(String(c.fecha)).cxc += n(c.monto);
-    }
-    const tot = { ingreso: 0, cxc: 0, rpp: 0 };
-    for (const f of Object.keys(porDia)) {
-      porDia[f] = { ingreso: r2(porDia[f].ingreso), cxc: r2(porDia[f].cxc), rpp: r2(porDia[f].rpp) };
-      tot.ingreso += porDia[f].ingreso; tot.cxc += porDia[f].cxc; tot.rpp += porDia[f].rpp;
-    }
-    cargado = { porDia, totales: { ingreso: r2(tot.ingreso), cxc: r2(tot.cxc), rpp: r2(tot.rpp) } };
-  }
-
   return NextResponse.json({
     reporte: { desde, hasta, dias: reporte.dias, totales: reporte.totales, porMetodo: reporte.porMetodo, cxcDetalle: reporte.cxcDetalle },
-    cargado,
   });
 }
 

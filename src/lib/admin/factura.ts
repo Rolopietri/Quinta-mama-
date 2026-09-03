@@ -35,7 +35,7 @@ export type DiaFactura = {
 };
 
 // Desglose por método de pago (como el "Detallado por Forma de Pago" de Xetux).
-export type MetodoAgg = { metodo: string; categoria: CategoriaPago; monto: number; tickets: number };
+export type MetodoAgg = { metodo: string; categoria: CategoriaPago; neto: number; iva: number; monto: number; tickets: number };
 // Detalle de cuentas por cobrar por cliente (crédito del reporte).
 export type CxCDetalleCliente = { cliente: string; total: number; docs: { ref: string; fecha: string; monto: number }[] };
 
@@ -221,10 +221,10 @@ export function parseReporteFacturas(buf: Buffer): ReporteFacturas {
   const mm = new Map<string, MetodoAgg>();
   for (const f of filas) {
     const metodo = metodoDe(f.formaPago);
-    const cur = mm.get(metodo) ?? { metodo, categoria: f.categoria, monto: 0, tickets: 0 };
-    cur.monto += f.total; cur.tickets += 1; mm.set(metodo, cur);
+    const cur = mm.get(metodo) ?? { metodo, categoria: f.categoria, neto: 0, iva: 0, monto: 0, tickets: 0 };
+    cur.neto += f.ventaNeta; cur.iva += f.impuesto; cur.monto += f.total; cur.tickets += 1; mm.set(metodo, cur);
   }
-  const porMetodo = Array.from(mm.values()).map((m) => ({ ...m, monto: r2(m.monto) })).sort((a, b) => b.monto - a.monto);
+  const porMetodo = Array.from(mm.values()).map((m) => ({ ...m, neto: r2(m.neto), iva: r2(m.iva), monto: r2(m.monto) })).sort((a, b) => b.monto - a.monto);
 
   // Detalle de cuentas por cobrar por cliente (crédito, bruto).
   const cm = new Map<string, CxCDetalleCliente>();
