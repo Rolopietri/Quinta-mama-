@@ -1649,7 +1649,7 @@ function SeccionIngresos() {
   const habilitarFactura = new Date() >= new Date("2026-09-01T00:00:00");
   const tabs: [typeof vista, string][] = [
     ["ingresos", "Ingresos"],
-    ["importar", "Importar (Setux)"],
+    ["importar", "Importar (Xetux)"],
     ...(habilitarFactura ? ([["factura", "Por factura (cuadre)"]] as [typeof vista, string][]) : []),
     ["categorias", "Categorías"],
   ];
@@ -1999,7 +1999,7 @@ function IngresosMes() {
       const r = await fetch("/api/admin/recalcular-iva", { method: "POST" });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || "No se pudo recalcular el IVA.");
-      setMsg(`IVA separado (${d.ivaPct}%) en ${d.ajustados} ingresos de Setux.`);
+      setMsg(`IVA separado (${d.ivaPct}%) en ${d.ajustados} ingresos de Xetux.`);
       recargar();
     } catch (e) {
       setError(e instanceof Error ? e.message : "No se pudo recalcular el IVA.");
@@ -2147,7 +2147,7 @@ function IngresosMes() {
               ))}
             </div>
           )}
-          {monedasPresentes.length > 1 && <div className="text-[10px] text-[#9A938B] mt-1.5">Cada moneda por separado (Setux en €, alquileres en $).</div>}
+          {monedasPresentes.length > 1 && <div className="text-[10px] text-[#9A938B] mt-1.5">Cada moneda por separado (Xetux en €, alquileres en $).</div>}
           {/* Ingreso: total y comparación con Cocina, juntos arriba */}
           <div className="mt-2 pt-2 border-t border-[#333]">
             <div className="text-[9px] tracking-[0.2em] uppercase text-[#9A938B]">Ventas en Cocina (POS)</div>
@@ -2786,7 +2786,7 @@ function ImportarSetux() {
       {!reporte ? (
         <div className="rounded-2xl bg-white ring-1 ring-marfil p-6 text-center">
           <p className="font-display text-[11px] tracking-[0.3em] uppercase text-cacao-mute mb-1">Importar ventas del día</p>
-          <p className="text-sm text-cacao-soft mb-4 font-serif italic">Sube el PDF “Consolidado de ventas por formas de pago” de Setux.</p>
+          <p className="text-sm text-cacao-soft mb-4 font-serif italic">Sube el PDF “Consolidado de ventas por formas de pago” de Xetux.</p>
           <label className="inline-block rounded-lg bg-cacao text-white px-5 py-2.5 text-xs uppercase tracking-widest hover:bg-terracotta cursor-pointer">
             {cargando ? "Leyendo…" : "Elegir PDF"}
             <input type="file" accept="application/pdf,.pdf" className="hidden" disabled={cargando} onChange={(e) => { const f = e.target.files?.[0]; if (f) subir(f); e.target.value = ""; }} />
