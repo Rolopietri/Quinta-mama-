@@ -1672,12 +1672,14 @@ function SeccionIngresos() {
 // promedio, y los COMPARA con lo ya cargado en Administración — sin guardar.
 type DiaFacturaUI = { fecha: string; ingresoNeto: number; ingresoBruto: number; cxcNeto: number; cxcBruto: number; rppNeto: number; rppBruto: number; propina: number; tickets: number };
 type TotalesFacturaUI = { ingresoNeto: number; ingresoBruto: number; cxcNeto: number; cxcBruto: number; rppNeto: number; rppBruto: number; totalNeto: number; totalBruto: number; propina: number; tickets: number; ticketPromedioBruto: number; ticketPromedioNeto: number };
+type MetodoUI = { metodo: string; categoria: "INGRESO" | "CXC" | "RPP"; monto: number; tickets: number };
+type CxCClienteUI = { cliente: string; total: number; docs: { ref: string; fecha: string; monto: number }[] };
 type CargadoUI = { porDia: Record<string, { ingreso: number; cxc: number; rpp: number }>; totales: { ingreso: number; cxc: number; rpp: number } };
 
 function CuadreFacturas() {
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [rep, setRep] = useState<{ desde: string; hasta: string; dias: DiaFacturaUI[]; totales: TotalesFacturaUI } | null>(null);
+  const [rep, setRep] = useState<{ desde: string; hasta: string; dias: DiaFacturaUI[]; totales: TotalesFacturaUI; porMetodo?: MetodoUI[]; cxcDetalle?: CxCClienteUI[] } | null>(null);
   const [cargado, setCargado] = useState<CargadoUI | null>(null);
   const [base, setBase] = useState<"neto" | "bruto">("bruto");
   const [archivoB64, setArchivoB64] = useState<string | null>(null);
@@ -1763,6 +1765,49 @@ function CuadreFacturas() {
             <MiniKpi titulo="CXC (crédito)" valor={fEUR(rep.totales.cxcBruto)} sub={`neto ${fEUR(rep.totales.cxcNeto)}`} />
             <MiniKpi titulo="RPP (cortesías)" valor={fEUR(rep.totales.rppBruto)} sub={`neto ${fEUR(rep.totales.rppNeto)}`} />
           </div>
+
+          {/* Desglose por método de pago (como el Detallado por Forma de Pago) */}
+          {rep.porMetodo && rep.porMetodo.length > 0 && (
+            <div className="rounded-xl ring-1 ring-marfil overflow-hidden">
+              <div className="px-3 py-2 bg-marfil-soft font-display text-[10px] tracking-[0.25em] uppercase text-cacao-mute">Desglose por método de pago</div>
+              <table className="w-full text-xs">
+                <thead><tr className="text-cacao-mute uppercase tracking-widest text-left"><th className="py-1.5 px-3 font-normal">Método</th><th className="py-1.5 px-3 font-normal">Tipo</th><th className="py-1.5 px-3 font-normal text-right">Facturas</th><th className="py-1.5 px-3 font-normal text-right">Monto</th></tr></thead>
+                <tbody>
+                  {rep.porMetodo.map((m) => (
+                    <tr key={m.metodo} className="border-t border-marfil">
+                      <td className="py-1 px-3 text-cacao">{m.metodo}</td>
+                      <td className="py-1 px-3 text-cacao-soft">{m.categoria === "INGRESO" ? "Ingreso" : m.categoria === "CXC" ? "Crédito (CXC)" : "Cortesía (RPP)"}</td>
+                      <td className="py-1 px-3 text-right tabular-nums text-cacao-soft">{m.tickets}</td>
+                      <td className="py-1 px-3 text-right tabular-nums text-cacao">{fEUR(m.monto)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot><tr className="border-t-2 border-marfil font-medium"><td className="py-1 px-3 text-cacao" colSpan={3}>Total</td><td className="py-1 px-3 text-right tabular-nums text-cacao">{fEUR(rep.totales.totalBruto)}</td></tr></tfoot>
+              </table>
+            </div>
+          )}
+
+          {/* Detalle de cuentas por cobrar (crédito) por cliente */}
+          {rep.cxcDetalle && rep.cxcDetalle.length > 0 && (
+            <div className="rounded-xl ring-1 ring-marfil overflow-hidden">
+              <div className="px-3 py-2 bg-marfil-soft font-display text-[10px] tracking-[0.25em] uppercase text-cacao-mute flex items-center justify-between">
+                <span>Cuentas por cobrar (crédito) · {rep.cxcDetalle.length} cliente{rep.cxcDetalle.length === 1 ? "" : "s"}</span>
+                <span className="text-cacao">{fEUR(rep.totales.cxcBruto)}</span>
+              </div>
+              <div className="max-h-72 overflow-y-auto">
+                <table className="w-full text-xs">
+                  <tbody>
+                    {rep.cxcDetalle.map((c) => (
+                      <tr key={c.cliente} className="border-t border-marfil">
+                        <td className="py-1.5 px-3 text-cacao">{c.cliente}<span className="text-cacao-mute"> · {c.docs.length} doc{c.docs.length === 1 ? "" : "s"} ({c.docs.map((d) => d.ref).filter(Boolean).join(", ")})</span></td>
+                        <td className="py-1.5 px-3 text-right tabular-nums text-cacao whitespace-nowrap">{fEUR(c.total)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           {/* Cuadre vs cargado */}
           <div className="flex items-center gap-2 flex-wrap">

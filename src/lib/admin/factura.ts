@@ -34,9 +34,16 @@ export type DiaFactura = {
   tickets: number; // facturas cerradas ese día (por fecha de orden)
 };
 
+// Desglose por método de pago (como el "Detallado por Forma de Pago" de Xetux).
+export type MetodoAgg = { metodo: string; categoria: CategoriaPago; monto: number; tickets: number };
+// Detalle de cuentas por cobrar por cliente (crédito del reporte).
+export type CxCDetalleCliente = { cliente: string; total: number; docs: { ref: string; fecha: string; monto: number }[] };
+
 export type ReporteFacturas = {
   filas: FilaFactura[];
   dias: DiaFactura[];
+  porMetodo: MetodoAgg[];
+  cxcDetalle: CxCDetalleCliente[];
   desde: string; hasta: string;
   totales: {
     ingresoNeto: number; ingresoBruto: number;
@@ -204,5 +211,32 @@ export function parseReporteFacturas(buf: Buffer): ReporteFacturas {
     ticketPromedioNeto: r2(tickets > 0 ? totalNeto / tickets : 0),
   };
 
-  return { filas, dias, desde: dias[0]?.fecha ?? "", hasta: dias[dias.length - 1]?.fecha ?? "", totales };
+  // Desglose por método de pago (bruto = Total Venta). Los pagos del mismo
+  // método (p.ej. "PTO | PTO") se colapsan; los mixtos van como "Mixto (…)".
+  const metodoDe = (forma: string): string => {
+    const partes = [...new Set(forma.split("|").map((p) => p.trim()).filter(Boolean))];
+    if (partes.length === 1) return partes[0];
+    return `Mixto (${partes.join(" + ")})`;
+  };
+  const mm = new Map<string, MetodoAgg>();
+  for (const f of filas) {
+    const metodo = metodoDe(f.formaPago);
+    const cur = mm.get(metodo) ?? { metodo, categoria: f.categoria, monto: 0, tickets: 0 };
+    cur.monto += f.total; cur.tickets += 1; mm.set(metodo, cur);
+  }
+  const porMetodo = Array.from(mm.values()).map((m) => ({ ...m, monto: r2(m.monto) })).sort((a, b) => b.monto - a.monto);
+
+  // Detalle de cuentas por cobrar por cliente (crédito, bruto).
+  const cm = new Map<string, CxCDetalleCliente>();
+  for (const f of filas) {
+    if (f.categoria !== "CXC") continue;
+    const cliente = f.cliente || "—";
+    const cur = cm.get(cliente) ?? { cliente, total: 0, docs: [] };
+    cur.total += f.total;
+    cur.docs.push({ ref: f.nro || f.orden || "", fecha: f.fecha, monto: r2(f.total) });
+    cm.set(cliente, cur);
+  }
+  const cxcDetalle = Array.from(cm.values()).map((c) => ({ ...c, total: r2(c.total) })).sort((a, b) => b.total - a.total);
+
+  return { filas, dias, porMetodo, cxcDetalle, desde: dias[0]?.fecha ?? "", hasta: dias[dias.length - 1]?.fecha ?? "", totales };
 }

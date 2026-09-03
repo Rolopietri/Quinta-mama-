@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
   }
 
   return NextResponse.json({
-    reporte: { desde, hasta, dias: reporte.dias, totales: reporte.totales },
+    reporte: { desde, hasta, dias: reporte.dias, totales: reporte.totales, porMetodo: reporte.porMetodo, cxcDetalle: reporte.cxcDetalle },
     cargado,
   });
 }
