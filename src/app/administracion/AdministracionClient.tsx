@@ -2023,7 +2023,14 @@ function IngresosMes() {
   // Así se ve por qué canal entró (Zelle/Dólar = dólares, Pago Móvil/Pto de Venta = Bs tasa euro).
   const porMetodo: Record<string, Record<string, number>> = {};
   for (const e of ingresos) {
-    const metodo = e.metodo || "Sin método";
+    // Dólar (efectivo USD) y Efectivo se muestran unidos como "Efectivo". El
+    // dato crudo (e.metodo) no se toca: esto solo agrupa la vista.
+    const up = (e.metodo || "").trim().toUpperCase();
+    const metodo = !e.metodo
+      ? "Sin método"
+      : up === "DOLAR" || up === "DÓLAR" || up === "EFECTIVO"
+        ? "Efectivo"
+        : e.metodo;
     const k = e.moneda || "EUR";
     (porMetodo[metodo] ??= {})[k] = (porMetodo[metodo][k] ?? 0) + (e.monto ?? 0);
   }
