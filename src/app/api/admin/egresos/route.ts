@@ -36,6 +36,8 @@ function fila(e: Record<string, unknown>): Record<string, unknown> {
   // pagada: por defecto true (gasto real inmediato). false = cuenta por pagar.
   const pagada = e.pagada === false ? false : true;
   const fechaPago = pagada ? (texto(e.fecha_pago) ?? texto(e.fecha)) : null;
+  // Flete (misma moneda): ya viene SUMADO en `monto`; se guarda su desglose.
+  const flete = numero(e.flete);
   return {
     fecha: texto(e.fecha) ?? undefined,
     concepto: texto(e.concepto),
@@ -54,6 +56,7 @@ function fila(e: Record<string, unknown>): Record<string, unknown> {
     solicitud_linea_id: texto(e.solicitud_linea_id),
     pagada,
     fecha_pago: fechaPago,
+    flete: flete != null && flete > 0 ? Math.round(flete * 100) / 100 : null,
   };
 }
 

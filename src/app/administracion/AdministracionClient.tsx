@@ -1007,6 +1007,7 @@ type Egreso = {
   solicitud_linea_id: string | null;
   pagada?: boolean | null;
   fecha_pago?: string | null;
+  flete?: number | null;
 };
 
 // Confirmar pago de una solicitud pendiente → registrar egresos y marcar procesada.
@@ -1514,18 +1515,24 @@ function FormEgreso({
   porPagar?: boolean;
 }) {
   const esEdicion = !!inicial;
+  // `monto` en el form es la BASE (bienes) sin flete; el guardado suma el flete.
+  // En edición, monto guardado = base + flete → se recupera la base restando.
+  const fleteIni = inicial?.flete ?? 0;
+  const baseIni = inicial?.monto != null ? Math.round((inicial.monto - fleteIni) * 100) / 100 : null;
   const [f, setF] = useState({
     fecha: inicial?.fecha ?? `${mes}-01`,
     categoria_id: inicial?.categoria_id ?? "",
     proveedor_id: inicial?.proveedor_id ?? "",
     concepto: inicial?.concepto ?? "",
-    monto: inicial?.monto != null ? String(inicial.monto) : "",
+    monto: baseIni != null ? String(baseIni) : "",
     moneda: inicial?.moneda ?? "Bs",
     tasa: inicial?.tasa != null ? String(inicial.tasa) : "",
     metodo: inicial?.metodo ?? "Transferencia",
     factura: inicial?.factura ?? "",
     nota: inicial?.nota ?? "",
+    flete: fleteIni > 0 ? String(fleteIni) : "",
   });
+  const [tieneFlete, setTieneFlete] = useState(fleteIni > 0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Registro de un proveedor NUEVO desde aquí mismo (se guarda en el catálogo).
@@ -1537,6 +1544,8 @@ function FormEgreso({
 
   async function guardar() {
     if (parseMonto(f.monto) == null) { setError("Pon un monto."); return; }
+    const fleteVal = tieneFlete ? (parseMonto(f.flete) ?? 0) : 0;
+    if (tieneFlete && fleteVal <= 0) { setError("Pon el monto del flete (o desmarca “Tiene flete”)."); return; }
     if (creandoProv && !nprov.nombre.trim()) { setError("Pon el nombre del proveedor nuevo (o elige “— Ninguno —”)."); return; }
     setBusy(true);
     setError(null);
@@ -1561,12 +1570,14 @@ function FormEgreso({
         clasificacion: cat?.clasificacion ?? null,
         proveedor_id: provId,
         proveedor_nombre: provNombre,
-        monto: parseMonto(f.monto),
+        // El monto guardado es base + flete (misma moneda). El flete se desglosa.
+        monto: (parseMonto(f.monto) ?? 0) + fleteVal,
         moneda: f.moneda,
         tasa: parseTasa(f.tasa),
         metodo: f.metodo,
         factura: f.factura,
         nota: f.nota,
+        flete: fleteVal > 0 ? fleteVal : null,
         ...(porPagar && !esEdicion ? { pagada: false } : {}),
       };
       const r = await fetch("/api/admin/egresos", {
@@ -1633,6 +1644,19 @@ function FormEgreso({
         <Campo label="Tasa a USD">
           <input inputMode="decimal" value={f.tasa} onChange={(e) => set("tasa", e.target.value)} disabled={f.moneda === "USD"} placeholder={f.moneda === "USD" ? "—" : ""} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao disabled:bg-marfil-soft" />
         </Campo>
+      </div>
+      {/* Flete (opcional): misma moneda, se SUMA al monto. */}
+      <div className="rounded-xl ring-1 ring-marfil p-3 space-y-2">
+        <label className="flex items-center gap-2 text-sm text-cacao cursor-pointer">
+          <input type="checkbox" checked={tieneFlete} onChange={(e) => setTieneFlete(e.target.checked)} className="accent-terracotta" />
+          Tiene flete
+        </label>
+        {tieneFlete && (
+          <div className="grid grid-cols-2 gap-2 items-end">
+            <Campo label={`Flete (${f.moneda})`}><input inputMode="decimal" value={f.flete} onChange={(e) => set("flete", e.target.value)} placeholder="0,00" className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" /></Campo>
+            <p className="text-[11px] text-cacao-mute pb-2">Total con flete: <span className="text-cacao">{fmtMonto((parseMonto(f.monto) ?? 0) + (parseMonto(f.flete) ?? 0), f.moneda)}</span></p>
+          </div>
+        )}
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
         <Campo label="Método">
