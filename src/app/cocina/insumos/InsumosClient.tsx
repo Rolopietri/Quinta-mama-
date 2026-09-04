@@ -939,7 +939,7 @@ export function InsumosClient() {
                 )}
             </label>
             <label className="text-sm text-cacao">
-              Merma por cocción (%)
+              Merma por procesamiento (%)
               <input
                 type="number"
                 step="1"
@@ -953,8 +953,8 @@ export function InsumosClient() {
                 className="mt-1 w-full rounded-lg ring-1 ring-marfil px-3 py-2"
               />
               <span className="text-[10px] text-cacao-mute block mt-1">
-                % de peso que pierde al cocinarse. Permite registrar pérdidas
-                pesando el producto ya cocido (ej. tocineta ≈ 70%).
+                % de peso que se pierde al prepararlo: al cocinarse (tocineta ≈ 70%),
+                o por la parte que se descarta (pepa del aguacate, semilla del mango).
               </span>
             </label>
           </div>
