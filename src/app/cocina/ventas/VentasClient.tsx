@@ -32,6 +32,24 @@ import { CalendarIcon, ChevronIcon, WarningIcon } from "@/components/icons";
 import { hoyISO } from "@/lib/ui";
 import { ErrorBanner } from "@/components/ErrorBanner";
 
+/** Xetux nombra el archivo con la fecha en que se generó el reporte, ej.
+ *  "Detallado_por_ProductoThu_Sep_03_22_25_34_VET_2026.xls" → 2026-09-03. El
+ *  reporte por producto NO trae fechas por línea, así que esta es la única pista
+ *  automática de la fecha del reporte. Devuelve YYYY-MM-DD o null. */
+function fechaDesdeNombreXetux(nombre: string): string | null {
+  const meses: Record<string, string> = {
+    jan: "01", feb: "02", mar: "03", apr: "04", may: "05", jun: "06",
+    jul: "07", aug: "08", sep: "09", oct: "10", nov: "11", dec: "12",
+  };
+  const m = nombre.match(/(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)_?(\d{1,2}).*?(\d{4})/i);
+  if (!m) return null;
+  const mm = meses[m[1].toLowerCase()];
+  const dd = String(parseInt(m[2], 10)).padStart(2, "0");
+  const yyyy = m[3];
+  if (!mm || parseInt(dd, 10) < 1 || parseInt(dd, 10) > 31) return null;
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 /** Fecha larga en español para los encabezados de grupo (ej. "21 jul 2026"). */
 function fmtFecha(fecha: string): string {
   return new Date(fecha + "T00:00").toLocaleDateString("es-VE", {
@@ -96,6 +114,8 @@ export function VentasClient() {
 
   // Importar
   const [iFecha, setIFecha] = useState(todayISO());
+  // Fecha detectada en el nombre del archivo de Xetux (para avisarle al usuario).
+  const [fechaDeArchivo, setFechaDeArchivo] = useState<string | null>(null);
   const [csvText, setCsvText] = useState("");
   const [clasif, setClasif] = useState<ClasificItem[] | null>(null);
   // Cómo interpretar la columna de dinero del CSV: total de línea o precio
@@ -688,6 +708,9 @@ export function VentasClient() {
                 className="mt-1 w-full sm:w-48 rounded-lg ring-1 ring-marfil px-3 py-2"
               />
             </label>
+            {fechaDeArchivo && (
+              <p className="text-xs text-[#2F4A1F] -mt-1">Fecha tomada del nombre del archivo ({fmtFecha(fechaDeArchivo)}). Ajústala si no corresponde al día de las ventas.</p>
+            )}
             <label className="text-sm text-cacao block">
               Archivo de Xetux (Excel .xls/.xlsx o CSV)
               <input
@@ -697,6 +720,12 @@ export function VentasClient() {
                   const f = e.target.files?.[0];
                   if (!f) return;
                   setError(null);
+                  // El reporte por producto no trae fechas; si el nombre del
+                  // archivo de Xetux tiene la fecha de generación, se usa como
+                  // fecha de importación (el usuario la confirma abajo).
+                  const detFecha = fechaDesdeNombreXetux(f.name);
+                  setFechaDeArchivo(detFecha);
+                  if (detFecha) setIFecha(detFecha);
                   const nombre = f.name.toLowerCase();
                   const esExcel =
                     nombre.endsWith(".xls") || nombre.endsWith(".xlsx");
