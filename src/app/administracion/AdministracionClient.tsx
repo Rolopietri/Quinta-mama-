@@ -438,7 +438,7 @@ function FormProveedor({
 // historial (pendiente → procesada). Moneda original + conversión a USD.
 
 const MONEDAS = ["Bs", "USD", "EUR"] as const;
-const METODOS = ["Transferencia", "Pago móvil", "Zelle", "Efectivo", "USDT", "Otro"] as const;
+const METODOS = ["Transferencia", "Pago Móvil", "Zelle", "Dólar", "Bolívares", "Otro"] as const;
 const TASA_TIPOS = ["dólar", "del día", "promedio", "VNC", "USDT", "otra"] as const;
 
 type LineaForm = {
@@ -2698,7 +2698,7 @@ type IncobrableUI = {
 };
 
 // Métodos de pago disponibles (los mismos que reporta el sistema/Setux).
-const METODOS_COBRO = ["Efectivo", "Pago Móvil", "Zelle", "Punto de Venta", "Transferencia", "Dólar", "Tarjeta de crédito", "Tarjeta de débito", "Otro"];
+const METODOS_COBRO = ["Punto de Venta", "Pago Móvil", "Zelle", "Transferencia", "Dólar", "Bolívares", "Otro"];
 
 // Un saldo a favor de hasta este monto (EUR) se considera sobrante de redondeo
 // (pagó de más, sin vuelto) → se ofrece "Marcar sobrante" en la fila. Por encima,
@@ -3190,7 +3190,7 @@ function ModalCobro({ cliente, tasaGlobal, onCerrar, onListo }: { cliente: Clien
   const [moneda, setMoneda] = useState<"EUR" | "USD" | "Bs">("EUR");
   const [tasaBsStr, setTasaBsStr] = useState("");
   const [montoStr, setMontoStr] = useState(totalOpenEur.toFixed(2));
-  const [metodo, setMetodo] = useState("Efectivo");
+  const [metodo, setMetodo] = useState("Punto de Venta");
   const [fecha, setFecha] = useState(hoyISO());
   const [referencia, setReferencia] = useState("");
   const [guardando, setGuardando] = useState(false);
