@@ -306,10 +306,23 @@ export function AnalisisCompras() {
 
   // Egresos por categoría (gráfico principal): compras de Cocina englobadas como
   // "Cafetería/comedor" + los egresos operativos (nómina, alquiler…), todo en $.
+  // Un egreso cuya categoría sea de Cocina/Cafetería/Comedor (ej. pagar una
+  // factura de Cocina sin cargarla en inventario) SE SUMA a ese mismo rubro.
   const egresoRubros = useMemo(() => {
+    const esCocinaCat = (nombre: string) => {
+      const n = (nombre ?? "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+      return n.includes("cocina") || n.includes("cafeteria") || n.includes("comedor");
+    };
+    let cafeteria = totalMonto > 0.005 ? totalMonto : 0;
+    const otros: { key: string; label: string; monto: number }[] = [];
+    for (const c of gastos?.porCategoria ?? []) {
+      if (c.usd <= 0.005) continue;
+      if (esCocinaCat(c.categoria)) cafeteria += c.usd;
+      else otros.push({ key: `eg-${c.categoria}`, label: c.categoria, monto: c.usd });
+    }
     const rows: { key: string; label: string; monto: number }[] = [];
-    if (totalMonto > 0.005) rows.push({ key: "cafeteria", label: "Cafetería/comedor", monto: totalMonto });
-    for (const c of gastos?.porCategoria ?? []) if (c.usd > 0.005) rows.push({ key: `eg-${c.categoria}`, label: c.categoria, monto: c.usd });
+    if (cafeteria > 0.005) rows.push({ key: "cafeteria", label: "Cafetería/comedor", monto: cafeteria });
+    rows.push(...otros);
     return rows.sort((a, b) => b.monto - a.monto);
   }, [totalMonto, gastos]);
   const egresoTotal = egresoRubros.reduce((s, r) => s + r.monto, 0);
