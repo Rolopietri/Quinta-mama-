@@ -439,6 +439,31 @@ export async function listComprasRango(desde: string, hasta: string): Promise<Co
   return out;
 }
 
+/** Compras PAGADAS que cuentan como egreso del mes [desde, hasta] por CAJA REAL:
+ *  su fecha efectiva es la de PAGO (fecha_pago). Las que no tienen fecha_pago
+ *  (datos viejos) cuentan por su fecha de compra, para no perderlas. Así cada
+ *  compra cuenta en un solo mes: el de su pago. Pagina el tope de 1000. */
+export async function listComprasEgresoMes(desde: string, hasta: string): Promise<Compra[]> {
+  const sb = createSupabaseBrowserClient();
+  const PAGE = 1000;
+  const out: Compra[] = [];
+  const orClause = `and(fecha_pago.gte.${desde},fecha_pago.lte.${hasta}),and(fecha_pago.is.null,fecha.gte.${desde},fecha.lte.${hasta})`;
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await sb
+      .from("compras")
+      .select("*")
+      .eq("pagada", true)
+      .or(orClause)
+      .order("fecha", { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    const rows = (data as CompraRow[]) ?? [];
+    out.push(...rows.map(rowToCompra));
+    if (rows.length < PAGE) break;
+  }
+  return out;
+}
+
 /** Compras pendientes de pago (pagada=false), sin filtro de fecha — son deudas
  *  vigentes. Ordenadas de más antigua a más nueva. Pagina el tope de 1000. */
 export async function listComprasPendientes(): Promise<Compra[]> {

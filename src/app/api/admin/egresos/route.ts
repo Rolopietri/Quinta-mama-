@@ -135,7 +135,9 @@ export async function PATCH(req: NextRequest) {
   let cambios: Record<string, unknown>;
   if (b.pagar === true) {
     const fechaPago = texto(b.fecha_pago) ?? new Date().toISOString().slice(0, 10);
-    cambios = { pagada: true, fecha_pago: fechaPago, ...(texto(b.metodo) ? { metodo: texto(b.metodo) } : {}) };
+    // Caja real: el egreso cuenta en el mes en que se paga → su fecha pasa a ser
+    // la de pago, para que aparezca junto a los demás egresos de ese mes.
+    cambios = { pagada: true, fecha: fechaPago, fecha_pago: fechaPago, ...(texto(b.metodo) ? { metodo: texto(b.metodo) } : {}) };
     if (b.monto !== undefined && b.monto !== null && b.monto !== "") {
       const monto = numero(b.monto);
       const moneda = texto(b.moneda);

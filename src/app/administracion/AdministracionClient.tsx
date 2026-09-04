@@ -7,7 +7,7 @@
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { totalesVentasPorMes } from "@/lib/data/ventas";
-import { listTasasBcvRango, listComprasRango, listComprasPendientes, listProveedores, listInsumos, marcarCompraPagada, marcarFacturaPagada } from "@/lib/data/cocina";
+import { listTasasBcvRango, listComprasRango, listComprasEgresoMes, listComprasPendientes, listProveedores, listInsumos, marcarCompraPagada, marcarFacturaPagada } from "@/lib/data/cocina";
 import type { TasaBcv, Compra, Proveedor as ProveedorCocina, Insumo } from "@/lib/types";
 import { AnalisisAdministrativo } from "./AnalisisAdministrativo";
 
@@ -1200,7 +1200,7 @@ function EgresosMes() {
           fetch("/api/admin/categorias", { cache: "no-store" }),
           fetch("/api/admin/proveedores", { cache: "no-store" }),
           fetch("/api/admin/egresos?pendientes=1", { cache: "no-store" }),
-          listComprasRango(`${mes}-01`, finMes).catch(() => [] as Compra[]),
+          listComprasEgresoMes(`${mes}-01`, finMes).catch(() => [] as Compra[]),
           listComprasPendientes().catch(() => [] as Compra[]),
           listProveedores().catch(() => [] as ProveedorCocina[]),
           listInsumos().catch(() => [] as Insumo[]),
@@ -1226,11 +1226,12 @@ function EgresosMes() {
   }, [mes, tick]);
 
   // Compras de insumos (Cocina) reflejadas como egresos en $ (solo lectura).
-  // CAJA REAL: solo las PAGADAS cuentan como egreso; las pendientes van al panel.
+  // CAJA REAL: `compras` ya viene filtrado a las PAGADAS que cuentan en el mes por
+  // su fecha de PAGO (una factura vieja pagada este mes aparece este mes).
   const comprasEgreso: Egreso[] = compras
-    .filter((c) => (c.precioTotalUsd ?? 0) > 0.005 && c.pagada !== false)
+    .filter((c) => (c.precioTotalUsd ?? 0) > 0.005)
     .map((c) => ({
-      id: `compra:${c.id}`, fecha: c.fecha, concepto: "Compra de insumos", categoria_id: null,
+      id: `compra:${c.id}`, fecha: c.fechaPago ?? c.fecha, concepto: "Compra de insumos", categoria_id: null,
       categoria_nombre: "Insumos (Cocina)", clasificacion: "variable",
       proveedor_id: null, proveedor_nombre: null,
       monto: c.precioTotalUsd, moneda: "USD", tasa: null, monto_usd: c.precioTotalUsd,
