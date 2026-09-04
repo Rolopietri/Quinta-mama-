@@ -128,6 +128,69 @@ export function ConteoFisicoClient() {
     );
   }
 
+  // Exporta la plantilla de conteo (.xlsx) con el stock actual: se llena la
+  // columna `conteo_fisico` afuera y se vuelve a importar. Empareja por `id`.
+  async function exportarPlantilla() {
+    setError(null);
+    try {
+      const XLSX = await import("xlsx");
+      const filas = [...items]
+        .sort((a, b) => a.nombre.localeCompare(b.nombre))
+        .map((i) => ({
+          id: i.id,
+          categoria: i.categoriaCompra ?? "",
+          nombre: i.nombre,
+          unidad_base: i.unidadBase,
+          total_sistema: i.stockTotal,
+          comprometido: i.stockComprometido,
+          libre_sistema: stockLibre(i),
+          conteo_fisico: "",
+        }));
+      const ws = XLSX.utils.json_to_sheet(filas);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "conteo");
+      XLSX.writeFile(wb, `Conteo_Insumos_${new Date().toISOString().slice(0, 7)}.xlsx`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo exportar la plantilla.");
+    }
+  }
+
+  // Importa un conteo desde el .xlsx (la plantilla llena). Empareja por `id`,
+  // lee la columna `conteo_fisico`, y PRE-LLENA el formulario (no guarda solo):
+  // el usuario revisa las diferencias abajo y le da "Guardar conteo".
+  async function importarConteo(file: File) {
+    setError(null); setResultado(null);
+    try {
+      const XLSX = await import("xlsx");
+      const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      if (!ws) throw new Error("El archivo no tiene ninguna hoja.");
+      const filas = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: "" });
+      const ids = new Set(items.map((i) => i.id));
+      const nuevos: Record<string, string> = {};
+      let ok = 0, sinValor = 0, noHallados = 0;
+      for (const r of filas) {
+        const id = String(r.id ?? r.ID ?? "").trim();
+        const val = parse(String(r.conteo_fisico ?? r.conteo ?? r.conteo_real ?? ""));
+        if (!id) continue;
+        if (val === null) { sinValor++; continue; }
+        if (!ids.has(id)) { noHallados++; continue; }
+        nuevos[id] = String(val);
+        ok++;
+      }
+      if (ok === 0) throw new Error("No encontré conteos válidos. Revisa que el archivo tenga las columnas 'id' y 'conteo_fisico'.");
+      setConteos((prev) => ({ ...prev, ...nuevos }));
+      setResultado(
+        `Cargué ${ok} conteo${ok === 1 ? "" : "s"} del Excel.` +
+          (noHallados ? ` ${noHallados} id(s) no coincidieron (insumo inactivo o borrado).` : "") +
+          (sinValor ? ` ${sinValor} sin valor (ignoradas).` : "") +
+          ` Revisa abajo y dale "Guardar conteo".`,
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo leer el archivo.");
+    }
+  }
+
   if (loading) {
     return <div className="rounded-2xl bg-white ring-1 ring-marfil p-10 text-center text-cacao-soft">Cargando insumos…</div>;
   }
@@ -155,6 +218,15 @@ export function ConteoFisicoClient() {
             <input type="checkbox" checked={soloDif} onChange={(e) => setSoloDif(e.target.checked)} className="accent-cacao" />
             Solo con diferencia
           </label>
+        </div>
+        {/* Conteo por Excel: exportar plantilla → llenar 'conteo_fisico' → importar. */}
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" onClick={exportarPlantilla} className="rounded-lg ring-1 ring-marfil text-cacao px-3 py-1.5 text-[11px] uppercase tracking-widest hover:bg-marfil-soft">Exportar plantilla (Excel)</button>
+          <label className="rounded-lg ring-1 ring-marfil text-cacao px-3 py-1.5 text-[11px] uppercase tracking-widest hover:bg-marfil-soft cursor-pointer">
+            Importar conteo (Excel)
+            <input type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) importarConteo(f); e.target.value = ""; }} />
+          </label>
+          <span className="text-[10px] text-cacao-mute">Exporta → llena la columna <b>conteo_fisico</b> → importa. Empareja por id.</span>
         </div>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-xs text-cacao-soft">
