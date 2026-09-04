@@ -129,22 +129,37 @@ export async function PATCH(req: NextRequest) {
   const b = (await req.json().catch(() => ({}))) as Record<string, unknown>;
   const id = texto(b.id);
   if (!id) return NextResponse.json({ error: "falta id" }, { status: 400 });
-  // Modo "pagar": marca una cuenta por pagar como pagada (caja real). Opcional
-  // método y fecha de pago (por defecto hoy). No toca el resto del egreso.
-  const cambios = b.pagar === true
-    ? {
-        pagada: true,
-        fecha_pago: texto(b.fecha_pago) ?? new Date().toISOString().slice(0, 10),
-        ...(texto(b.metodo) ? { metodo: texto(b.metodo) } : {}),
+  // Modo "pagar": marca una cuenta por pagar como pagada (caja real) con su fecha
+  // de pago y método. Puede además ajustar monto/moneda/tasa (recalcula el USD;
+  // Bs sin tasa → BCV del día de pago).
+  let cambios: Record<string, unknown>;
+  if (b.pagar === true) {
+    const fechaPago = texto(b.fecha_pago) ?? new Date().toISOString().slice(0, 10);
+    cambios = { pagada: true, fecha_pago: fechaPago, ...(texto(b.metodo) ? { metodo: texto(b.metodo) } : {}) };
+    if (b.monto !== undefined && b.monto !== null && b.monto !== "") {
+      const monto = numero(b.monto);
+      const moneda = texto(b.moneda);
+      let tasa = numero(b.tasa);
+      if (moneda === "Bs" && tasa == null && monto != null) {
+        const { data: tb } = await sb
+          .from("tasa_bcv").select("usd_bs").lte("fecha", fechaPago)
+          .order("fecha", { ascending: false }).limit(1).maybeSingle();
+        const usdBs = tb ? Number((tb as { usd_bs: number | null }).usd_bs) : 0;
+        if (usdBs > 0) tasa = usdBs;
       }
+      const usd = equivUSD(monto, moneda, tasa);
+      cambios = { ...cambios, monto, moneda, tasa, monto_usd: usd == null ? null : Math.round(usd * 100) / 100 };
+    }
+  } else if (b.solo_categoria === true) {
     // Modo "solo categoría": reclasificar sin tocar el resto del egreso.
-    : b.solo_categoria === true
-    ? {
-        categoria_id: texto(b.categoria_id),
-        categoria_nombre: texto(b.categoria_nombre),
-        clasificacion: b.clasificacion === "fija" ? "fija" : b.clasificacion === "variable" ? "variable" : null,
-      }
-    : fila(b);
+    cambios = {
+      categoria_id: texto(b.categoria_id),
+      categoria_nombre: texto(b.categoria_nombre),
+      clasificacion: b.clasificacion === "fija" ? "fija" : b.clasificacion === "variable" ? "variable" : null,
+    };
+  } else {
+    cambios = fila(b);
+  }
   const { data, error } = await sb.from("admin_egreso").update(cambios).eq("id", id).select("*").single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ egreso: data });

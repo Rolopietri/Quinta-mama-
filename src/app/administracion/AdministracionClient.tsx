@@ -1010,6 +1010,15 @@ type Egreso = {
   flete?: number | null;
 };
 
+// Una cuenta por pagar en el panel de Egresos: compra de Cocina pendiente
+// (agrupada por factura) o egreso manual pendiente.
+type CuentaPagar = {
+  key: string; tipo: "compra" | "egreso"; ids: string[]; fecha: string;
+  titulo: string; detalle: string; usd: number;
+  monto?: number | null; moneda?: string | null; // moneda/monto originales (egreso)
+  numeroFactura?: string | null; proveedorId?: string | null; // para compras
+};
+
 // Confirmar pago de una solicitud pendiente → registrar egresos y marcar procesada.
 function ConfirmarPago({
   solicitud,
@@ -1176,7 +1185,7 @@ function EgresosMes() {
   const [editando, setEditando] = useState<Egreso | null>(null);
   const [reclasificando, setReclasificando] = useState<string | null>(null);
   const [mostrarClasif, setMostrarClasif] = useState(false);
-  const [pagando, setPagando] = useState<string | null>(null);
+  const [cuentaPagar, setCuentaPagar] = useState<CuentaPagar | null>(null);
   const [tick, setTick] = useState(0);
   const recargar = useCallback(() => setTick((t) => t + 1), []);
 
@@ -1237,7 +1246,6 @@ function EgresosMes() {
 
   // ── Cuentas por pagar: compras de Cocina pendientes (agrupadas por factura) +
   //    egresos manuales pendientes. Todo en USD para el total "por pagar". ──
-  type CuentaPagar = { key: string; tipo: "compra" | "egreso"; ids: string[]; fecha: string; titulo: string; detalle: string; usd: number };
   const cuentasPagar: CuentaPagar[] = (() => {
     const out: CuentaPagar[] = [];
     // Compras pendientes agrupadas por (proveedor + nº de factura). Sin factura → individual.
@@ -1257,7 +1265,8 @@ function EgresosMes() {
         fecha: arr.map((c) => c.fecha).sort()[0],
         titulo: prov ? `${prov}${fact ? ` · Factura ${fact}` : ""}` : `Compra de insumos${fact ? ` · Factura ${fact}` : ""}`,
         detalle: `${items}${arr.length > 3 ? "…" : ""} · ${arr.length} línea${arr.length === 1 ? "" : "s"} (Cocina)`,
-        usd,
+        usd, monto: usd, moneda: "USD",
+        numeroFactura: fact ?? null, proveedorId: arr[0].proveedorId ?? null,
       });
     }
     // Egresos manuales pendientes.
@@ -1267,36 +1276,30 @@ function EgresosMes() {
         key: `egreso:${e.id}`, tipo: "egreso", ids: [e.id], fecha: e.fecha,
         titulo: e.proveedor_nombre || e.concepto || "Cuenta por pagar",
         detalle: [e.concepto && e.proveedor_nombre ? e.concepto : null, e.categoria_nombre].filter(Boolean).join(" · ") || "Manual",
-        usd,
+        usd, monto: e.monto, moneda: e.moneda,
       });
     }
     return out.sort((x, z) => (x.fecha ?? "").localeCompare(z.fecha ?? ""));
   })();
   const totalPorPagarUSD = cuentasPagar.reduce((s, c) => s + c.usd, 0);
 
-  // Pagar una cuenta: compras → marca pagada la factura/línea; egreso → PATCH pagar.
-  async function pagarCuenta(c: CuentaPagar) {
-    setPagando(c.key); setError(null);
-    try {
-      if (c.tipo === "compra") {
-        const comprasDe = comprasPend.filter((x) => c.ids.includes(x.id));
-        const conFactura = comprasDe.find((x) => x.numeroFactura)?.numeroFactura;
-        if (conFactura) {
-          await marcarFacturaPagada(conFactura, comprasDe[0]?.proveedorId ?? null, true);
-        } else {
-          for (const id of c.ids) await marcarCompraPagada(id, true);
-        }
-      } else {
-        const r = await fetch("/api/admin/egresos", {
-          method: "PATCH", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ pagar: true, id: c.ids[0] }),
-        });
-        if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || "No se pudo pagar."); }
-      }
-      setMsg("Cuenta pagada. Ya cuenta como egreso del mes.");
-      recargar();
-    } catch (e) { setError(e instanceof Error ? e.message : "No se pudo pagar la cuenta."); }
-    finally { setPagando(null); }
+  // Pagar una cuenta con los datos del modal (fecha/método/monto). Compras → marca
+  // pagada la factura/línea con esa fecha; egreso → PATCH pagar (actualiza monto/
+  // método/tasa). Lanza el error para que el modal lo muestre; al lograrlo, cierra.
+  async function pagarCuenta(c: CuentaPagar, det: { fecha: string; metodo: string; monto?: number | null; moneda?: string | null; tasa?: number | null }) {
+    if (c.tipo === "compra") {
+      if (c.numeroFactura) await marcarFacturaPagada(c.numeroFactura, c.proveedorId ?? null, true, det.fecha);
+      else for (const id of c.ids) await marcarCompraPagada(id, true, det.fecha);
+    } else {
+      const r = await fetch("/api/admin/egresos", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pagar: true, id: c.ids[0], fecha_pago: det.fecha, metodo: det.metodo, monto: det.monto, moneda: det.moneda, tasa: det.tasa }),
+      });
+      if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || "No se pudo pagar."); }
+    }
+    setMsg("Cuenta pagada. Ya cuenta como egreso del mes.");
+    setCuentaPagar(null);
+    recargar();
   }
 
   const totalUSD = egresosAll.reduce((s, e) => s + (e.monto_usd ?? 0), 0);
@@ -1360,6 +1363,8 @@ function EgresosMes() {
       {error && <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419]">{error}</div>}
       {msg && <div className="rounded-lg bg-[#F1F4ED] ring-1 ring-[#C9D6BC] p-3 text-sm text-[#2F4A1F]">{msg}</div>}
 
+      {cuentaPagar && <ModalPago cuenta={cuentaPagar} onCerrar={() => setCuentaPagar(null)} onPagar={pagarCuenta} />}
+
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <ResumenCaja titulo="Total del mes" valor={fmtMonto(totalUSD, "USD")} fuerte />
         <ResumenCaja titulo="Fijas" valor={fmtMonto(fijasUSD, "USD")} />
@@ -1389,7 +1394,7 @@ function EgresosMes() {
                   <p className="text-[11px] text-cacao-mute truncate">{fmtFecha(c.fecha)} · {c.detalle}</p>
                 </div>
                 <span className="tabular-nums text-cacao text-sm whitespace-nowrap">{fmtMonto(c.usd, "USD")}</span>
-                <button type="button" onClick={() => pagarCuenta(c)} disabled={pagando === c.key} className="rounded-lg bg-cacao text-white px-3 py-1.5 text-[11px] uppercase tracking-widest hover:bg-terracotta disabled:opacity-40 shrink-0">{pagando === c.key ? "…" : "Pagar"}</button>
+                <button type="button" onClick={() => setCuentaPagar(c)} className="rounded-lg bg-cacao text-white px-3 py-1.5 text-[11px] uppercase tracking-widest hover:bg-terracotta shrink-0">Pagar</button>
               </div>
             ))}
           </div>
@@ -1490,6 +1495,84 @@ function ResumenCaja({ titulo, valor, sub, fuerte }: { titulo: string; valor: st
       <div className={`font-display text-[9px] tracking-[0.25em] uppercase ${fuerte ? "text-[#9A938B]" : "text-cacao-mute"}`}>{titulo}</div>
       <div className="text-lg font-medium mt-1">{valor}</div>
       {sub && <div className={`text-[11px] mt-0.5 ${fuerte ? "text-[#9A938B]" : "text-cacao-mute"}`}>{sub}</div>}
+    </div>
+  );
+}
+
+// Modal para PAGAR una cuenta por pagar: pide fecha, método y (en egresos) monto/
+// moneda/tasa antes de marcarla pagada. En compras de Cocina el monto viene de
+// Cocina, así que solo se elige la fecha de pago.
+function ModalPago({ cuenta, onCerrar, onPagar }: {
+  cuenta: CuentaPagar;
+  onCerrar: () => void;
+  onPagar: (c: CuentaPagar, det: { fecha: string; metodo: string; monto?: number | null; moneda?: string | null; tasa?: number | null }) => Promise<void>;
+}) {
+  const esCompra = cuenta.tipo === "compra";
+  const [fecha, setFecha] = useState(hoyISO());
+  const [metodo, setMetodo] = useState("Transferencia");
+  const [moneda, setMoneda] = useState(cuenta.moneda || "Bs");
+  const [montoStr, setMontoStr] = useState(cuenta.monto != null ? String(cuenta.monto) : "");
+  const [tasaStr, setTasaStr] = useState("");
+  const [guardando, setGuardando] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function confirmar() {
+    setError(null);
+    let det: { fecha: string; metodo: string; monto?: number | null; moneda?: string | null; tasa?: number | null };
+    if (esCompra) {
+      det = { fecha, metodo };
+    } else {
+      const monto = parseMonto(montoStr);
+      if (monto == null || monto <= 0) { setError("Pon el monto pagado."); return; }
+      det = { fecha, metodo, monto, moneda, tasa: moneda === "Bs" ? parseTasa(tasaStr) : null };
+    }
+    setGuardando(true);
+    try {
+      await onPagar(cuenta, det);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo registrar el pago.");
+      setGuardando(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30" onClick={onCerrar}>
+      <div className="w-full max-w-md rounded-2xl bg-white ring-1 ring-marfil p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
+        <h2 className="font-display text-xs tracking-[0.3em] uppercase text-cacao-mute">Registrar pago</h2>
+        <div className="rounded-xl bg-marfil-soft/60 ring-1 ring-marfil px-3 py-2">
+          <p className="text-sm text-cacao">{cuenta.titulo}</p>
+          <p className="text-[11px] text-cacao-mute">{cuenta.detalle} · {fmtMonto(cuenta.usd, "USD")}</p>
+        </div>
+        {error && <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-2.5 text-sm text-[#7A2419]">{error}</div>}
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Campo label="Fecha de pago"><input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" /></Campo>
+          <Campo label="Método de pago">
+            <select value={metodo} onChange={(e) => setMetodo(e.target.value)} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
+              {METODOS.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </Campo>
+        </div>
+        {esCompra ? (
+          <p className="text-[11px] text-cacao-mute">Compra de Cocina: el monto ({fmtMonto(cuenta.usd, "USD")}) y su detalle vienen del módulo de Cocina. Aquí solo confirmas la fecha y el método de pago.</p>
+        ) : (
+          <div className="grid grid-cols-3 gap-2">
+            <Campo label="Monto"><input inputMode="decimal" value={montoStr} onChange={(e) => setMontoStr(e.target.value)} placeholder="0,00" className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" /></Campo>
+            <Campo label="Moneda">
+              <select value={moneda} onChange={(e) => setMoneda(e.target.value)} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
+                {MONEDAS.map((m) => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </Campo>
+            <Campo label="Tasa a USD">
+              <input inputMode="decimal" value={tasaStr} onChange={(e) => setTasaStr(e.target.value)} disabled={moneda === "USD"} placeholder={moneda === "Bs" ? "BCV del día" : moneda === "USD" ? "—" : ""} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao disabled:bg-marfil-soft" />
+            </Campo>
+          </div>
+        )}
+        {!esCompra && moneda === "Bs" && !parseTasa(tasaStr) && <p className="text-[11px] text-cacao-mute">Si dejas la tasa vacía, se usa la tasa BCV ($) del día de pago.</p>}
+        <div className="flex gap-2 pt-1">
+          <button type="button" onClick={confirmar} disabled={guardando} className="rounded-lg bg-cacao text-white px-5 py-2.5 text-xs uppercase tracking-widest hover:bg-terracotta disabled:bg-marfil disabled:text-cacao-mute">{guardando ? "Pagando…" : "Registrar pago"}</button>
+          <button type="button" onClick={onCerrar} className="rounded-lg ring-1 ring-marfil text-cacao px-5 py-2.5 text-xs uppercase tracking-widest">Cancelar</button>
+        </div>
+      </div>
     </div>
   );
 }

@@ -506,11 +506,12 @@ export async function updateCompra(
 export async function marcarCompraPagada(
   id: string,
   pagada: boolean,
+  fechaPago?: string,
 ): Promise<void> {
   const sb = createSupabaseBrowserClient();
   const { error } = await sb
     .from("compras")
-    .update({ pagada, fecha_pago: pagada ? hoyISO() : null })
+    .update({ pagada, fecha_pago: pagada ? (fechaPago ?? hoyISO()) : null })
     .eq("id", id);
   if (error) throw error;
 }
@@ -522,11 +523,12 @@ export async function marcarFacturaPagada(
   numeroFactura: string,
   proveedorId: string | null,
   pagada: boolean,
+  fechaPago?: string,
 ): Promise<string[]> {
   const sb = createSupabaseBrowserClient();
   let q = sb
     .from("compras")
-    .update({ pagada, fecha_pago: pagada ? hoyISO() : null })
+    .update({ pagada, fecha_pago: pagada ? (fechaPago ?? hoyISO()) : null })
     .eq("numero_factura", numeroFactura);
   q = proveedorId ? q.eq("proveedor_id", proveedorId) : q.is("proveedor_id", null);
   const { data, error } = await q.select("id");
