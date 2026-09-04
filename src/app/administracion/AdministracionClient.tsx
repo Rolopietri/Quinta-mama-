@@ -7,8 +7,8 @@
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { totalesVentasPorMes } from "@/lib/data/ventas";
-import { listTasasBcvRango, listComprasRango } from "@/lib/data/cocina";
-import type { TasaBcv, Compra } from "@/lib/types";
+import { listTasasBcvRango, listComprasRango, listComprasPendientes, listProveedores, listInsumos, marcarCompraPagada, marcarFacturaPagada } from "@/lib/data/cocina";
+import type { TasaBcv, Compra, Proveedor as ProveedorCocina, Insumo } from "@/lib/types";
 import { AnalisisAdministrativo } from "./AnalisisAdministrativo";
 
 type Seccion = "proveedores" | "solicitudes" | "ingresos" | "analisis-ventas" | "cobrar" | "egresos" | "estado" | "historico";
@@ -1005,6 +1005,8 @@ type Egreso = {
   factura: string | null;
   nota: string | null;
   solicitud_linea_id: string | null;
+  pagada?: boolean | null;
+  fecha_pago?: string | null;
 };
 
 // Confirmar pago de una solicitud pendiente → registrar egresos y marcar procesada.
@@ -1160,15 +1162,20 @@ function EgresosMes() {
   const [mes, setMes] = useState<string>(mesActualISO());
   const [egresos, setEgresos] = useState<Egreso[]>([]);
   const [compras, setCompras] = useState<Compra[]>([]); // compras de insumos (Cocina) reflejadas
+  const [comprasPend, setComprasPend] = useState<Compra[]>([]); // compras por pagar (todas)
+  const [egresosPend, setEgresosPend] = useState<Egreso[]>([]); // cuentas por pagar manuales
+  const [provCocina, setProvCocina] = useState<ProveedorCocina[]>([]);
+  const [insumos, setInsumos] = useState<Insumo[]>([]);
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [proveedores, setProveedores] = useState<Proveedor[]>([]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
-  const [modo, setModo] = useState<"lista" | "form">("lista");
+  const [modo, setModo] = useState<"lista" | "form" | "porpagar">("lista");
   const [editando, setEditando] = useState<Egreso | null>(null);
   const [reclasificando, setReclasificando] = useState<string | null>(null);
   const [mostrarClasif, setMostrarClasif] = useState(false);
+  const [pagando, setPagando] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
   const recargar = useCallback(() => setTick((t) => t + 1), []);
 
@@ -1178,16 +1185,24 @@ function EgresosMes() {
       try {
         const [y, m] = mes.split("-").map((x) => parseInt(x, 10));
         const finMes = `${mes}-${String(new Date(y, m, 0).getDate()).padStart(2, "0")}`;
-        const [re, rc, rp, cp] = await Promise.all([
+        const [re, rc, rp, rpe, cp, cpend, pcoc, ins] = await Promise.all([
           fetch(`/api/admin/egresos?mes=${mes}`, { cache: "no-store" }),
           fetch("/api/admin/categorias", { cache: "no-store" }),
           fetch("/api/admin/proveedores", { cache: "no-store" }),
+          fetch("/api/admin/egresos?pendientes=1", { cache: "no-store" }),
           listComprasRango(`${mes}-01`, finMes).catch(() => [] as Compra[]),
+          listComprasPendientes().catch(() => [] as Compra[]),
+          listProveedores().catch(() => [] as ProveedorCocina[]),
+          listInsumos().catch(() => [] as Insumo[]),
         ]);
-        const [de, dc, dp] = await Promise.all([re.json(), rc.json(), rp.json()]);
+        const [de, dc, dp, dpe] = await Promise.all([re.json(), rc.json(), rp.json(), rpe.json()]);
         if (a) {
           setEgresos(de.egresos ?? []);
+          setEgresosPend(dpe.egresos ?? []);
           setCompras(cp);
+          setComprasPend(cpend);
+          setProvCocina(pcoc);
+          setInsumos(ins);
           setCategorias(dc.categorias ?? []);
           setProveedores(dp.proveedores ?? []);
         }
@@ -1201,8 +1216,9 @@ function EgresosMes() {
   }, [mes, tick]);
 
   // Compras de insumos (Cocina) reflejadas como egresos en $ (solo lectura).
+  // CAJA REAL: solo las PAGADAS cuentan como egreso; las pendientes van al panel.
   const comprasEgreso: Egreso[] = compras
-    .filter((c) => (c.precioTotalUsd ?? 0) > 0.005)
+    .filter((c) => (c.precioTotalUsd ?? 0) > 0.005 && c.pagada !== false)
     .map((c) => ({
       id: `compra:${c.id}`, fecha: c.fecha, concepto: "Compra de insumos", categoria_id: null,
       categoria_nombre: "Insumos (Cocina)", clasificacion: "variable",
@@ -1210,9 +1226,77 @@ function EgresosMes() {
       monto: c.precioTotalUsd, moneda: "USD", tasa: null, monto_usd: c.precioTotalUsd,
       metodo: c.modalidadPago ?? null, factura: null, nota: null, solicitud_linea_id: null,
     }) as unknown as Egreso);
-  const egresosAll: Egreso[] = [...egresos, ...comprasEgreso]
+  // Egresos manuales pagados del mes (caja real): los pendientes no cuentan.
+  const egresosPagados = egresos.filter((e) => e.pagada !== false);
+  const egresosAll: Egreso[] = [...egresosPagados, ...comprasEgreso]
     .sort((a2, b2) => (b2.fecha ?? "").localeCompare(a2.fecha ?? ""));
   const esCocina = (e: Egreso) => e.id.startsWith("compra:");
+  const nombreInsumo = (id: string) => insumos.find((i) => i.id === id)?.nombre ?? "insumo";
+  const nombreProvCocina = (id?: string) => (id ? provCocina.find((p) => p.id === id)?.nombre : null) ?? null;
+
+  // ── Cuentas por pagar: compras de Cocina pendientes (agrupadas por factura) +
+  //    egresos manuales pendientes. Todo en USD para el total "por pagar". ──
+  type CuentaPagar = { key: string; tipo: "compra" | "egreso"; ids: string[]; fecha: string; titulo: string; detalle: string; usd: number };
+  const cuentasPagar: CuentaPagar[] = (() => {
+    const out: CuentaPagar[] = [];
+    // Compras pendientes agrupadas por (proveedor + nº de factura). Sin factura → individual.
+    const grupos = new Map<string, Compra[]>();
+    for (const c of comprasPend) {
+      const k = c.numeroFactura ? `f:${c.proveedorId ?? "-"}|${c.numeroFactura}` : `c:${c.id}`;
+      const arr = grupos.get(k) ?? []; arr.push(c); grupos.set(k, arr);
+    }
+    for (const [k, arr] of grupos) {
+      const usd = arr.reduce((s, c) => s + (c.precioTotalUsd ?? 0), 0);
+      if (usd <= 0.005) continue;
+      const prov = nombreProvCocina(arr[0].proveedorId);
+      const fact = arr[0].numeroFactura;
+      const items = arr.map((c) => nombreInsumo(c.insumoId)).slice(0, 3).join(", ");
+      out.push({
+        key: `compra:${k}`, tipo: "compra", ids: arr.map((c) => c.id),
+        fecha: arr.map((c) => c.fecha).sort()[0],
+        titulo: prov ? `${prov}${fact ? ` · Factura ${fact}` : ""}` : `Compra de insumos${fact ? ` · Factura ${fact}` : ""}`,
+        detalle: `${items}${arr.length > 3 ? "…" : ""} · ${arr.length} línea${arr.length === 1 ? "" : "s"} (Cocina)`,
+        usd,
+      });
+    }
+    // Egresos manuales pendientes.
+    for (const e of egresosPend) {
+      const usd = e.monto_usd ?? 0;
+      out.push({
+        key: `egreso:${e.id}`, tipo: "egreso", ids: [e.id], fecha: e.fecha,
+        titulo: e.proveedor_nombre || e.concepto || "Cuenta por pagar",
+        detalle: [e.concepto && e.proveedor_nombre ? e.concepto : null, e.categoria_nombre].filter(Boolean).join(" · ") || "Manual",
+        usd,
+      });
+    }
+    return out.sort((x, z) => (x.fecha ?? "").localeCompare(z.fecha ?? ""));
+  })();
+  const totalPorPagarUSD = cuentasPagar.reduce((s, c) => s + c.usd, 0);
+
+  // Pagar una cuenta: compras → marca pagada la factura/línea; egreso → PATCH pagar.
+  async function pagarCuenta(c: CuentaPagar) {
+    setPagando(c.key); setError(null);
+    try {
+      if (c.tipo === "compra") {
+        const comprasDe = comprasPend.filter((x) => c.ids.includes(x.id));
+        const conFactura = comprasDe.find((x) => x.numeroFactura)?.numeroFactura;
+        if (conFactura) {
+          await marcarFacturaPagada(conFactura, comprasDe[0]?.proveedorId ?? null, true);
+        } else {
+          for (const id of c.ids) await marcarCompraPagada(id, true);
+        }
+      } else {
+        const r = await fetch("/api/admin/egresos", {
+          method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ pagar: true, id: c.ids[0] }),
+        });
+        if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || "No se pudo pagar."); }
+      }
+      setMsg("Cuenta pagada. Ya cuenta como egreso del mes.");
+      recargar();
+    } catch (e) { setError(e instanceof Error ? e.message : "No se pudo pagar la cuenta."); }
+    finally { setPagando(null); }
+  }
 
   const totalUSD = egresosAll.reduce((s, e) => s + (e.monto_usd ?? 0), 0);
   const fijasUSD = egresosAll.filter((e) => e.clasificacion === "fija").reduce((s, e) => s + (e.monto_usd ?? 0), 0);
@@ -1245,15 +1329,16 @@ function EgresosMes() {
     }
   }
 
-  if (modo === "form") {
+  if (modo === "form" || modo === "porpagar") {
     return (
       <FormEgreso
         inicial={editando}
         mes={mes}
         categorias={categorias}
         proveedores={proveedores}
+        porPagar={modo === "porpagar"}
         onCancelar={() => { setModo("lista"); setEditando(null); }}
-        onGuardado={(esEdicion) => { setModo("lista"); setEditando(null); setMsg(esEdicion ? "Egreso actualizado." : "Egreso registrado."); recargar(); }}
+        onGuardado={(esEdicion) => { setModo("lista"); setEditando(null); setMsg(esEdicion ? "Egreso actualizado." : modo === "porpagar" ? "Cuenta por pagar registrada." : "Egreso registrado."); recargar(); }}
       />
     );
   }
@@ -1266,18 +1351,50 @@ function EgresosMes() {
           <span className="font-cinzel text-base text-cacao min-w-[9rem] text-center">{nombreMes(mes)}</span>
           <button type="button" onClick={() => { setCargando(true); setMes((m) => moverMes(m, 1)); }} className="rounded-lg ring-1 ring-marfil px-2.5 py-1.5 text-cacao hover:bg-marfil-soft" aria-label="Mes siguiente">→</button>
         </div>
-        <button type="button" onClick={() => { setEditando(null); setModo("form"); }} className="rounded-lg bg-cacao text-white px-4 py-2 text-xs uppercase tracking-widest hover:bg-terracotta">+ Registrar egreso</button>
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={() => { setEditando(null); setModo("porpagar"); }} className="rounded-lg ring-1 ring-cacao text-cacao px-4 py-2 text-xs uppercase tracking-widest hover:bg-marfil-soft">+ Cuenta por pagar</button>
+          <button type="button" onClick={() => { setEditando(null); setModo("form"); }} className="rounded-lg bg-cacao text-white px-4 py-2 text-xs uppercase tracking-widest hover:bg-terracotta">+ Registrar egreso</button>
+        </div>
       </div>
 
       {error && <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419]">{error}</div>}
       {msg && <div className="rounded-lg bg-[#F1F4ED] ring-1 ring-[#C9D6BC] p-3 text-sm text-[#2F4A1F]">{msg}</div>}
 
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <ResumenCaja titulo="Total del mes" valor={fmtMonto(totalUSD, "USD")} fuerte />
         <ResumenCaja titulo="Fijas" valor={fmtMonto(fijasUSD, "USD")} />
         <ResumenCaja titulo="Variables" valor={fmtMonto(variablesUSD, "USD")} />
+        <ResumenCaja titulo="Por pagar" valor={fmtMonto(totalPorPagarUSD, "USD")} />
       </div>
-      {sinTasa && <p className="text-[11px] text-cacao-mute">Hay egresos sin tasa: no se suman al total en USD hasta que les pongas la tasa.</p>}
+      <p className="text-[11px] text-cacao-mute">El total del mes es caja real: solo lo pagado. Lo pendiente está en “Cuentas por pagar”.{sinTasa ? " Hay egresos sin tasa: no se suman al total en USD hasta que les pongas la tasa." : ""}</p>
+
+      {/* ── Cuentas por pagar ─────────────────────────────────── */}
+      <section className="rounded-2xl bg-white ring-1 ring-marfil p-4">
+        <div className="flex items-center justify-between gap-2 mb-1">
+          <h3 className="font-cinzel text-base text-cacao">Cuentas por pagar</h3>
+          {cuentasPagar.length > 0 && <span className="rounded-full bg-[#FBF3E2] text-[#7A5A18] ring-1 ring-[#E7D3A1] px-2.5 py-0.5 text-[10px] uppercase tracking-widest">{cuentasPagar.length} · {fmtMonto(totalPorPagarUSD, "USD")}</span>}
+        </div>
+        <p className="text-[11px] text-cacao-mute mb-3">Compras de Cocina pendientes y cuentas manuales que aún no has pagado. Al marcar “Pagar”, cuenta como egreso del mes.</p>
+        {cuentasPagar.length === 0 ? (
+          <p className="text-sm text-cacao-soft italic py-2">Nada pendiente por pagar. ✓</p>
+        ) : (
+          <div className="rounded-xl ring-1 ring-marfil overflow-hidden divide-y divide-marfil">
+            {cuentasPagar.map((c) => (
+              <div key={c.key} className="flex items-center gap-3 px-3 py-2">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-cacao text-sm truncate">{c.titulo}</span>
+                    {c.tipo === "compra" && <span className="rounded-full bg-marfil-soft text-cacao-soft ring-1 ring-marfil px-1.5 py-0.5 text-[9px] uppercase tracking-widest shrink-0">Cocina</span>}
+                  </div>
+                  <p className="text-[11px] text-cacao-mute truncate">{fmtFecha(c.fecha)} · {c.detalle}</p>
+                </div>
+                <span className="tabular-nums text-cacao text-sm whitespace-nowrap">{fmtMonto(c.usd, "USD")}</span>
+                <button type="button" onClick={() => pagarCuenta(c)} disabled={pagando === c.key} className="rounded-lg bg-cacao text-white px-3 py-1.5 text-[11px] uppercase tracking-widest hover:bg-terracotta disabled:opacity-40 shrink-0">{pagando === c.key ? "…" : "Pagar"}</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
 
       {/* Clasificar egresos: asigna/cambia la categoría de cada egreso cargado. */}
       {egresos.length > 0 && (() => {
@@ -1384,6 +1501,7 @@ function FormEgreso({
   proveedores,
   onGuardado,
   onCancelar,
+  porPagar = false,
 }: {
   inicial: Egreso | null;
   mes: string;
@@ -1391,6 +1509,9 @@ function FormEgreso({
   proveedores: Proveedor[];
   onGuardado: (esEdicion: boolean) => void;
   onCancelar: () => void;
+  /** true = registra una CUENTA POR PAGAR (pagada=false): no cuenta como egreso
+   *  hasta que se pague desde el panel "Cuentas por pagar". */
+  porPagar?: boolean;
 }) {
   const esEdicion = !!inicial;
   const [f, setF] = useState({
@@ -1446,6 +1567,7 @@ function FormEgreso({
         metodo: f.metodo,
         factura: f.factura,
         nota: f.nota,
+        ...(porPagar && !esEdicion ? { pagada: false } : {}),
       };
       const r = await fetch("/api/admin/egresos", {
         method: esEdicion ? "PATCH" : "POST",
@@ -1464,7 +1586,8 @@ function FormEgreso({
 
   return (
     <div className="rounded-2xl bg-white ring-1 ring-marfil p-5 max-w-lg space-y-3">
-      <h2 className="font-display text-xs tracking-[0.3em] uppercase text-cacao-mute">{esEdicion ? "Editar egreso" : "Registrar egreso"}</h2>
+      <h2 className="font-display text-xs tracking-[0.3em] uppercase text-cacao-mute">{esEdicion ? "Editar egreso" : porPagar ? "Registrar cuenta por pagar" : "Registrar egreso"}</h2>
+      {porPagar && !esEdicion && <p className="text-[11px] text-cacao-mute">No cuenta como egreso todavía. Aparecerá en “Cuentas por pagar” y contará al marcarla pagada.</p>}
       {error && <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-2.5 text-sm text-[#7A2419]">{error}</div>}
       <div className="grid gap-3 sm:grid-cols-2">
         <Campo label="Fecha"><input type="date" value={f.fecha} onChange={(e) => set("fecha", e.target.value)} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" /></Campo>

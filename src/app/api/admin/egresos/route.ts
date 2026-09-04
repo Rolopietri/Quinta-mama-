@@ -33,6 +33,9 @@ function fila(e: Record<string, unknown>): Record<string, unknown> {
   const moneda = texto(e.moneda);
   const tasa = numero(e.tasa);
   const usd = equivUSD(monto, moneda, tasa);
+  // pagada: por defecto true (gasto real inmediato). false = cuenta por pagar.
+  const pagada = e.pagada === false ? false : true;
+  const fechaPago = pagada ? (texto(e.fecha_pago) ?? texto(e.fecha)) : null;
   return {
     fecha: texto(e.fecha) ?? undefined,
     concepto: texto(e.concepto),
@@ -49,6 +52,8 @@ function fila(e: Record<string, unknown>): Record<string, unknown> {
     factura: texto(e.factura),
     nota: texto(e.nota),
     solicitud_linea_id: texto(e.solicitud_linea_id),
+    pagada,
+    fecha_pago: fechaPago,
   };
 }
 
@@ -57,6 +62,14 @@ export async function GET(req: NextRequest) {
   if (!autorizado(req)) return NextResponse.json({ error: "no autorizado" }, { status: 401 });
   const sb = createServiceClient();
   if (!sb) return NextResponse.json({ error: "servidor no configurado" }, { status: 500 });
+
+  // ?pendientes=1 → cuentas por pagar (pagada=false), sin filtro de mes (deudas
+  // vigentes). Resiliente si la columna aún no existe (migración pendiente).
+  if (new URL(req.url).searchParams.get("pendientes") === "1") {
+    const { data, error } = await sb.from("admin_egreso").select("*").eq("pagada", false).order("fecha", { ascending: true });
+    if (error) return NextResponse.json({ egresos: [] });
+    return NextResponse.json({ egresos: data ?? [] });
+  }
 
   let q = sb.from("admin_egreso").select("*").order("fecha", { ascending: false }).order("created_at", { ascending: false });
   const mes = new URL(req.url).searchParams.get("mes"); // "2026-08"
@@ -97,8 +110,16 @@ export async function PATCH(req: NextRequest) {
   const b = (await req.json().catch(() => ({}))) as Record<string, unknown>;
   const id = texto(b.id);
   if (!id) return NextResponse.json({ error: "falta id" }, { status: 400 });
-  // Modo "solo categoría": reclasificar sin tocar el resto del egreso.
-  const cambios = b.solo_categoria === true
+  // Modo "pagar": marca una cuenta por pagar como pagada (caja real). Opcional
+  // método y fecha de pago (por defecto hoy). No toca el resto del egreso.
+  const cambios = b.pagar === true
+    ? {
+        pagada: true,
+        fecha_pago: texto(b.fecha_pago) ?? new Date().toISOString().slice(0, 10),
+        ...(texto(b.metodo) ? { metodo: texto(b.metodo) } : {}),
+      }
+    // Modo "solo categoría": reclasificar sin tocar el resto del egreso.
+    : b.solo_categoria === true
     ? {
         categoria_id: texto(b.categoria_id),
         categoria_nombre: texto(b.categoria_nombre),

@@ -439,6 +439,27 @@ export async function listComprasRango(desde: string, hasta: string): Promise<Co
   return out;
 }
 
+/** Compras pendientes de pago (pagada=false), sin filtro de fecha — son deudas
+ *  vigentes. Ordenadas de más antigua a más nueva. Pagina el tope de 1000. */
+export async function listComprasPendientes(): Promise<Compra[]> {
+  const sb = createSupabaseBrowserClient();
+  const PAGE = 1000;
+  const out: Compra[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await sb
+      .from("compras")
+      .select("*")
+      .eq("pagada", false)
+      .order("fecha", { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    const rows = (data as CompraRow[]) ?? [];
+    out.push(...rows.map(rowToCompra));
+    if (rows.length < PAGE) break;
+  }
+  return out;
+}
+
 export async function createCompra(input: CompraInput): Promise<Compra> {
   const sb = createSupabaseBrowserClient();
   const { data, error } = await sb
