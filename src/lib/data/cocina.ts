@@ -445,21 +445,20 @@ export async function listComprasRango(desde: string, hasta: string): Promise<Co
  *  compra cuenta en un solo mes: el de su pago. Pagina el tope de 1000. */
 export async function listComprasEgresoMes(desde: string, hasta: string): Promise<Compra[]> {
   const sb = createSupabaseBrowserClient();
-  const PAGE = 1000;
+  // Dos consultas simples (más robustas que un .or anidado):
+  //  1) pagadas con fecha_pago dentro del mes (cuentan por fecha de pago).
+  //  2) pagadas SIN fecha_pago (dato viejo) con fecha de compra dentro del mes.
+  const [porPago, sinPago] = await Promise.all([
+    sb.from("compras").select("*").eq("pagada", true).gte("fecha_pago", desde).lte("fecha_pago", hasta),
+    sb.from("compras").select("*").eq("pagada", true).is("fecha_pago", null).gte("fecha", desde).lte("fecha", hasta),
+  ]);
+  if (porPago.error) throw porPago.error;
+  const seen = new Set<string>();
   const out: Compra[] = [];
-  const orClause = `and(fecha_pago.gte.${desde},fecha_pago.lte.${hasta}),and(fecha_pago.is.null,fecha.gte.${desde},fecha.lte.${hasta})`;
-  for (let from = 0; ; from += PAGE) {
-    const { data, error } = await sb
-      .from("compras")
-      .select("*")
-      .eq("pagada", true)
-      .or(orClause)
-      .order("fecha", { ascending: true })
-      .range(from, from + PAGE - 1);
-    if (error) throw error;
-    const rows = (data as CompraRow[]) ?? [];
-    out.push(...rows.map(rowToCompra));
-    if (rows.length < PAGE) break;
+  for (const r of [...(porPago.data ?? []), ...(sinPago.error ? [] : sinPago.data ?? [])] as CompraRow[]) {
+    if (seen.has(r.id)) continue;
+    seen.add(r.id);
+    out.push(rowToCompra(r));
   }
   return out;
 }

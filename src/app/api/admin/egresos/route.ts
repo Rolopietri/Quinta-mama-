@@ -85,17 +85,22 @@ export async function GET(req: NextRequest) {
     const [y, m] = mesPago.split("-").map((x) => parseInt(x, 10));
     const desde = `${mesPago}-01`;
     const hasta = `${mesPago}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, "0")}`;
-    const or = `and(fecha_pago.gte.${desde},fecha_pago.lte.${hasta}),and(fecha_pago.is.null,fecha.gte.${desde},fecha.lte.${hasta})`;
-    const con = await sb.from("admin_egreso").select("*").neq("pagada", false).or(or);
+    // Dos consultas simples (robustas): pagados con fecha_pago en el mes, y los
+    // pagados sin fecha_pago (dato viejo/inmediato) por su fecha en el mes.
+    const [porPago, sinPago] = await Promise.all([
+      sb.from("admin_egreso").select("*").neq("pagada", false).gte("fecha_pago", desde).lte("fecha_pago", hasta),
+      sb.from("admin_egreso").select("*").neq("pagada", false).is("fecha_pago", null).gte("fecha", desde).lte("fecha", hasta),
+    ]);
     // Si la columna pagada/fecha_pago no existe aún, cae al filtro por fecha.
-    if (con.error) {
+    if (porPago.error) {
       const alt = await sb.from("admin_egreso").select("*").gte("fecha", desde).lte("fecha", hasta);
       return NextResponse.json({ egresos: alt.data ?? [] });
     }
-    const egresos = (con.data ?? []).map((e) => {
-      const r = e as Record<string, unknown>;
-      return { ...r, fecha: (r.fecha_pago as string) ?? r.fecha };
-    }).sort((a2, b2) => String((b2 as { fecha?: string }).fecha ?? "").localeCompare(String((a2 as { fecha?: string }).fecha ?? "")));
+    const seen = new Set<string>();
+    const egresos = [...(porPago.data ?? []), ...(sinPago.error ? [] : sinPago.data ?? [])]
+      .filter((e) => { const id = (e as { id?: string }).id ?? ""; if (seen.has(id)) return false; seen.add(id); return true; })
+      .map((e) => { const r = e as Record<string, unknown>; return { ...r, fecha: (r.fecha_pago as string) ?? r.fecha }; })
+      .sort((a2, b2) => String((b2 as { fecha?: string }).fecha ?? "").localeCompare(String((a2 as { fecha?: string }).fecha ?? "")));
     return NextResponse.json({ egresos });
   }
 
