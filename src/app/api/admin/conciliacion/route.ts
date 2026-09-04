@@ -31,10 +31,19 @@ export async function GET(req: NextRequest) {
   }
   if (!dia.test(desde) || !dia.test(hasta)) return NextResponse.json({ error: "rango inválido" }, { status: 400 });
 
-  const [ingR, egrR, cxcR] = await Promise.all([
+  // La columna `iva` en egreso/cxc puede no existir aún (migración pendiente):
+  // se pide, y si falla por columna inexistente se reintenta sin ella.
+  type Fila = { monto?: unknown; moneda?: unknown; categoria_nombre?: unknown; iva?: unknown };
+  const selConIva = async (tabla: string, cols: string): Promise<Fila[]> => {
+    const con = await sb.from(tabla).select(`${cols}, iva`).gte("fecha", desde).lte("fecha", hasta);
+    if (!con.error) return (con.data ?? []) as Fila[];
+    const sin = await sb.from(tabla).select(cols).gte("fecha", desde).lte("fecha", hasta);
+    return (sin.data ?? []) as Fila[];
+  };
+  const [ingR, egrRows, cxcRows] = await Promise.all([
     sb.from("admin_ingreso").select("monto, iva, moneda, fuente").gte("fecha", desde).lte("fecha", hasta),
-    sb.from("admin_egreso").select("monto, moneda, categoria_nombre").gte("fecha", desde).lte("fecha", hasta),
-    sb.from("admin_cuenta_cobrar").select("monto, moneda").gte("fecha", desde).lte("fecha", hasta),
+    selConIva("admin_egreso", "monto, moneda, categoria_nombre"),
+    selConIva("admin_cuenta_cobrar", "monto, moneda"),
   ]);
   if (ingR.error) return NextResponse.json({ error: ingR.error.message }, { status: 500 });
 
@@ -47,15 +56,25 @@ export async function GET(req: NextRequest) {
   // Otros ingresos en euros que no son Setux ni cobros (manuales en €).
   const otrosEur = ingresos.filter((e) => e.fuente !== "setux" && e.fuente !== "cxc-cobro" && (e.moneda ?? "EUR") === "EUR").reduce((s, e) => s + n(e.monto), 0);
 
-  // Cortesías (RPP) del mes: egreso categoría "Cortesías", en euros.
-  const rpp = (egrR.data ?? []).filter((e) => norm(e.categoria_nombre).includes("cortesia") && (e.moneda ?? "EUR") === "EUR").reduce((s, e) => s + n(e.monto), 0);
-  // Ventas a crédito (CXC) del mes: cuentas por cobrar con fecha en el mes.
-  const cxc = (cxcR.data ?? []).filter((c) => (c.moneda ?? "EUR") === "EUR").reduce((s, c) => s + n(c.monto), 0);
-
-  // CXC y RPP se guardan en BRUTO (con IVA, como el "Total Venta" del reporte).
-  // Para conciliar con Cocina —que va en NETO— se pasan a neto (÷ 1+IVA).
+  // CXC y RPP se guardan en BRUTO (con IVA, como el "Total Venta" del reporte =
+  // lo que el cliente paga). Para conciliar con Cocina —que va en NETO— se pasan
+  // a neto: si el registro trae su IVA, neto = monto − iva (EXACTO, respeta las
+  // facturas con 0 IVA como alquileres); si no (dato viejo), se aproxima ÷1+IVA.
   const ivaCfg = await getIvaConfig(sb);
   const factor = 1 + (ivaCfg.ivaPct ?? 16) / 100;
+  const netoDe = (monto: number, iva: unknown) =>
+    iva == null ? (factor > 0 ? monto / factor : monto) : monto - n(iva);
+
+  const egrEur = egrRows.filter((e) => (e.moneda ?? "EUR") === "EUR");
+  const cortesias = egrEur.filter((e) => norm(typeof e.categoria_nombre === "string" ? e.categoria_nombre : null).includes("cortesia"));
+  // Cortesías (RPP) del mes: egreso categoría "Cortesías", en euros.
+  const rpp = cortesias.reduce((s, e) => s + n(e.monto), 0);
+  const rppNeto = cortesias.reduce((s, e) => s + netoDe(n(e.monto), e.iva), 0);
+  // Ventas a crédito (CXC) del mes: cuentas por cobrar con fecha en el mes.
+  const cxcEur = cxcRows.filter((c) => (c.moneda ?? "EUR") === "EUR");
+  const cxc = cxcEur.reduce((s, c) => s + n(c.monto), 0);
+  const cxcNeto = cxcEur.reduce((s, c) => s + netoDe(n(c.monto), c.iva), 0);
+
   const r2 = (x: number) => Math.round(x * 100) / 100;
   return NextResponse.json({
     desde, hasta,
@@ -63,8 +82,8 @@ export async function GET(req: NextRequest) {
     ivaSetux: r2(ivaSetux),
     cxc: r2(cxc),
     rpp: r2(rpp),
-    cxcNeto: r2(factor > 0 ? cxc / factor : cxc),
-    rppNeto: r2(factor > 0 ? rpp / factor : rpp),
+    cxcNeto: r2(cxcNeto),
+    rppNeto: r2(rppNeto),
     cobrosEur: r2(cobrosEur),
     otrosEur: r2(otrosEur),
   });

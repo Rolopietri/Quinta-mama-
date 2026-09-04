@@ -80,15 +80,16 @@ export async function PUT(req: NextRequest) {
     const cur = ingMap.get(k) ?? { fecha, metodo, net: 0, iva: 0 };
     cur.net += net; cur.iva += iva; ingMap.set(k, cur);
   };
-  type CxcRow = { fecha: string; descripcion: string; deudor: string; ref: string | null; monto: number; moneda: string; tasa: number; monto_usd: number; cobrada: boolean; fuente: string; import_hash: string };
+  // monto = BRUTO (lo que el cliente paga); iva = IVA de esa parte → neto = monto − iva.
+  type CxcRow = { fecha: string; descripcion: string; deudor: string; ref: string | null; monto: number; iva: number; moneda: string; tasa: number; monto_usd: number; cobrada: boolean; fuente: string; import_hash: string };
   const cxc: CxcRow[] = [];
-  const addCxc = (fecha: string, cliente: string, ref: string | null, monto: number) => {
-    cxc.push({ fecha, descripcion: ref ? `Venta a crédito ${ref}` : "Venta a crédito", deudor: cliente || "—", ref, monto: r2(monto), moneda: "EUR", tasa, monto_usd: usd(monto), cobrada: false, fuente: "factura", import_hash: `factura|${ref ? ref.toLowerCase() : `${clave(cliente)}|${fecha}`}|${r2(monto)}` });
+  const addCxc = (fecha: string, cliente: string, ref: string | null, monto: number, iva: number) => {
+    cxc.push({ fecha, descripcion: ref ? `Venta a crédito ${ref}` : "Venta a crédito", deudor: cliente || "—", ref, monto: r2(monto), iva: r2(iva), moneda: "EUR", tasa, monto_usd: usd(monto), cobrada: false, fuente: "factura", import_hash: `factura|${ref ? ref.toLowerCase() : `${clave(cliente)}|${fecha}`}|${r2(monto)}` });
   };
-  type RppRow = { fecha: string; concepto: string; categoria_id: null; categoria_nombre: string; clasificacion: string; proveedor_id: null; proveedor_nombre: null; monto: number; moneda: string; tasa: number; monto_usd: number; metodo: string; factura: string | null; nota: string; fuente: string };
+  type RppRow = { fecha: string; concepto: string; categoria_id: null; categoria_nombre: string; clasificacion: string; proveedor_id: null; proveedor_nombre: null; monto: number; iva: number; moneda: string; tasa: number; monto_usd: number; metodo: string; factura: string | null; nota: string; fuente: string };
   const rpp: RppRow[] = [];
-  const addRpp = (fecha: string, cliente: string, ref: string | null, monto: number) => {
-    rpp.push({ fecha, concepto: `Cortesías (RPP)${ref ? ` ${ref}` : ""}`, categoria_id: null, categoria_nombre: "Cortesías", clasificacion: "variable", proveedor_id: null, proveedor_nombre: null, monto: r2(monto), moneda: "EUR", tasa, monto_usd: usd(monto), metodo: "RPP", factura: ref, nota: cliente ? `Cortesía a ${cliente}` : "Cortesía", fuente: "factura" });
+  const addRpp = (fecha: string, cliente: string, ref: string | null, monto: number, iva: number) => {
+    rpp.push({ fecha, concepto: `Cortesías (RPP)${ref ? ` ${ref}` : ""}`, categoria_id: null, categoria_nombre: "Cortesías", clasificacion: "variable", proveedor_id: null, proveedor_nombre: null, monto: r2(monto), iva: r2(iva), moneda: "EUR", tasa, monto_usd: usd(monto), metodo: "RPP", factura: ref, nota: cliente ? `Cortesía a ${cliente}` : "Cortesía", fuente: "factura" });
   };
 
   for (const f of filas) {
@@ -98,20 +99,23 @@ export async function PUT(req: NextRequest) {
     const sp = ref ? splits[ref] : undefined;
     if (ms.length > 1 && sp && Object.keys(sp).length) {
       // Pago mixto con split especificado por el usuario: cada parte a su rubro.
+      // El IVA de la factura se reparte proporcional al monto de cada parte.
       for (const [m, montoRaw] of Object.entries(sp)) {
         const a = Number(montoRaw) || 0;
         if (a <= 0.005) continue;
+        const prop = tot > 0 ? a / tot : 0;
+        const ivaParte = f.impuesto * prop;
         const c = catDe(m);
-        if (c === "CXC") addCxc(f.fecha, f.cliente, ref, a);
-        else if (c === "RPP") addRpp(f.fecha, f.cliente, ref, a);
-        else addIngreso(f.fecha, m, tot > 0 ? f.ventaNeta * (a / tot) : 0, tot > 0 ? f.impuesto * (a / tot) : 0);
+        if (c === "CXC") addCxc(f.fecha, f.cliente, ref, a, ivaParte);
+        else if (c === "RPP") addRpp(f.fecha, f.cliente, ref, a, ivaParte);
+        else addIngreso(f.fecha, m, f.ventaNeta * prop, ivaParte);
       }
     } else if (ms.length <= 1) {
       // Un solo método: directo a su rubro.
       const m = ms[0] ?? "—";
       const c = catDe(m);
-      if (c === "CXC") addCxc(f.fecha, f.cliente, ref, tot);
-      else if (c === "RPP") addRpp(f.fecha, f.cliente, ref, tot);
+      if (c === "CXC") addCxc(f.fecha, f.cliente, ref, tot, f.impuesto);
+      else if (c === "RPP") addRpp(f.fecha, f.cliente, ref, tot, f.impuesto);
       else addIngreso(f.fecha, m, f.ventaNeta, f.impuesto);
     } else {
       // Mixto sin split: entra como "Mixto (…)" en ingresos (fallback).
@@ -163,9 +167,22 @@ export async function PUT(req: NextRequest) {
       await sb.from("admin_ticket_dia").delete().in("fecha", fechas);
     }
 
+    // Inserta; si la columna `iva` aún no existe (migración pendiente), reintenta
+    // sin ella para no bloquear la carga (la conciliación caería al ÷1+IVA).
+    const insertResiliente = async (tabla: string, rows: Record<string, unknown>[]) => {
+      const { error } = await sb.from(tabla).insert(rows);
+      if (!error) return;
+      if ((error as { code?: string }).code === "42703" || /iva|column/i.test(error.message)) {
+        const sinIva = rows.map(({ iva, ...r }) => { void iva; return r; });
+        const retry = await sb.from(tabla).insert(sinIva);
+        if (retry.error) throw retry.error;
+        return;
+      }
+      throw error;
+    };
     if (ingresos.length) { const { error } = await sb.from("admin_ingreso").insert(ingresos); if (error) throw error; }
-    if (cxc.length) { const { error } = await sb.from("admin_cuenta_cobrar").insert(cxc); if (error) throw error; }
-    if (rpp.length) { const { error } = await sb.from("admin_egreso").insert(rpp); if (error) throw error; }
+    if (cxc.length) await insertResiliente("admin_cuenta_cobrar", cxc);
+    if (rpp.length) await insertResiliente("admin_egreso", rpp);
     if (propinas.length) { const { error } = await sb.from("admin_propina").insert(propinas); if (error) throw error; }
     if (ticketsDia.length) {
       const { error } = await sb.from("admin_ticket_dia").insert(ticketsDia);
