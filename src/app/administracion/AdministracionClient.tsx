@@ -1334,7 +1334,6 @@ function EgresosMes() {
     return (
       <FormEgreso
         inicial={editando}
-        mes={mes}
         categorias={categorias}
         proveedores={proveedores}
         porPagar={modo === "porpagar"}
@@ -1497,7 +1496,6 @@ function ResumenCaja({ titulo, valor, sub, fuerte }: { titulo: string; valor: st
 
 function FormEgreso({
   inicial,
-  mes,
   categorias,
   proveedores,
   onGuardado,
@@ -1505,7 +1503,6 @@ function FormEgreso({
   porPagar = false,
 }: {
   inicial: Egreso | null;
-  mes: string;
   categorias: Categoria[];
   proveedores: Proveedor[];
   onGuardado: (esEdicion: boolean) => void;
@@ -1520,7 +1517,7 @@ function FormEgreso({
   const fleteIni = inicial?.flete ?? 0;
   const baseIni = inicial?.monto != null ? Math.round((inicial.monto - fleteIni) * 100) / 100 : null;
   const [f, setF] = useState({
-    fecha: inicial?.fecha ?? `${mes}-01`,
+    fecha: inicial?.fecha ?? hoyISO(),
     categoria_id: inicial?.categoria_id ?? "",
     proveedor_id: inicial?.proveedor_id ?? "",
     concepto: inicial?.concepto ?? "",

@@ -101,6 +101,22 @@ export async function POST(req: NextRequest) {
       : [];
   if (lista.length === 0) return NextResponse.json({ error: "No hay egresos que registrar." }, { status: 400 });
   const filas = lista.map(fila);
+
+  // Pago en Bs SIN tasa → se asume la tasa BCV ($) vigente de la fecha del egreso
+  // (la más reciente con fecha ≤ la del egreso), y se calcula su equivalente USD.
+  for (const fl of filas) {
+    if (fl.moneda !== "Bs" || fl.tasa != null || fl.monto == null) continue;
+    const fecha = typeof fl.fecha === "string" ? fl.fecha : new Date().toISOString().slice(0, 10);
+    const { data: tb } = await sb
+      .from("tasa_bcv").select("usd_bs").lte("fecha", fecha)
+      .order("fecha", { ascending: false }).limit(1).maybeSingle();
+    const usdBs = tb ? Number((tb as { usd_bs: number | null }).usd_bs) : 0;
+    if (usdBs > 0) {
+      fl.tasa = usdBs;
+      fl.monto_usd = Math.round((Number(fl.monto) / usdBs) * 100) / 100;
+    }
+  }
+
   const { data, error } = await sb.from("admin_egreso").insert(filas).select("*");
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ egresos: data ?? [] });

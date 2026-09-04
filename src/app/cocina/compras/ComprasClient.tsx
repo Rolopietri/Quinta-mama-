@@ -20,6 +20,7 @@ import {
   listInsumos,
   listProveedores,
   getTasaBcvActual,
+  getTasaBcvPorFecha,
 } from "@/lib/data/cocina";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { CalendarIcon, ChevronIcon } from "@/components/icons";
@@ -145,6 +146,35 @@ export function ComprasClient() {
       cancelled = true;
     };
   }, []);
+
+  // La tasa BCV sugerida sigue la FECHA de la compra, no la de hoy: al cambiar la
+  // fecha se carga la tasa vigente de ese día. Al AGREGAR (no editar) re-aplica esa
+  // tasa a la modalidad actual, para que el convertidor use la tasa correcta del día.
+  useEffect(() => {
+    if (!form.fecha) return;
+    let cancel = false;
+    (async () => {
+      const t = await getTasaBcvPorFecha(form.fecha).catch(() => null);
+      if (cancel || !t) return;
+      setTasa(t);
+      if (editingId) return; // en edición se respeta la tasa guardada de la compra
+      setForm((f) => {
+        const sug = f.modalidadPago === "bcv_euro" ? t.eurBs : f.modalidadPago === "paralela" ? t.paralelaBs : t.usdBs;
+        if (!(Number(sug) > 0)) return f;
+        const ts = Number(sug);
+        const next = { ...f, tasaBcvUsada: String(sug) };
+        if (f.montoAnchor === "bs") {
+          const bs = Number(f.precioTotalBs);
+          if (f.precioTotalBs.trim() !== "" && Number.isFinite(bs)) next.precioTotalUsd = fmtMoney(bs / ts);
+        } else {
+          const usd = Number(f.precioTotalUsd);
+          if (f.precioTotalUsd.trim() !== "" && Number.isFinite(usd)) next.precioTotalBs = fmtMoney(usd * ts);
+        }
+        return next;
+      });
+    })();
+    return () => { cancel = true; };
+  }, [form.fecha, editingId]);
 
   function resetForm() {
     setForm({ ...emptyForm, fecha: todayISO() });
@@ -842,7 +872,7 @@ export function ComprasClient() {
               />
               {tasaSugerida !== null && (
                 <span className="text-xs text-cacao-mute block mt-1">
-                  Tasa BCV del día: Bs {tasaSugerida.toFixed(2)}.{" "}
+                  Tasa BCV del {fmtFecha(form.fecha)}: Bs {tasaSugerida.toFixed(2)}.{" "}
                   {tasaNum > 0 &&
                   Math.abs(tasaNum - tasaSugerida) > 0.009 ? (
                     <button

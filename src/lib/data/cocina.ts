@@ -578,6 +578,30 @@ export async function listTasasBcvRango(desde: string, hasta: string): Promise<T
   }));
 }
 
+/** Tasa BCV aplicable a una fecha: la más reciente con fecha ≤ la pedida (el BCV
+ *  no publica fines de semana/feriados, así que se usa la última vigente). Si no
+ *  hay ninguna anterior, cae a la más antigua disponible. null si no hay tasas. */
+export async function getTasaBcvPorFecha(fecha: string): Promise<TasaBcv | null> {
+  const sb = createSupabaseBrowserClient();
+  const toTasa = (r: TasaRow): TasaBcv => ({
+    fecha: r.fecha,
+    usdBs: Number(r.usd_bs),
+    eurBs: r.eur_bs === null ? undefined : Number(r.eur_bs),
+    paralelaBs: r.paralela_bs === null ? undefined : Number(r.paralela_bs),
+    fuente: r.fuente ?? "bcv",
+  });
+  const enOAntes = await sb
+    .from("tasa_bcv").select("*").lte("fecha", fecha)
+    .order("fecha", { ascending: false }).limit(1).maybeSingle();
+  if (!enOAntes.error && enOAntes.data) return toTasa(enOAntes.data as TasaRow);
+  // Sin tasa anterior (fecha muy vieja): usa la más antigua que exista.
+  const masVieja = await sb
+    .from("tasa_bcv").select("*")
+    .order("fecha", { ascending: true }).limit(1).maybeSingle();
+  if (!masVieja.error && masVieja.data) return toTasa(masVieja.data as TasaRow);
+  return null;
+}
+
 export async function getTasaBcvActual(): Promise<TasaBcv | null> {
   const sb = createSupabaseBrowserClient();
   const { data, error } = await sb
