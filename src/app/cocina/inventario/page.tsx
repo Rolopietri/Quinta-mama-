@@ -9,6 +9,11 @@ const SUBMODULOS: SubModulo[] = [
     desc: "Cuadrá el inventario: pon el stock real de cada insumo de un golpe. Queda registrado como ajuste.",
   },
   {
+    href: "/cocina/inventario/merma",
+    label: "Merma por conteo",
+    desc: "Cuánto se pierde en cada conteo (stock esperado vs real), valorado en $. Base de la inteligencia de inventario.",
+  },
+  {
     href: "/cocina/inventario/planes",
     label: "Planes de producción",
     desc: "Reservá stock por adelantado para producciones planificadas (eventos, batches).",
