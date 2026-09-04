@@ -37,6 +37,25 @@ export async function POST(req: NextRequest) {
   const b = (await req.json().catch(() => ({}))) as Record<string, unknown>;
   const nombre = texto(b.nombre);
   if (!nombre) return NextResponse.json({ error: "El nombre es obligatorio." }, { status: 400 });
+
+  // El nombre es único sin distinguir mayúsculas (idx sobre lower(nombre)), e
+  // incluye las inactivas (borrado lógico). Si ya existe una con ese nombre:
+  //   • activa → se devuelve tal cual (idempotente, sin error).
+  //   • inactiva → se REACTIVA (con la clasificación pedida) en vez de fallar.
+  const existentes = await sb.from("admin_categoria").select("*").ilike("nombre", nombre);
+  const ya = (existentes.data ?? []).find((c) => (c.nombre ?? "").toLowerCase() === nombre.toLowerCase());
+  if (ya) {
+    if (ya.activo) return NextResponse.json({ categoria: ya });
+    const { data, error } = await sb
+      .from("admin_categoria")
+      .update({ activo: true, clasificacion: clasif(b.clasificacion) })
+      .eq("id", ya.id)
+      .select("*")
+      .single();
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ categoria: data });
+  }
+
   const { data, error } = await sb
     .from("admin_categoria")
     .insert({ nombre, clasificacion: clasif(b.clasificacion) })
