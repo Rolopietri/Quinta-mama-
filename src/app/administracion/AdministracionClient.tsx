@@ -2028,6 +2028,7 @@ function IngresosMes() {
   const [propFecha, setPropFecha] = useState(() => new Date().toISOString().slice(0, 10));
   const [propMonto, setPropMonto] = useState("");
   const [propNota, setPropNota] = useState("");
+  const [tipoProp, setTipoProp] = useState<"recibida" | "entrega">("recibida");
   const [guardandoProp, setGuardandoProp] = useState(false);
   const [tasaInput, setTasaInput] = useState("1.17");
   const [guardandoTasa, setGuardandoTasa] = useState(false);
@@ -2205,7 +2206,12 @@ function IngresosMes() {
     }
   }
 
-  const propinasMes = propinas.reduce((s, p) => s + (Number(p.monto) || 0), 0);
+  // Propinas: cobradas (entradas +), entregadas (pagos al personal −) y saldo por
+  // entregar. La propina no es ingreso ni egreso: es un bolsillo aparte.
+  const propinasCobradas = propinas.reduce((s, p) => s + Math.max(0, Number(p.monto) || 0), 0);
+  const propinasEntregadas = propinas.reduce((s, p) => s + Math.max(0, -(Number(p.monto) || 0)), 0);
+  const propinasSaldo = propinasCobradas - propinasEntregadas;
+  const propinasMes = propinasCobradas; // "cuánto de propina entró" (informativo)
   const ivaMes = ingresos.reduce((s, e) => s + (Number(e.iva) || 0), 0);
   async function borrarPropina(id: string) {
     try {
@@ -2220,19 +2226,20 @@ function IngresosMes() {
     e.preventDefault();
     const monto = parseMonto(propMonto);
     if (monto == null || monto <= 0) { setError("Pon un monto de propina válido."); return; }
+    if (tipoProp === "entrega" && monto > propinasSaldo + 0.005 && !confirm(`La entrega (${fmtMonto(monto, "EUR")}) supera el saldo por entregar de ESTE mes (${fmtMonto(propinasSaldo, "EUR")}). Si estás pagando propina de meses anteriores, continúa. ¿Registrar la entrega?`)) return;
     setGuardandoProp(true);
     setError(null);
     try {
       const r = await fetch("/api/admin/propinas", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fecha: propFecha || undefined, monto, moneda: "EUR", nota: propNota.trim() || undefined }),
+        body: JSON.stringify({ fecha: propFecha || undefined, monto, moneda: "EUR", tipo: tipoProp, nota: propNota.trim() || undefined }),
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || "No se pudo registrar la propina.");
       setPropMonto("");
       setPropNota("");
-      setMsg("Propina registrada.");
+      setMsg(tipoProp === "entrega" ? "Entrega de propina registrada." : "Propina registrada.");
       recargar();
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo registrar la propina.");
@@ -2358,10 +2365,30 @@ function IngresosMes() {
       <div className="rounded-2xl bg-white ring-1 ring-marfil p-4">
         <div className="flex items-center justify-between mb-2">
           <span className="font-display text-[9px] tracking-[0.25em] uppercase text-cacao-mute">Propinas del mes (no es ingreso)</span>
-          <span className="text-sm font-medium text-cacao">{fmtMonto(propinasMes, "EUR")}</span>
         </div>
-        {/* Registrar propina manual (p.ej. un cliente que deja propina al pagar una CxC). */}
+        <div className="grid grid-cols-3 gap-2 mb-3">
+          <div className="rounded-xl ring-1 ring-marfil px-3 py-2">
+            <p className="text-[9px] uppercase tracking-widest text-cacao-mute">Cobradas</p>
+            <p className="text-sm text-cacao tabular-nums">{fmtMonto(propinasCobradas, "EUR")}</p>
+          </div>
+          <div className="rounded-xl ring-1 ring-marfil px-3 py-2">
+            <p className="text-[9px] uppercase tracking-widest text-cacao-mute">Entregadas</p>
+            <p className="text-sm text-cacao tabular-nums">{fmtMonto(propinasEntregadas, "EUR")}</p>
+          </div>
+          <div className="rounded-xl ring-1 ring-[#E7D3A1] bg-[#FBF3E2] px-3 py-2">
+            <p className="text-[9px] uppercase tracking-widest text-[#7A5A18]">Por entregar</p>
+            <p className="text-sm text-[#7A5A18] tabular-nums font-medium">{fmtMonto(propinasSaldo, "EUR")}</p>
+          </div>
+        </div>
+        {/* Registrar propina que ENTRÓ, o una ENTREGA (pago al personal, resta del saldo). */}
         <form onSubmit={agregarPropina} className="flex flex-wrap items-end gap-2 mb-3">
+          <label className="text-[11px] text-cacao-soft">
+            Tipo
+            <select value={tipoProp} onChange={(e) => setTipoProp(e.target.value as "recibida" | "entrega")} className="mt-0.5 block rounded-lg ring-1 ring-marfil px-2 py-1 text-sm bg-white">
+              <option value="recibida">Propina recibida</option>
+              <option value="entrega">Entrega al personal</option>
+            </select>
+          </label>
           <label className="text-[11px] text-cacao-soft">
             Fecha
             <input type="date" value={propFecha} onChange={(e) => setPropFecha(e.target.value)} className="mt-0.5 block rounded-lg ring-1 ring-marfil px-2 py-1 text-sm" />
@@ -2372,28 +2399,28 @@ function IngresosMes() {
           </label>
           <label className="text-[11px] text-cacao-soft flex-1 min-w-[140px]">
             Nota (opcional)
-            <input value={propNota} onChange={(e) => setPropNota(e.target.value)} placeholder="Ej: propina de <cliente> al pagar CxC" className="mt-0.5 block w-full rounded-lg ring-1 ring-marfil px-2 py-1 text-sm" />
+            <input value={propNota} onChange={(e) => setPropNota(e.target.value)} placeholder={tipoProp === "entrega" ? "Ej: entrega a <personal>" : "Ej: propina de <cliente> al pagar CxC"} className="mt-0.5 block w-full rounded-lg ring-1 ring-marfil px-2 py-1 text-sm" />
           </label>
           <button type="submit" disabled={guardandoProp || !propMonto.trim()} className="rounded-lg bg-cacao text-white px-3 py-1.5 text-xs uppercase tracking-widest hover:bg-terracotta disabled:opacity-40">
-            {guardandoProp ? "Guardando…" : "+ Propina"}
+            {guardandoProp ? "Guardando…" : tipoProp === "entrega" ? "− Entrega" : "+ Propina"}
           </button>
         </form>
         {propinas.length > 0 ? (
           <ul className="divide-y divide-marfil">
-            {propinas.map((p) => (
+            {propinas.map((p) => { const m = Number(p.monto) || 0; const esEntrega = m < 0; return (
               <li key={p.id} className="flex items-center justify-between gap-3 py-1.5 text-sm">
-                <span className="text-cacao-soft">{fmtFecha(p.fecha)}</span>
+                <span className="text-cacao-soft">{fmtFecha(p.fecha)}{esEntrega ? <span className="ml-2 rounded-full bg-marfil-soft text-cacao-soft ring-1 ring-marfil px-1.5 py-0.5 text-[9px] uppercase tracking-widest">Entrega</span> : null}</span>
                 <span className="flex items-center gap-3">
-                  <span className="text-cacao tabular-nums">{fmtMonto(Number(p.monto) || 0, p.moneda || "EUR")}</span>
-                  <button type="button" onClick={() => borrarPropina(p.id)} className="text-cacao-soft hover:text-terracotta" aria-label="Eliminar propina">✕</button>
+                  <span className={`tabular-nums ${esEntrega ? "text-[#7A2419]" : "text-cacao"}`}>{esEntrega ? "− " : ""}{fmtMonto(Math.abs(m), p.moneda || "EUR")}</span>
+                  <button type="button" onClick={() => borrarPropina(p.id)} className="text-cacao-soft hover:text-terracotta" aria-label="Eliminar registro">✕</button>
                 </span>
               </li>
-            ))}
+            ); })}
           </ul>
         ) : (
           <p className="text-[12px] text-cacao-soft italic">Sin propinas registradas este mes.</p>
         )}
-        <p className="text-[11px] text-cacao-mute mt-2">La propina no es ingreso: se cobra para el personal. Si borras las ventas de un día, borra también su propina aquí (son registros separados).</p>
+        <p className="text-[11px] text-cacao-mute mt-2">La propina no es ingreso ni egreso: es plata del personal. Regístrala como <strong>Entrega al personal</strong> cuando la pagues —resta del saldo por entregar y no afecta tu utilidad—. No la cargues como egreso.</p>
       </div>
 
       <section className="rounded-2xl bg-white ring-1 ring-marfil overflow-hidden">
