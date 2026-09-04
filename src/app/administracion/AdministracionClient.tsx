@@ -1196,7 +1196,7 @@ function EgresosMes() {
         const [y, m] = mes.split("-").map((x) => parseInt(x, 10));
         const finMes = `${mes}-${String(new Date(y, m, 0).getDate()).padStart(2, "0")}`;
         const [re, rc, rp, rpe, cp, cpend, pcoc, ins] = await Promise.all([
-          fetch(`/api/admin/egresos?mes=${mes}`, { cache: "no-store" }),
+          fetch(`/api/admin/egresos?mesPago=${mes}`, { cache: "no-store" }),
           fetch("/api/admin/categorias", { cache: "no-store" }),
           fetch("/api/admin/proveedores", { cache: "no-store" }),
           fetch("/api/admin/egresos?pendientes=1", { cache: "no-store" }),

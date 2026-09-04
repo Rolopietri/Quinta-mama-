@@ -66,12 +66,37 @@ export async function GET(req: NextRequest) {
   const sb = createServiceClient();
   if (!sb) return NextResponse.json({ error: "servidor no configurado" }, { status: 500 });
 
+  const params = new URL(req.url).searchParams;
+
   // ?pendientes=1 → cuentas por pagar (pagada=false), sin filtro de mes (deudas
   // vigentes). Resiliente si la columna aún no existe (migración pendiente).
-  if (new URL(req.url).searchParams.get("pendientes") === "1") {
+  if (params.get("pendientes") === "1") {
     const { data, error } = await sb.from("admin_egreso").select("*").eq("pagada", false).order("fecha", { ascending: true });
     if (error) return NextResponse.json({ egresos: [] });
     return NextResponse.json({ egresos: data ?? [] });
+  }
+
+  // ?mesPago=YYYY-MM → CAJA REAL: egresos PAGADOS que cuentan en ese mes por su
+  // fecha de PAGO (fecha_pago), o por su fecha si no tienen fecha_pago (dato
+  // viejo/pagado al registrar). NO muta nada: la `fecha` devuelta se ajusta a la
+  // fecha efectiva de pago solo en la respuesta, para reflejarlo en ese mes.
+  const mesPago = params.get("mesPago");
+  if (mesPago && /^\d{4}-\d{2}$/.test(mesPago)) {
+    const [y, m] = mesPago.split("-").map((x) => parseInt(x, 10));
+    const desde = `${mesPago}-01`;
+    const hasta = `${mesPago}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, "0")}`;
+    const or = `and(fecha_pago.gte.${desde},fecha_pago.lte.${hasta}),and(fecha_pago.is.null,fecha.gte.${desde},fecha.lte.${hasta})`;
+    const con = await sb.from("admin_egreso").select("*").neq("pagada", false).or(or);
+    // Si la columna pagada/fecha_pago no existe aún, cae al filtro por fecha.
+    if (con.error) {
+      const alt = await sb.from("admin_egreso").select("*").gte("fecha", desde).lte("fecha", hasta);
+      return NextResponse.json({ egresos: alt.data ?? [] });
+    }
+    const egresos = (con.data ?? []).map((e) => {
+      const r = e as Record<string, unknown>;
+      return { ...r, fecha: (r.fecha_pago as string) ?? r.fecha };
+    }).sort((a2, b2) => String((b2 as { fecha?: string }).fecha ?? "").localeCompare(String((a2 as { fecha?: string }).fecha ?? "")));
+    return NextResponse.json({ egresos });
   }
 
   let q = sb.from("admin_egreso").select("*").order("fecha", { ascending: false }).order("created_at", { ascending: false });
@@ -135,9 +160,10 @@ export async function PATCH(req: NextRequest) {
   let cambios: Record<string, unknown>;
   if (b.pagar === true) {
     const fechaPago = texto(b.fecha_pago) ?? new Date().toISOString().slice(0, 10);
-    // Caja real: el egreso cuenta en el mes en que se paga → su fecha pasa a ser
-    // la de pago, para que aparezca junto a los demás egresos de ese mes.
-    cambios = { pagada: true, fecha: fechaPago, fecha_pago: fechaPago, ...(texto(b.metodo) ? { metodo: texto(b.metodo) } : {}) };
+    // Caja real: SOLO se guarda la fecha de pago. La fecha del registro NO se toca
+    // (mover fechas dañaría el inventario/histórico); el reflejo por mes de pago
+    // se hace al leer (modo mesPago), no mutando el dato.
+    cambios = { pagada: true, fecha_pago: fechaPago, ...(texto(b.metodo) ? { metodo: texto(b.metodo) } : {}) };
     if (b.monto !== undefined && b.monto !== null && b.monto !== "") {
       const monto = numero(b.monto);
       const moneda = texto(b.moneda);
