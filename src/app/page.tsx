@@ -58,6 +58,13 @@ const cards: {
     title: "Administración",
     desc: "Estados financieros: gastos, ingresos y resultado. Requiere contraseña.",
   },
+  {
+    href: "/admin/wifi",
+    index: "08",
+    eyebrow: "Clientes",
+    title: "WiFi de Invitados",
+    desc: "QR de las mesas, clave del WiFi y base de clientes registrados.",
+  },
 ];
 
 export default function Home() {
