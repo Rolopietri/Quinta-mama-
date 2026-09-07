@@ -1933,6 +1933,7 @@ function CuadreFacturas() {
   const [splits, setSplits] = useState<Record<string, Record<string, string>>>({});
   const [archivoB64, setArchivoB64] = useState<string | null>(null);
   const [guardando, setGuardando] = useState(false);
+  const [confirmando, setConfirmando] = useState(false);
   const [ok, setOk] = useState<string | null>(null);
 
   const fEUR = (v: number) => `${(v ?? 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
@@ -1974,7 +1975,7 @@ function CuadreFacturas() {
   async function guardar() {
     if (!archivoB64 || !rep) return;
     if (mixtasDescuadradas.length > 0) { setError(`Hay ${mixtasDescuadradas.length} pago(s) mixto(s) cuyo desglose no suma el total de la factura. Ajústalos antes de importar.`); return; }
-    if (!confirm(`Se importará el reporte (${rep.desde} → ${rep.hasta}): Ingresos, CXC, RPP, propina y tickets. Si reimportas los mismos días, se actualizan (no se duplican). ¿Continuar?`)) return;
+    setConfirmando(false);
     setGuardando(true); setError(null); setOk(null);
     try {
       const splitsNum: Record<string, Record<string, number>> = {};
@@ -2008,12 +2009,26 @@ function CuadreFacturas() {
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <span className="font-display text-[10px] tracking-[0.25em] uppercase text-cacao-mute">Período {rep.desde} → {rep.hasta} · {rep.totales.tickets} facturas</span>
             <div className="flex items-center gap-2">
-              <button type="button" onClick={guardar} disabled={guardando || !archivoB64 || mixtasDescuadradas.length > 0} title={mixtasDescuadradas.length > 0 ? "Ajusta los pagos mixtos: deben sumar el total de su factura" : undefined} className="rounded-lg bg-terracotta text-white px-4 py-2 text-xs uppercase tracking-widest hover:opacity-90 disabled:opacity-40">
-                {guardando ? "Importando…" : "Importar"}
-              </button>
-              <button type="button" onClick={() => { setRep(null); setArchivoB64(null); setOk(null); }} className="text-xs uppercase tracking-widest text-cacao-soft hover:text-cacao">Cambiar archivo</button>
+              {confirmando ? (
+                <>
+                  <button type="button" onClick={guardar} disabled={guardando} className="rounded-lg bg-terracotta text-white px-4 py-2 text-xs uppercase tracking-widest hover:opacity-90 disabled:opacity-40">
+                    {guardando ? "Importando…" : "Confirmar"}
+                  </button>
+                  <button type="button" onClick={() => setConfirmando(false)} disabled={guardando} className="text-xs uppercase tracking-widest text-cacao-soft hover:text-cacao">Cancelar</button>
+                </>
+              ) : (
+                <>
+                  <button type="button" onClick={() => setConfirmando(true)} disabled={guardando || !archivoB64 || mixtasDescuadradas.length > 0} title={mixtasDescuadradas.length > 0 ? "Ajusta los pagos mixtos: deben sumar el total de su factura" : undefined} className="rounded-lg bg-terracotta text-white px-4 py-2 text-xs uppercase tracking-widest hover:opacity-90 disabled:opacity-40">
+                    Importar
+                  </button>
+                  <button type="button" onClick={() => { setRep(null); setArchivoB64(null); setOk(null); }} className="text-xs uppercase tracking-widest text-cacao-soft hover:text-cacao">Cambiar archivo</button>
+                </>
+              )}
             </div>
           </div>
+          {confirmando && (
+            <p className="text-[12px] text-cacao-soft rounded-lg bg-marfil-soft ring-1 ring-marfil px-3 py-2">Se cargarán los días {rep.desde} → {rep.hasta}: Ingresos, CXC, RPP y tickets. Reimportar los mismos días los actualiza (no duplica). Pulsa <strong>Confirmar</strong>.</p>
+          )}
 
           {/* KPIs del reporte */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
