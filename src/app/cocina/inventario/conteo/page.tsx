@@ -23,10 +23,10 @@ export default function ConteoFisicoPage() {
             </p>
           </div>
           <Link
-            href="/cocina/inventario"
+            href="/cocina/catalogo"
             className="text-xs uppercase tracking-widest text-cacao-soft hover:text-cacao"
           >
-            ← Inventario
+            ← Insumos e Inventario
           </Link>
         </section>
         <ConteoFisicoClient />

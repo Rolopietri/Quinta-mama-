@@ -22,10 +22,10 @@ export default function MermaPage() {
             </p>
           </div>
           <Link
-            href="/cocina/inventario"
+            href="/cocina/catalogo"
             className="text-xs uppercase tracking-widest text-cacao-soft hover:text-cacao"
           >
-            ← Inventario
+            ← Insumos e Inventario
           </Link>
         </section>
         <MermaClient />
