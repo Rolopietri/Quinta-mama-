@@ -1,6 +1,6 @@
 import { Header } from "@/components/Header";
 import Link from "next/link";
-import { ConteoFisicoClient } from "./ConteoFisicoClient";
+import { ConteoTabs } from "./ConteoTabs";
 
 export default function ConteoFisicoPage() {
   return (
@@ -13,13 +13,13 @@ export default function ConteoFisicoPage() {
               Cocina · Inventario
             </p>
             <h1 className="mt-2 font-cinzel text-2xl sm:text-3xl tracking-[0.12em] uppercase text-cacao">
-              Conteo físico
+              Conteo físico y mermas
             </h1>
             <p className="mt-3 font-serif italic text-cacao-soft max-w-2xl">
-              Cuadrá el inventario con la realidad: escribí cuánto tenés
-              físicamente de cada insumo y el sistema fija ese número como
-              stock, registrando la diferencia como un ajuste. Hacelo cada
-              cierto tiempo para que el descuento por ventas no se desvíe.
+              Cuadrá el inventario con la realidad y revisa la merma que revela
+              cada conteo. En <b>Conteo</b> pones el stock real (a mano o
+              importando el Excel); en <b>Merma</b> ves, conteo por conteo,
+              cuánto se perdió, valorado en dólares.
             </p>
           </div>
           <Link
@@ -29,7 +29,7 @@ export default function ConteoFisicoPage() {
             ← Insumos e Inventario
           </Link>
         </section>
-        <ConteoFisicoClient />
+        <ConteoTabs />
       </main>
     </>
   );

@@ -9,19 +9,14 @@ const SUBMODULOS: SubModulo[] = [
     desc: "Ficha de cada materia prima — precio, stock (libre y comprometido) y registro de pérdidas/mermas.",
   },
   {
-    href: "/cocina/inventario/conteo",
-    label: "Conteo físico",
-    desc: "Cuadrá el inventario: pon el stock real de cada insumo (de un golpe o importando el Excel). Queda registrado como ajuste.",
-  },
-  {
-    href: "/cocina/inventario/merma",
-    label: "Merma por conteo",
-    desc: "Cuánto se pierde en cada conteo (stock esperado vs real), valorado en $. Base de la inteligencia de inventario.",
-  },
-  {
     href: "/cocina/proveedores",
     label: "Proveedores",
     desc: "Contactos y modalidades de pago (Bs BCV, paralela, USD efectivo o divisa).",
+  },
+  {
+    href: "/cocina/alertas",
+    label: "Alertas de stock",
+    desc: "Insumos agotados o por debajo del mínimo de compra.",
   },
   {
     href: "/cocina/auditoria",
@@ -29,9 +24,9 @@ const SUBMODULOS: SubModulo[] = [
     desc: "Historial automático de cada cambio de stock: cuándo, cuánto y de dónde vino.",
   },
   {
-    href: "/cocina/alertas",
-    label: "Alertas de stock",
-    desc: "Insumos agotados o por debajo del mínimo de compra.",
+    href: "/cocina/inventario/conteo",
+    label: "Conteo físico y mermas",
+    desc: "Cuadrá el inventario (a mano o importando el Excel) y revisa la merma de cada conteo, valorada en $.",
   },
 ];
 
