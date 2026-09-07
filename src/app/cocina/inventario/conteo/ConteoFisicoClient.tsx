@@ -9,7 +9,14 @@ import type { Insumo, Seccion } from "@/lib/types";
 import { SECCIONES, stockLibre } from "@/lib/types";
 import { listInsumos } from "@/lib/data/cocina";
 import { ajustarStockConteo } from "@/lib/data/stock-movimientos";
+import { ultimaVentaFecha } from "@/lib/data/ventas";
 import { ErrorBanner } from "@/components/ErrorBanner";
+
+// Formatea una fecha ISO (YYYY-MM-DD) a dd/mm/yyyy.
+function fFecha(iso: string): string {
+  const [y, m, d] = iso.split("-");
+  return d && m && y ? `${d}/${m}/${y}` : iso;
+}
 
 // Formatea una cantidad de stock: entero si aplica, si no hasta 2 decimales.
 function fNum(n: number): string {
@@ -36,13 +43,15 @@ export function ConteoFisicoClient() {
   const [conteos, setConteos] = useState<Record<string, string>>({});
   const [guardando, setGuardando] = useState(false);
   const [resultado, setResultado] = useState<string | null>(null);
+  // Fecha de la última venta importada = "corte" del stock del sistema.
+  const [ultimaVenta, setUltimaVenta] = useState<string | null>(null);
 
   useEffect(() => {
     let cancel = false;
     (async () => {
       try {
-        const ins = await listInsumos();
-        if (!cancel) setItems(ins.filter((i) => i.activo));
+        const [ins, uv] = await Promise.all([listInsumos(), ultimaVentaFecha()]);
+        if (!cancel) { setItems(ins.filter((i) => i.activo)); setUltimaVenta(uv); }
       } catch (e) {
         if (!cancel) setError(e instanceof Error ? e.message : "Error cargando insumos");
       } finally {
@@ -200,6 +209,16 @@ export function ConteoFisicoClient() {
   return (
     <div className="space-y-4">
       {error && <ErrorBanner>{error}</ErrorBanner>}
+
+      {/* Corte de ventas: recordatorio de timing para que la merma sea exacta. */}
+      <div className="rounded-xl bg-[#FBF3E2] ring-1 ring-[#E8D9B0] px-3 py-2 text-[12px] text-[#7A5A18]">
+        {ultimaVenta ? (
+          <>Ventas importadas hasta el <b>{fFecha(ultimaVenta)}</b> — el stock del sistema refleja las ventas hasta esa fecha. </>
+        ) : (
+          <>Aún no hay ventas importadas. </>
+        )}
+        Para una merma exacta, cuenta <b>antes de abrir</b>, después de importar el día anterior (así el sistema y el estante coinciden).
+      </div>
 
       {/* Controles + resumen (sticky) */}
       <div className="sticky top-0 z-10 rounded-2xl bg-white/95 backdrop-blur ring-1 ring-marfil p-3 space-y-3">
