@@ -7,7 +7,7 @@
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { totalesVentasPorMes } from "@/lib/data/ventas";
-import { listTasasBcvRango, listComprasRango, listComprasEgresoMes, listComprasPendientes, listProveedores, listInsumos, marcarCompraPagada, marcarFacturaPagada } from "@/lib/data/cocina";
+import { listTasasBcvRango, listComprasRango, listComprasEgresoMes, listComprasPendientes, listProveedores, listInsumos, marcarCompraPagada, marcarFacturaPagada, getTasaBcvPorFecha } from "@/lib/data/cocina";
 import type { TasaBcv, Compra, Proveedor as ProveedorCocina, Insumo } from "@/lib/types";
 import { AnalisisAdministrativo } from "./AnalisisAdministrativo";
 
@@ -459,9 +459,13 @@ function FormProveedor({
 
 const MONEDAS = ["Bs", "USD", "EUR"] as const;
 const METODOS = ["Transferencia", "Pago Móvil", "Zelle", "Dólar", "Bolívares", "Otro"] as const;
-const TASA_TIPOS = ["dólar", "del día", "promedio", "VNC", "USDT", "otra"] as const;
-// Forma de pago que aparece entre paréntesis en la solicitud (ej. "75.00$ (Tasa BCV)").
-const METODOS_SOLICITUD = ["Tasa BCV", "Zelle", "Transferencia", "Pago Móvil", "Dólar", "Efectivo", "Otro"] as const;
+// Forma de pago que aparece entre paréntesis en la solicitud (ej. "75.00$ (BCV Dólar)").
+// "BCV Dólar" y "BCV Euro" toman su tasa automática por fecha; "Tasa particular"
+// se escribe a mano.
+const METODOS_SOLICITUD = ["BCV Dólar", "BCV Euro", "Tasa particular", "Zelle", "Transferencia", "Pago Móvil", "Efectivo", "Otro"] as const;
+// ¿La forma usa una tasa oficial del BCV (auto por fecha)?
+const esFormaBcvDolar = (f: string) => /bcv\s*d[oó]lar/i.test(f);
+const esFormaBcvEuro = (f: string) => /bcv\s*euro/i.test(f);
 
 type LineaForm = {
   uid: string;
@@ -573,7 +577,9 @@ function textoSolicitud(lineas: LineaForm[]): string {
   const bloques: string[] = [];
   lineas.forEach((l, i) => {
     const m = parseMonto(l.monto);
-    const forma = l.metodo?.trim();
+    let forma = l.metodo?.trim();
+    // "Tasa particular" muestra la tasa escrita (ej. "Tasa 45,20"); BCV/otros van tal cual.
+    if (/tasa particular/i.test(forma ?? "") && l.tasa?.trim()) forma = `Tasa ${l.tasa.trim()}`;
     const b: string[] = [];
     if (l.tipo === "proveedor") b.push(`${i + 1}. Proveedor: ${l.proveedor_nombre || "(sin nombre)"}`);
     else b.push(`${i + 1}. ${l.concepto || "(concepto)"}`);
@@ -613,6 +619,8 @@ function SeccionSolicitudes() {
 function NuevaSolicitud() {
   const [proveedores, setProveedores] = useState<Proveedor[]>([]);
   const [lineas, setLineas] = useState<LineaForm[]>([]);
+  const [fecha, setFecha] = useState(hoyISO());
+  const [tasaBcv, setTasaBcv] = useState<{ usdBs?: number; eurBs?: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [copiado, setCopiado] = useState(false);
@@ -632,8 +640,42 @@ function NuevaSolicitud() {
     return () => { a = false; };
   }, []);
 
+  // Tasa BCV (dólar y euro) de la fecha elegida — auto para las formas oficiales.
+  useEffect(() => {
+    let a = true;
+    getTasaBcvPorFecha(fecha).then((t) => { if (a) setTasaBcv(t ? { usdBs: t.usdBs, eurBs: t.eurBs } : null); }).catch(() => { if (a) setTasaBcv(null); });
+    return () => { a = false; };
+  }, [fecha]);
+
+  // Tasa que corresponde a una forma de pago (auto para BCV $/€, vacío para el resto).
+  const tasaDeForma = useCallback((forma: string): string => {
+    if (esFormaBcvDolar(forma)) return tasaBcv?.usdBs ? String(tasaBcv.usdBs) : "";
+    if (esFormaBcvEuro(forma)) return tasaBcv?.eurBs ? String(tasaBcv.eurBs) : "";
+    return "";
+  }, [tasaBcv]);
+
+  // Al cambiar la fecha (o cargar la tasa), re-aplica la tasa oficial a las líneas
+  // BCV. Las de "Tasa particular" u otras formas conservan lo que el usuario puso.
+  useEffect(() => {
+    (async () => {
+      setLineas((ls) => ls.map((l) => {
+        const auto = tasaDeForma(l.metodo);
+        return auto && auto !== l.tasa ? { ...l, tasa: auto } : l;
+      }));
+    })();
+  }, [tasaBcv, tasaDeForma]);
+
   function actualizar(uid: string, cambios: Partial<LineaForm>) {
-    setLineas((ls) => ls.map((l) => (l.uid === uid ? { ...l, ...cambios } : l)));
+    setLineas((ls) => ls.map((l) => {
+      if (l.uid !== uid) return l;
+      const next = { ...l, ...cambios };
+      // Si cambió la forma de pago, ajusta la tasa: auto para BCV, manual para el resto.
+      if (cambios.metodo !== undefined) {
+        const auto = tasaDeForma(cambios.metodo);
+        if (auto) next.tasa = auto;
+      }
+      return next;
+    }));
   }
   function elegirProveedor(uid: string, id: string) {
     const p = proveedores.find((x) => x.id === id);
@@ -706,9 +748,16 @@ function NuevaSolicitud() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap gap-2">
-        <button type="button" onClick={() => setLineas((l) => [...l, nuevaLinea("proveedor")])} className="rounded-lg bg-cacao text-white px-4 py-2 text-xs uppercase tracking-widest hover:bg-terracotta">+ Agregar proveedor al pago</button>
-        <button type="button" onClick={() => setLineas((l) => [...l, nuevaLinea("adicional")])} className="rounded-lg ring-1 ring-marfil text-cacao px-4 py-2 text-xs uppercase tracking-widest hover:bg-marfil-soft">+ Concepto adicional</button>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => setLineas((l) => [...l, nuevaLinea("proveedor")])} className="rounded-lg bg-cacao text-white px-4 py-2 text-xs uppercase tracking-widest hover:bg-terracotta">+ Agregar proveedor al pago</button>
+          <button type="button" onClick={() => setLineas((l) => [...l, nuevaLinea("adicional")])} className="rounded-lg ring-1 ring-marfil text-cacao px-4 py-2 text-xs uppercase tracking-widest hover:bg-marfil-soft">+ Concepto adicional</button>
+        </div>
+        <label className="text-[11px] text-cacao-soft">
+          Fecha (para la tasa BCV)
+          <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} className="mt-0.5 block rounded-lg ring-1 ring-marfil px-2 py-1.5 text-sm text-cacao" />
+          <span className="block text-[10px] text-cacao-mute mt-0.5">{tasaBcv?.usdBs ? `BCV $ ${tasaBcv.usdBs} · € ${tasaBcv.eurBs ?? "—"}` : "Sin tasa BCV para esa fecha"}</span>
+        </label>
       </div>
 
       {error && <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419]">{error}</div>}
@@ -725,6 +774,7 @@ function NuevaSolicitud() {
               key={l.uid}
               linea={l}
               indice={i + 1}
+              fecha={fecha}
               proveedores={proveedores}
               onCambio={(c) => actualizar(l.uid, c)}
               onElegirProveedor={(id) => elegirProveedor(l.uid, id)}
@@ -764,6 +814,7 @@ function NuevaSolicitud() {
 function LineaEditor({
   linea,
   indice,
+  fecha,
   proveedores,
   onCambio,
   onElegirProveedor,
@@ -771,6 +822,7 @@ function LineaEditor({
 }: {
   linea: LineaForm;
   indice: number;
+  fecha: string;
   proveedores: Proveedor[];
   onCambio: (c: Partial<LineaForm>) => void;
   onElegirProveedor: (id: string) => void;
@@ -785,10 +837,10 @@ function LineaEditor({
         </span>
         <div className="flex items-center gap-2">
           {esProv && (
-            <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] uppercase tracking-widest ${linea.datos_registrados ? "bg-[#F1F4ED] text-[#2F4A1F]" : "bg-[#F9EBE7] text-[#7A2419]"}`}>
-              <span className={`h-1.5 w-1.5 rounded-full ${linea.datos_registrados ? "bg-[#4B7A2F]" : "bg-[#C0563F]"}`} />
-              {linea.datos_registrados ? "Datos registrados" : "Faltan datos"}
-            </span>
+            <label className="inline-flex items-center gap-1.5 text-[11px] text-cacao-soft cursor-pointer select-none">
+              <input type="checkbox" checked={linea.datos_registrados} onChange={(e) => onCambio({ datos_registrados: e.target.checked })} className="accent-terracotta" />
+              Datos registrados
+            </label>
           )}
           <button type="button" onClick={onQuitar} className="text-cacao-soft hover:text-terracotta text-sm" aria-label="Quitar">✕</button>
         </div>
@@ -842,17 +894,18 @@ function LineaEditor({
         )}
       </div>
 
-      {linea.moneda !== "USD" && (
-        <div className="grid grid-cols-2 gap-2">
-          <Campo label="Tasa a USD (opcional)">
-            <input inputMode="decimal" value={linea.tasa} onChange={(e) => onCambio({ tasa: e.target.value })} placeholder={linea.moneda === "Bs" ? "Bs por USD" : "USD por EUR"} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
-          </Campo>
-          <Campo label="Tipo de tasa">
-            <select value={linea.tasa_tipo} onChange={(e) => onCambio({ tasa_tipo: e.target.value })} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
-              {TASA_TIPOS.map((t) => <option key={t} value={t}>{t}</option>)}
-            </select>
-          </Campo>
-        </div>
+      {/* Tasa según la forma: BCV $/€ es automática por fecha; particular es manual. */}
+      {(esFormaBcvDolar(linea.metodo) || esFormaBcvEuro(linea.metodo)) && (
+        <p className="text-[12px] text-cacao-soft">
+          {linea.tasa
+            ? <>Tasa {esFormaBcvEuro(linea.metodo) ? "BCV Euro" : "BCV Dólar"} del {fmtFecha(fecha)}: <span className="text-cacao tabular-nums">Bs {linea.tasa}</span> · automática</>
+            : <span className="text-[#7A2419]">No hay tasa BCV cargada para {fmtFecha(fecha)}. Cárgala o usa “Tasa particular”.</span>}
+        </p>
+      )}
+      {/tasa particular/i.test(linea.metodo) && (
+        <Campo label="Tasa particular (Bs por USD/EUR)">
+          <input inputMode="decimal" value={linea.tasa} onChange={(e) => onCambio({ tasa: e.target.value })} placeholder="Ej: 45,20" className="w-full sm:w-56 border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
+        </Campo>
       )}
 
       {esProv && (
