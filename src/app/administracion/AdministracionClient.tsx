@@ -460,6 +460,8 @@ function FormProveedor({
 const MONEDAS = ["Bs", "USD", "EUR"] as const;
 const METODOS = ["Transferencia", "Pago Móvil", "Zelle", "Dólar", "Bolívares", "Otro"] as const;
 const TASA_TIPOS = ["dólar", "del día", "promedio", "VNC", "USDT", "otra"] as const;
+// Forma de pago que aparece entre paréntesis en la solicitud (ej. "75.00$ (Tasa BCV)").
+const METODOS_SOLICITUD = ["Tasa BCV", "Zelle", "Transferencia", "Pago Móvil", "Dólar", "Efectivo", "Otro"] as const;
 
 type LineaForm = {
   uid: string;
@@ -496,8 +498,8 @@ function nuevaLinea(tipo: "proveedor" | "adicional"): LineaForm {
     datos_registrados: false,
     concepto: "",
     monto: "",
-    moneda: "Bs",
-    metodo: tipo === "proveedor" ? "Transferencia" : "",
+    moneda: "USD",
+    metodo: "Tasa BCV",
     tasa: "",
     tasa_tipo: "dólar",
     factura: "",
@@ -548,29 +550,43 @@ function equivUSD(monto: number | null, moneda: string, tasa: number | null): nu
   return null;
 }
 
+// Monto al estilo de la solicitud: "75.00$" / "1.200,00 Bs" / "50.00€".
+function montoSolicitud(m: number | null, moneda: string): string {
+  if (m == null) return "(sin monto)";
+  const n = m.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  if (moneda === "USD") return `${n}$`;
+  if (moneda === "EUR") return `${n}€`;
+  return `${n} ${moneda}`;
+}
+
+// Arma el texto de la solicitud tal como se envía (por WhatsApp). Formato:
+//   Pagos que necesitamos gestionar hoy:
+//
+//   1. Proveedor: <nombre>
+//   Monto: 75.00$ (Tasa BCV)         ← método/forma entre paréntesis
+//   Concepto: NR - 9983
+//   Datos Registrados                 ← o "Datos: <x>" / "Datos (Registrar): <x>"
+//
+//   2. <concepto>                     ← ítems sin proveedor (recargas, etc.)
+//   Monto: 80.00$ (Tasa BCV)
 function textoSolicitud(lineas: LineaForm[]): string {
-  const provs = lineas.filter((l) => l.tipo === "proveedor");
-  const adics = lineas.filter((l) => l.tipo === "adicional");
   const bloques: string[] = [];
-  provs.forEach((l, i) => {
+  lineas.forEach((l, i) => {
     const m = parseMonto(l.monto);
-    const b: string[] = [`${i + 1}. Proveedor: ${l.proveedor_nombre || "(sin nombre)"}`];
-    if (l.concepto) b.push(`Concepto: ${l.concepto}`);
-    b.push(`Monto: ${m != null ? fmtMonto(m, l.moneda) : "(sin monto)"}`);
-    if (l.metodo) b.push(`Método: ${l.metodo}`);
-    if (l.factura) b.push(`Factura: ${l.factura}`);
-    if (l.nota) b.push(`NOTA: ${l.nota}`);
-    b.push(l.datos_registrados ? "✓ Datos registrados" : "✕ Faltan datos");
+    const forma = l.metodo?.trim();
+    const b: string[] = [];
+    if (l.tipo === "proveedor") b.push(`${i + 1}. Proveedor: ${l.proveedor_nombre || "(sin nombre)"}`);
+    else b.push(`${i + 1}. ${l.concepto || "(concepto)"}`);
+    b.push(`Monto: ${montoSolicitud(m, l.moneda)}${forma ? ` (${forma})` : ""}`);
+    if (l.tipo === "proveedor" && l.concepto) b.push(`Concepto: ${l.concepto}`);
+    if (l.tipo === "proveedor") {
+      if (l.datos_registrados) b.push("Datos Registrados");
+      else if (/zelle/i.test(forma ?? "")) b.push(`Datos:${l.nota ? ` ${l.nota}` : ""}`);
+      else b.push(`Datos (Registrar):${l.nota ? ` ${l.nota}` : ""}`);
+    }
     bloques.push(b.join("\n"));
   });
-  if (adics.length) {
-    const items = adics.map((l) => {
-      const m = parseMonto(l.monto);
-      return `${l.concepto || "(concepto)"}: ${m != null ? fmtMonto(m, l.moneda) : "(sin monto)"}`;
-    });
-    bloques.push(["Adicionales:", ...items].join("\n"));
-  }
-  return bloques.join("\n\n");
+  return ["Pagos que necesitamos gestionar hoy:", "", bloques.join("\n\n")].join("\n");
 }
 
 function SeccionSolicitudes() {
@@ -779,16 +795,21 @@ function LineaEditor({
       </div>
 
       {esProv && (
-        <div>
-          <label className="block font-display text-[10px] tracking-[0.2em] uppercase text-cacao-mute mb-1">Proveedor</label>
-          <select
-            value={linea.proveedor_id ?? ""}
-            onChange={(e) => onElegirProveedor(e.target.value)}
-            className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao bg-white"
-          >
-            <option value="">— Elegir de la base —</option>
-            {proveedores.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
-          </select>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <label className="block font-display text-[10px] tracking-[0.2em] uppercase text-cacao-mute mb-1">Proveedor (de la base)</label>
+            <select
+              value={linea.proveedor_id ?? ""}
+              onChange={(e) => onElegirProveedor(e.target.value)}
+              className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao bg-white"
+            >
+              <option value="">— Nuevo / no registrado —</option>
+              {proveedores.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+            </select>
+          </div>
+          <Campo label="Nombre del proveedor">
+            <input value={linea.proveedor_nombre} onChange={(e) => onCambio({ proveedor_nombre: e.target.value })} placeholder="Escríbelo si no está en la base" className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
+          </Campo>
         </div>
       )}
 
@@ -808,18 +829,18 @@ function LineaEditor({
         </div>
       </div>
 
-      {esProv && (
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Campo label="Método de pago">
-            <select value={linea.metodo} onChange={(e) => onCambio({ metodo: e.target.value })} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
-              {METODOS.map((m) => <option key={m} value={m}>{m}</option>)}
-            </select>
-          </Campo>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Campo label="Forma de pago (aparece en paréntesis)">
+          <select value={linea.metodo} onChange={(e) => onCambio({ metodo: e.target.value })} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
+            {METODOS_SOLICITUD.map((m) => <option key={m} value={m}>{m}</option>)}
+          </select>
+        </Campo>
+        {esProv && (
           <Campo label="Factura (opcional)">
             <input value={linea.factura} onChange={(e) => onCambio({ factura: e.target.value })} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
           </Campo>
-        </div>
-      )}
+        )}
+      </div>
 
       {linea.moneda !== "USD" && (
         <div className="grid grid-cols-2 gap-2">
@@ -834,9 +855,11 @@ function LineaEditor({
         </div>
       )}
 
-      <Campo label="Nota (opcional)">
-        <input value={linea.nota} onChange={(e) => onCambio({ nota: e.target.value })} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
-      </Campo>
+      {esProv && (
+        <Campo label={linea.datos_registrados ? "Datos (opcional — el proveedor ya está registrado)" : "Datos para registrar (Rif/banco/cuenta) o email de Zelle"}>
+          <textarea value={linea.nota} onChange={(e) => onCambio({ nota: e.target.value })} rows={linea.datos_registrados ? 1 : 3} placeholder={/zelle/i.test(linea.metodo) ? "correo@ejemplo.com" : "Rif. J-… · Banco · N° de cuenta"} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao resize-y" />
+        </Campo>
+      )}
     </div>
   );
 }
