@@ -1230,13 +1230,18 @@ function EgresosMes() {
   // su fecha de PAGO (una factura vieja pagada este mes aparece este mes).
   const comprasEgreso: Egreso[] = compras
     .filter((c) => (c.precioTotalUsd ?? 0) > 0.005)
-    .map((c) => ({
-      id: `compra:${c.id}`, fecha: c.fechaPago ?? c.fecha, concepto: "Compra de insumos", categoria_id: null,
-      categoria_nombre: "Insumos (Cocina)", clasificacion: "variable",
-      proveedor_id: null, proveedor_nombre: null,
-      monto: c.precioTotalUsd, moneda: "USD", tasa: null, monto_usd: c.precioTotalUsd,
-      metodo: c.modalidadPago ?? null, factura: null, nota: null, solicitud_linea_id: null,
-    }) as unknown as Egreso);
+    .map((c) => {
+      const prov = c.proveedorId ? provCocina.find((p) => p.id === c.proveedorId)?.nombre ?? null : null;
+      const ins = insumos.find((i) => i.id === c.insumoId)?.nombre;
+      return {
+        id: `compra:${c.id}`, fecha: c.fechaPago ?? c.fecha,
+        concepto: `Compra Cocina${c.numeroFactura ? ` · Factura ${c.numeroFactura}` : ins ? ` · ${ins}` : ""}`,
+        categoria_id: null, categoria_nombre: "Insumos (Cocina)", clasificacion: "variable",
+        proveedor_id: null, proveedor_nombre: prov,
+        monto: c.precioTotalUsd, moneda: "USD", tasa: null, monto_usd: c.precioTotalUsd,
+        metodo: c.modalidadPago ?? null, factura: c.numeroFactura ?? null, nota: null, solicitud_linea_id: null,
+      } as unknown as Egreso;
+    });
   // Egresos manuales pagados del mes (caja real): los pendientes no cuentan.
   const egresosPagados = egresos.filter((e) => e.pagada !== false);
   const egresosAll: Egreso[] = [...egresosPagados, ...comprasEgreso]
