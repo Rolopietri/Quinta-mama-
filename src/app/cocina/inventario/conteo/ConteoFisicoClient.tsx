@@ -5,8 +5,8 @@
 // de cada uno al valor contado (RPC ajustar_stock_conteo, registra el ajuste).
 
 import { useEffect, useMemo, useState } from "react";
-import type { Insumo, Seccion } from "@/lib/types";
-import { SECCIONES, stockLibre } from "@/lib/types";
+import type { Insumo } from "@/lib/types";
+import { stockLibre } from "@/lib/types";
 import { listInsumos } from "@/lib/data/cocina";
 import { ajustarStockConteo } from "@/lib/data/stock-movimientos";
 import { ultimaVentaFecha } from "@/lib/data/ventas";
@@ -30,14 +30,15 @@ function parse(v: string): number | null {
   const n = Number(s);
   return Number.isFinite(n) && n >= 0 ? n : null;
 }
-const seccionLabel = (s: Seccion) => SECCIONES.find((x) => x.value === s)?.label ?? s;
+// Categoría de compra del insumo (etiqueta para agrupar/filtrar el conteo).
+const catDe = (i: Insumo) => (i.categoriaCompra ?? "").trim() || "Sin categoría";
 
 export function ConteoFisicoClient() {
   const [items, setItems] = useState<Insumo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  const [filterSec, setFilterSec] = useState<Seccion | "todas">("todas");
+  const [filterCat, setFilterCat] = useState<string>("todas");
   const [soloDif, setSoloDif] = useState(false);
   // Conteos escritos por el usuario: insumoId -> texto del input.
   const [conteos, setConteos] = useState<Record<string, string>>({});
@@ -68,10 +69,16 @@ export function ConteoFisicoClient() {
     return n - ins.stockTotal;
   }
 
+  // Categorías presentes (para el filtro).
+  const categoriasEnUso = useMemo(
+    () => Array.from(new Set(items.map(catDe))).sort((a, b) => a.localeCompare(b)),
+    [items],
+  );
+
   const filtrados = useMemo(() => {
     const q = search.trim().toLowerCase();
     return items
-      .filter((i) => filterSec === "todas" || i.seccion === filterSec || i.seccion === "ambos")
+      .filter((i) => filterCat === "todas" || catDe(i) === filterCat)
       .filter((i) => (q ? i.nombre.toLowerCase().includes(q) : true))
       .filter((i) => {
         if (!soloDif) return true;
@@ -80,16 +87,17 @@ export function ConteoFisicoClient() {
       })
       .sort((a, b) => a.nombre.localeCompare(b.nombre));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items, search, filterSec, soloDif, conteos]);
+  }, [items, search, filterCat, soloDif, conteos]);
 
-  // Agrupar por sección para contar estante por estante.
+  // Agrupar por categoría de insumo para contar por tipo de producto.
   const grupos = useMemo(() => {
-    const m = new Map<Seccion, Insumo[]>();
+    const m = new Map<string, Insumo[]>();
     filtrados.forEach((i) => {
-      if (!m.has(i.seccion)) m.set(i.seccion, []);
-      m.get(i.seccion)!.push(i);
+      const c = catDe(i);
+      if (!m.has(c)) m.set(c, []);
+      m.get(c)!.push(i);
     });
-    return Array.from(m.entries());
+    return Array.from(m.entries()).sort((a, b) => a[0].localeCompare(b[0]));
   }, [filtrados]);
 
   // Resumen: cuántos tienen conteo y cuántos difieren del stock actual.
@@ -144,10 +152,10 @@ export function ConteoFisicoClient() {
     try {
       const XLSX = await import("xlsx");
       const filas = [...items]
-        .sort((a, b) => a.nombre.localeCompare(b.nombre))
+        .sort((a, b) => catDe(a).localeCompare(catDe(b)) || a.nombre.localeCompare(b.nombre))
         .map((i) => ({
           id: i.id,
-          categoria: i.categoriaCompra ?? "",
+          categoria: catDe(i),
           nombre: i.nombre,
           unidad_base: i.unidadBase,
           total_sistema: i.stockTotal,
@@ -229,9 +237,9 @@ export function ConteoFisicoClient() {
             placeholder="Buscar insumo…"
             className="flex-1 min-w-[160px] rounded-lg ring-1 ring-marfil px-3 py-2 text-sm"
           />
-          <select value={filterSec} onChange={(e) => setFilterSec(e.target.value as Seccion | "todas")} className={selCls}>
-            <option value="todas">Todas las secciones</option>
-            {SECCIONES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+          <select value={filterCat} onChange={(e) => setFilterCat(e.target.value)} className={selCls}>
+            <option value="todas">Todas las categorías</option>
+            {categoriasEnUso.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
           <label className="flex items-center gap-1.5 text-xs text-cacao-soft cursor-pointer">
             <input type="checkbox" checked={soloDif} onChange={(e) => setSoloDif(e.target.checked)} className="accent-cacao" />
@@ -277,10 +285,10 @@ export function ConteoFisicoClient() {
           {soloDif ? "Ningún insumo con diferencia." : "Sin insumos que coincidan."}
         </div>
       ) : (
-        grupos.map(([sec, list]) => (
-          <section key={sec} className="rounded-2xl bg-white ring-1 ring-marfil overflow-hidden">
+        grupos.map(([cat, list]) => (
+          <section key={cat} className="rounded-2xl bg-white ring-1 ring-marfil overflow-hidden">
             <header className="px-4 py-2.5 border-b border-marfil bg-marfil-soft/50">
-              <span className="font-display text-xs tracking-[0.3em] uppercase text-cacao">{seccionLabel(sec)}</span>
+              <span className="font-display text-xs tracking-[0.3em] uppercase text-cacao">{cat}</span>
               <span className="text-[11px] text-cacao-mute ml-2">{list.length}</span>
             </header>
             <div className="overflow-x-auto">
