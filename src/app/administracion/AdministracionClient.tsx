@@ -35,6 +35,26 @@ export function AdministracionClient() {
       .catch(() => setEstado("bloqueado"));
   }, []);
 
+  // Si la sesión expira mientras la página está abierta, cualquier llamada a
+  // /api/admin/* devuelve 401. En vez de un error críptico ("no autorizado"),
+  // volvemos a mostrar la puerta de contraseña para re-entrar sin perder nada.
+  useEffect(() => {
+    if (estado !== "abierto") return;
+    const orig = window.fetch;
+    window.fetch = async (...args: Parameters<typeof window.fetch>) => {
+      const res = await orig(...args);
+      try {
+        const input = args[0];
+        const url = typeof input === "string" ? input : input instanceof URL ? input.href : (input as Request).url;
+        if (res.status === 401 && url.includes("/api/admin/") && !url.includes("/api/admin/login")) {
+          setEstado("bloqueado");
+        }
+      } catch { /* noop */ }
+      return res;
+    };
+    return () => { window.fetch = orig; };
+  }, [estado]);
+
   if (estado === "cargando") return <p className="text-cacao-soft italic font-serif">Cargando…</p>;
   if (estado === "sin-config") return <SinConfig />;
   if (estado === "bloqueado") return <Puerta onEntrar={() => setEstado("abierto")} />;
