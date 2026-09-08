@@ -59,8 +59,11 @@ export function ClaveWifi({
         </dl>
 
         {credenciales.mensaje && (
-          <p className="mt-5 font-serif italic text-sm text-cacao-soft">
-            {credenciales.mensaje}
+          <p className="mt-5 font-serif italic text-sm text-cacao-soft whitespace-pre-line">
+            {credenciales.mensaje.replace(
+              /\{nombre\}/g,
+              nombre ? nombre.trim().split(" ")[0] : "",
+            )}
           </p>
         )}
       </div>
