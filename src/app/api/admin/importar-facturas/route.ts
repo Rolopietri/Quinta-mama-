@@ -94,7 +94,9 @@ export async function PUT(req: NextRequest) {
 
   for (const f of filas) {
     const ms = metodosDe(f.formaPago);
-    const ref = f.nro || f.orden || null;
+    // Referencia de la CXC = Nro. de ORDEN (no el N° de factura). Fallback al
+    // número de factura solo si no hay orden.
+    const ref = f.orden || f.nro || null;
     const tot = f.total || 0;
     const sp = ref ? splits[ref] : undefined;
     if (ms.length > 1 && sp && Object.keys(sp).length) {

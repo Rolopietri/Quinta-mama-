@@ -263,7 +263,7 @@ export function parseReporteFacturas(buf: Buffer): ReporteFacturas {
     const cliente = f.cliente || "—";
     const cur = cm.get(cliente) ?? { cliente, total: 0, docs: [] };
     cur.total += f.total;
-    cur.docs.push({ ref: f.nro || f.orden || "", fecha: f.fecha, monto: r2(f.total) });
+    cur.docs.push({ ref: f.orden || f.nro || "", fecha: f.fecha, monto: r2(f.total) });
     cm.set(cliente, cur);
   }
   const cxcDetalle = Array.from(cm.values()).map((c) => ({ ...c, total: r2(c.total) })).sort((a, b) => b.total - a.total);
@@ -272,7 +272,7 @@ export function parseReporteFacturas(buf: Buffer): ReporteFacturas {
   const mixtas: FacturaMixta[] = filas
     .map((f) => ({ f, ms: metodosDe(f.formaPago) }))
     .filter((x) => x.ms.length > 1)
-    .map(({ f, ms }) => ({ nro: f.nro || f.orden, fecha: f.fecha, cliente: f.cliente, total: r2(f.total), ventaNeta: r2(f.ventaNeta), impuesto: r2(f.impuesto), metodos: ms }));
+    .map(({ f, ms }) => ({ nro: f.orden || f.nro, fecha: f.fecha, cliente: f.cliente, total: r2(f.total), ventaNeta: r2(f.ventaNeta), impuesto: r2(f.impuesto), metodos: ms }));
 
   return { filas, dias, porMetodo, cxcDetalle, mixtas, desde: dias[0]?.fecha ?? "", hasta: dias[dias.length - 1]?.fecha ?? "", totales };
 }
