@@ -85,7 +85,7 @@ export function WifiForm({ origen }: { origen: string | null }) {
         />
       </Campo>
 
-      <Campo etiqueta="Teléfono">
+      <Campo etiqueta="Número de WhatsApp">
         <input
           type="tel"
           required
