@@ -2059,7 +2059,8 @@ function CuadreFacturas() {
       const r = await fetch("/api/admin/importar-facturas", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ file_base64: archivoB64, splits: splitsNum }) });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || "No se pudo guardar.");
-      setOk(`Importado ${d.desde} → ${d.hasta}: ${d.ingresos} ingreso(s), ${d.cxc} CXC, ${d.rpp} RPP, ${d.dias} día(s) de tickets. Ticket promedio ${fEUR(d.ticketPromedio)}.`);
+      const cl = d.clientes ? ` Base de clientes: ${d.clientes.nuevos} nuevo(s), ${d.clientes.actualizados} ya registrado(s).` : "";
+      setOk(`Importado ${d.desde} → ${d.hasta}: ${d.ingresos} ingreso(s), ${d.cxc} CXC, ${d.rpp} RPP, ${d.dias} día(s) de tickets. Ticket promedio ${fEUR(d.ticketPromedio)}.${cl}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error");
     } finally { setGuardando(false); }
