@@ -316,7 +316,7 @@ function ListaInvitados({
     const q = busca.trim().toLowerCase();
     if (!q) return invitados;
     return invitados.filter((i) =>
-      [i.nombre ?? "", i.cedula ?? "", i.email, i.telefono, i.origen ?? ""].some((c) =>
+      [i.nombre ?? "", i.cedula ?? "", i.email ?? "", i.telefono ?? "", i.origen ?? ""].some((c) =>
         c.toLowerCase().includes(q),
       ),
     );
@@ -339,8 +339,8 @@ function ListaInvitados({
     const filas = filtrados.map((i) =>
       [
         i.cedula ?? "",
-        i.email,
-        i.telefono,
+        i.email ?? "",
+        i.telefono ?? "",
         i.nombre ?? "",
         i.acepta_promos ? "sí" : "no",
         etiquetaInteres(i.interes),
@@ -413,7 +413,7 @@ function ListaInvitados({
               {filtrados.map((i) => (
                 <tr key={i.id} className="border-t border-marfil-light align-top">
                   <td className="py-2.5 pr-3">
-                    <div className="text-cacao break-all">{i.nombre ?? i.email}</div>
+                    <div className="text-cacao break-all">{i.nombre ?? i.email ?? "—"}</div>
                     {i.nombre && (
                       <div className="text-xs text-cacao-soft break-all">{i.email}</div>
                     )}
@@ -425,7 +425,7 @@ function ListaInvitados({
                     )}
                   </td>
                   <td className="py-2.5 pr-3 text-cacao-soft whitespace-nowrap">
-                    {i.telefono}
+                    {i.telefono ?? "—"}
                   </td>
                   <td className="py-2.5 pr-3 text-cacao-soft whitespace-nowrap">
                     {i.cedula ?? "—"}
@@ -442,7 +442,7 @@ function ListaInvitados({
                       type="button"
                       onClick={() => onBorrar(i.id)}
                       className="text-cacao-mute hover:text-terracotta transition-colors"
-                      aria-label={`Borrar a ${i.nombre ?? i.email}`}
+                      aria-label={`Borrar a ${i.nombre ?? i.email ?? "cliente"}`}
                       title="Borrar"
                     >
                       <TrashIcon className="size-4" />
