@@ -22,6 +22,7 @@ export type WifiConfig = {
 };
 
 export type RegistroInvitado = {
+  nombre: string;
   email: string;
   telefono: string;
   cedula: string;
@@ -102,6 +103,7 @@ export function nacimientoValido(v: string): boolean {
 /** Errores de un registro; vacío = válido. */
 export function validarRegistro(r: Partial<RegistroInvitado>): string[] {
   const errores: string[] = [];
+  if (!r.nombre || r.nombre.trim().length < 3) errores.push("Escribe tu nombre.");
   if (!r.email || !emailValido(r.email)) errores.push("Escribe un correo válido.");
   if (!r.telefono || !telefonoValido(r.telefono)) errores.push("Escribe tu WhatsApp.");
   if (!r.cedula || !cedulaValida(r.cedula)) errores.push("Escribe tu cédula.");
