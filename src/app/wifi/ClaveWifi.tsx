@@ -34,7 +34,7 @@ export function ClaveWifi({
           <WifiIcon className="size-9" />
         </div>
         <h2 className="mt-3 text-lg font-medium text-cacao">
-          {nombre ? `¡Listo, ${nombre.split(" ")[0]}!` : "Ya estás registrado"}
+          {nombre ? `¡Listo, ${nombre.split(" ")[0]}!` : conocido ? "Ya estás registrado" : "¡Listo!"}
         </h2>
         <p className="mt-1 text-sm text-cacao-soft">
           {visitas && visitas > 1
