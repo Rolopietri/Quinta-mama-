@@ -15,6 +15,9 @@ export type FilaFactura = {
   nro: string; // N° de factura / NE
   orden: string; // Nro. Órden
   cliente: string;
+  cedula: string; // RIF / CI del cliente, si el reporte lo trae
+  telefono: string;
+  email: string;
   fecha: string; // YYYY-MM-DD (por fecha de ORDEN)
   fechaFactura: string | null; // YYYY-MM-DD (cierre), informativo
   ventaNeta: number; // sin IVA
@@ -168,7 +171,10 @@ export function parseReporteFacturas(buf: Buffer): ReporteFacturas {
 
   const cNro = col(headers, "N° de Factura / NE", "N de Factura / NE", "Nro de Factura");
   const cOrden = col(headers, "Nro. Órden", "Nro. Orden", "Nro Orden", "N Orden");
-  const cCliente = col(headers, "Cliente");
+  const cCliente = col(headers, "Cliente", "Nombre del Cliente", "Nombre Cliente");
+  const cCedula = col(headers, "RIF", "RIF/CI", "CI/RIF", "Cédula", "Cedula", "C.I.", "CI", "Documento", "Identificación", "Identificacion", "Nro. Documento");
+  const cTel = col(headers, "Teléfono", "Telefono", "Celular", "WhatsApp");
+  const cEmail = col(headers, "Correo", "Email", "E-mail", "Correo Electrónico", "Correo Electronico");
   const cNeta = col(headers, "Venta Neta");
   const cImp = col(headers, "Impuesto");
   const cTotal = col(headers, "Total Venta");
@@ -194,6 +200,9 @@ export function parseReporteFacturas(buf: Buffer): ReporteFacturas {
       nro: String(r[cNro] ?? "").trim(),
       orden: cOrden >= 0 ? String(r[cOrden] ?? "").trim() : "",
       cliente: cCliente >= 0 ? String(r[cCliente] ?? "").trim() : "",
+      cedula: cCedula >= 0 ? String(r[cCedula] ?? "").trim() : "",
+      telefono: cTel >= 0 ? String(r[cTel] ?? "").trim() : "",
+      email: cEmail >= 0 ? String(r[cEmail] ?? "").trim() : "",
       fecha,
       fechaFactura: cFFactura >= 0 ? fechaISO(r[cFFactura]) : null,
       ventaNeta: neta,
