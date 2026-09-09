@@ -19,7 +19,7 @@ import {
   guardarWifiConfig,
   listarInvitados,
 } from "@/lib/data/wifi";
-import { cumplenEsteMes, type WifiConfig, type WifiInvitado } from "@/lib/wifi";
+import { cumplenEsteMes, etiquetaInteres, type WifiConfig, type WifiInvitado } from "@/lib/wifi";
 
 export function WifiAdminClient({ baseUrl }: { baseUrl: string }) {
   const [cargando, setCargando] = useState(true);
@@ -329,6 +329,7 @@ function ListaInvitados({
       "telefono",
       "fecha_nacimiento",
       "acepta_promos",
+      "interes",
       "visitas",
       "origen",
       "primera_visita",
@@ -342,6 +343,7 @@ function ListaInvitados({
         i.telefono,
         i.fecha_nacimiento ?? "",
         i.acepta_promos ? "sí" : "no",
+        etiquetaInteres(i.interes),
         i.visitas,
         i.origen ?? "",
         i.primera_visita.slice(0, 10),
@@ -401,6 +403,7 @@ function ListaInvitados({
                 <th className="py-2 pr-3">Cliente</th>
                 <th className="py-2 pr-3">Teléfono</th>
                 <th className="py-2 pr-3">Nacimiento</th>
+                <th className="py-2 pr-3">Interés</th>
                 <th className="py-2 pr-3">Visitas</th>
                 <th className="py-2 pr-3">Última</th>
                 <th className="py-2" />
@@ -424,6 +427,9 @@ function ListaInvitados({
                   </td>
                   <td className="py-2.5 pr-3 text-cacao-soft whitespace-nowrap">
                     {i.fecha_nacimiento ?? "—"}
+                  </td>
+                  <td className="py-2.5 pr-3 text-cacao-soft whitespace-nowrap">
+                    {etiquetaInteres(i.interes)}
                   </td>
                   <td className="py-2.5 pr-3 text-cacao-soft">{i.visitas}</td>
                   <td className="py-2.5 pr-3 text-cacao-soft whitespace-nowrap">
