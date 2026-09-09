@@ -15,6 +15,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/admin-service";
 import { COOKIE_WIFI, DIAS_COOKIE, credencialesWifi } from "@/lib/wifi-server";
 import {
+  normalizarCedula,
   normalizarEmail,
   normalizarTelefono,
   validarRegistro,
@@ -54,12 +55,13 @@ export async function POST(request: NextRequest) {
   }
 
   const registro = {
-    nombre: String(body.nombre ?? "").trim(),
     email: normalizarEmail(String(body.email ?? "")),
     telefono: String(body.telefono ?? "").trim(),
-    nacimiento: String(body.nacimiento ?? "").trim(),
+    cedula: normalizarCedula(String(body.cedula ?? "")),
     promos: body.promos !== false,
-    interes: String(body.interes ?? "").trim().toLowerCase(),
+    intereses: Array.isArray(body.intereses)
+      ? body.intereses.map((x) => String(x).trim().toLowerCase()).filter(Boolean)
+      : [],
     origen: body.origen ? String(body.origen).slice(0, 40) : null,
   };
 
@@ -83,12 +85,11 @@ export async function POST(request: NextRequest) {
   // sesión, así que basta el cliente normal (rol anon).
   const sb = createServiceClient() ?? (await createSupabaseServerClient());
   const { data, error } = await sb.rpc("wifi_registrar", {
-    p_nombre: registro.nombre,
     p_email: registro.email,
     p_telefono: normalizarTelefono(registro.telefono),
-    p_nacimiento: registro.nacimiento,
+    p_cedula: registro.cedula,
     p_promos: registro.promos,
-    p_interes: registro.interes,
+    p_interes: registro.intereses.join(","),
     p_origen: registro.origen,
   });
 
@@ -105,7 +106,6 @@ export async function POST(request: NextRequest) {
     ...credenciales,
     nuevo: fila?.nuevo ?? true,
     visitas: fila?.visitas ?? 1,
-    nombre: registro.nombre,
   });
   res.cookies.set(COOKIE_WIFI, registro.email, {
     httpOnly: true,
