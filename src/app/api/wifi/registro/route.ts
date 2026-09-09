@@ -55,6 +55,7 @@ export async function POST(request: NextRequest) {
   }
 
   const registro = {
+    nombre: String(body.nombre ?? "").trim().slice(0, 120),
     email: normalizarEmail(String(body.email ?? "")),
     telefono: String(body.telefono ?? "").trim(),
     cedula: normalizarCedula(String(body.cedula ?? "")),
@@ -85,6 +86,7 @@ export async function POST(request: NextRequest) {
   // sesión, así que basta el cliente normal (rol anon).
   const sb = createServiceClient() ?? (await createSupabaseServerClient());
   const { data, error } = await sb.rpc("wifi_registrar", {
+    p_nombre: registro.nombre,
     p_email: registro.email,
     p_telefono: normalizarTelefono(registro.telefono),
     p_cedula: registro.cedula,
@@ -106,6 +108,7 @@ export async function POST(request: NextRequest) {
     ...credenciales,
     nuevo: fila?.nuevo ?? true,
     visitas: fila?.visitas ?? 1,
+    nombre: registro.nombre,
   });
   res.cookies.set(COOKIE_WIFI, registro.email, {
     httpOnly: true,
