@@ -2,7 +2,8 @@
 
 export type WifiInvitado = {
   id: string;
-  nombre: string;
+  nombre: string | null;
+  cedula: string | null;
   email: string;
   telefono: string;
   fecha_nacimiento: string | null;
@@ -21,22 +22,22 @@ export type WifiConfig = {
 };
 
 export type RegistroInvitado = {
-  nombre: string;
   email: string;
   telefono: string;
-  nacimiento: string; // yyyy-mm-dd
+  cedula: string;
   promos: boolean;
-  interes: string;
+  intereses: string[];
   origen?: string | null;
 };
 
-/** Lo que más le interesa al invitado de la Quinta (elige una). */
+/** A qué vino el invitado (puede elegir varias). */
 export const INTERESES = [
   { valor: "salud", etiqueta: "Salud", emoji: "🌿" },
   { valor: "deporte", etiqueta: "Deporte", emoji: "🎾" },
-  { valor: "consumo", etiqueta: "Comer y tomar", emoji: "☕" },
+  { valor: "consumo", etiqueta: "Consumo", emoji: "☕" },
   { valor: "cultura", etiqueta: "Cultura", emoji: "🎨" },
   { valor: "arquitectura", etiqueta: "Arquitectura", emoji: "🏛️" },
+  { valor: "cowork", etiqueta: "Cowork", emoji: "💻" },
   { valor: "otros", etiqueta: "Otros", emoji: "✨" },
 ] as const;
 
@@ -46,8 +47,26 @@ export function interesValido(v: string): v is Interes {
   return INTERESES.some((i) => i.valor === v);
 }
 
+/** "salud,cowork" → "Salud, Cowork". */
 export function etiquetaInteres(v: string | null | undefined): string {
-  return INTERESES.find((i) => i.valor === v)?.etiqueta ?? "—";
+  if (!v) return "—";
+  const etiquetas = v
+    .split(",")
+    .map((x) => INTERESES.find((i) => i.valor === x.trim())?.etiqueta)
+    .filter(Boolean);
+  return etiquetas.length ? etiquetas.join(", ") : "—";
+}
+
+/** Cédula venezolana: V-12345678, E-1234567, o solo los dígitos. */
+export function normalizarCedula(v: string): string {
+  const limpia = v.trim().toUpperCase().replace(/[\s.]/g, "");
+  const m = limpia.match(/^([VEJPG])?-?(\d{5,10})$/);
+  if (!m) return limpia;
+  return `${m[1] ?? "V"}-${m[2]}`;
+}
+
+export function cedulaValida(v: string): boolean {
+  return /^[VEJPG]-\d{5,10}$/.test(normalizarCedula(v));
 }
 
 /** Correo en minúsculas y sin espacios. */
@@ -83,13 +102,11 @@ export function nacimientoValido(v: string): boolean {
 /** Errores de un registro; vacío = válido. */
 export function validarRegistro(r: Partial<RegistroInvitado>): string[] {
   const errores: string[] = [];
-  if (!r.nombre || r.nombre.trim().length < 3) errores.push("Escribe tu nombre completo.");
   if (!r.email || !emailValido(r.email)) errores.push("Escribe un correo válido.");
-  if (!r.telefono || !telefonoValido(r.telefono)) errores.push("Escribe un teléfono válido.");
-  if (!r.nacimiento || !nacimientoValido(r.nacimiento))
-    errores.push("Escribe tu fecha de nacimiento.");
-  if (!r.interes || !interesValido(r.interes))
-    errores.push("Cuéntanos qué te interesa más de la Quinta.");
+  if (!r.telefono || !telefonoValido(r.telefono)) errores.push("Escribe tu WhatsApp.");
+  if (!r.cedula || !cedulaValida(r.cedula)) errores.push("Escribe tu cédula.");
+  if (!r.intereses || !r.intereses.length || !r.intereses.every(interesValido))
+    errores.push("Cuéntanos a qué viniste.");
   return errores;
 }
 
