@@ -3,6 +3,7 @@ import { tokenValido, ADMIN_COOKIE } from "@/lib/admin-auth";
 import { createServiceClient } from "@/lib/supabase/admin-service";
 import { parseReporteFacturas, metodoCanonico, metodosDe } from "@/lib/admin/factura";
 import { getTasaEurUsd } from "@/lib/admin/tasa";
+import { sincronizarClientesDesdeFacturas } from "@/lib/wifi-clientes";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -198,8 +199,17 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 
+  // ── Base de clientes: cada nombre/cédula del reporte alimenta `wifi_invitados`
+  //    (la misma base del WiFi), sin duplicar. Si falla, no bloquea la carga.
+  let clientes = { nuevos: 0, actualizados: 0, ignorados: 0 };
+  try {
+    clientes = await sincronizarClientesDesdeFacturas(sb, reporte.filas, "cafetin");
+  } catch (e) {
+    console.error("[clientes] sync falló:", e instanceof Error ? e.message : e);
+  }
+
   return NextResponse.json({
-    ok: true, desde, hasta,
+    ok: true, desde, hasta, clientes,
     ingresos: ingresos.length, cxc: cxc.length, rpp: rpp.length,
     propinas: propinas.length, dias: ticketsDia.length,
     ticketPromedio: reporte.totales.ticketPromedioBruto,
