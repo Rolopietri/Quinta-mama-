@@ -4,8 +4,8 @@ export type WifiInvitado = {
   id: string;
   nombre: string | null;
   cedula: string | null;
-  email: string;
-  telefono: string;
+  email: string | null;
+  telefono: string | null;
   fecha_nacimiento: string | null;
   acepta_promos: boolean;
   interes: string | null;
