@@ -109,6 +109,8 @@ export function validarRegistro(r: Partial<RegistroInvitado>): string[] {
   if (!r.cedula || !cedulaValida(r.cedula)) errores.push("Escribe tu cédula.");
   if (!r.intereses || !r.intereses.length || !r.intereses.every(interesValido))
     errores.push("Cuéntanos a qué viniste.");
+  if (r.promos === false)
+    errores.push("Para recibir la clave necesitamos tu permiso para enviarte novedades de la Quinta.");
   return errores;
 }
 
