@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { ClaveWifi } from "./ClaveWifi";
-import { validarRegistro, type WifiConfig } from "@/lib/wifi";
+import { INTERESES, validarRegistro, type WifiConfig } from "@/lib/wifi";
 
 type Respuesta = WifiConfig & { nuevo: boolean; visitas: number; nombre: string };
 
@@ -12,13 +12,14 @@ export function WifiForm({ origen }: { origen: string | null }) {
   const [telefono, setTelefono] = useState("");
   const [nacimiento, setNacimiento] = useState("");
   const [promos, setPromos] = useState(true);
+  const [interes, setInteres] = useState("");
   const [estado, setEstado] = useState<"idle" | "enviando">("idle");
   const [error, setError] = useState("");
   const [ok, setOk] = useState<Respuesta | null>(null);
 
   async function enviar(e: React.FormEvent) {
     e.preventDefault();
-    const registro = { nombre, email, telefono, nacimiento, promos };
+    const registro = { nombre, email, telefono, nacimiento, promos, interes };
     const errores = validarRegistro(registro);
     if (errores.length) {
       setError(errores[0]);
@@ -108,6 +109,33 @@ export function WifiForm({ origen }: { origen: string | null }) {
           className={CLASE_INPUT}
         />
       </Campo>
+
+      <fieldset>
+        <legend className="text-sm font-medium text-cacao">
+          ¿Qué te interesa más de la Quinta?
+        </legend>
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          {INTERESES.map((op) => {
+            const activo = interes === op.valor;
+            return (
+              <button
+                key={op.valor}
+                type="button"
+                aria-pressed={activo}
+                onClick={() => setInteres(op.valor)}
+                className={`flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm text-left ring-1 transition-colors ${
+                  activo
+                    ? "bg-terracotta text-white ring-terracotta"
+                    : "bg-white text-cacao ring-marfil hover:ring-cacao-soft"
+                }`}
+              >
+                <span aria-hidden="true">{op.emoji}</span>
+                <span>{op.etiqueta}</span>
+              </button>
+            );
+          })}
+        </div>
+      </fieldset>
 
       <label className="flex items-start gap-2.5 text-sm text-cacao-soft">
         <input
