@@ -4,22 +4,27 @@ import { useState } from "react";
 import { ClaveWifi } from "./ClaveWifi";
 import { INTERESES, validarRegistro, type WifiConfig } from "@/lib/wifi";
 
-type Respuesta = WifiConfig & { nuevo: boolean; visitas: number; nombre: string };
+type Respuesta = WifiConfig & { nuevo: boolean; visitas: number };
 
 export function WifiForm({ origen }: { origen: string | null }) {
-  const [nombre, setNombre] = useState("");
   const [email, setEmail] = useState("");
   const [telefono, setTelefono] = useState("");
-  const [nacimiento, setNacimiento] = useState("");
+  const [cedula, setCedula] = useState("");
   const [promos, setPromos] = useState(true);
-  const [interes, setInteres] = useState("");
+  const [intereses, setIntereses] = useState<string[]>([]);
   const [estado, setEstado] = useState<"idle" | "enviando">("idle");
   const [error, setError] = useState("");
   const [ok, setOk] = useState<Respuesta | null>(null);
 
+  function alternar(valor: string) {
+    setIntereses((prev) =>
+      prev.includes(valor) ? prev.filter((v) => v !== valor) : [...prev, valor],
+    );
+  }
+
   async function enviar(e: React.FormEvent) {
     e.preventDefault();
-    const registro = { nombre, email, telefono, nacimiento, promos, interes };
+    const registro = { email, telefono, cedula, promos, intereses };
     const errores = validarRegistro(registro);
     if (errores.length) {
       setError(errores[0]);
@@ -46,7 +51,6 @@ export function WifiForm({ origen }: { origen: string | null }) {
     return (
       <ClaveWifi
         credenciales={{ ssid: ok.ssid, clave: ok.clave, mensaje: ok.mensaje }}
-        nombre={ok.nombre}
         visitas={ok.visitas}
       />
     );
@@ -61,18 +65,6 @@ export function WifiForm({ origen }: { origen: string | null }) {
         Déjanos tus datos y te damos la clave del WiFi. Es una sola vez.
       </p>
 
-      <Campo etiqueta="Nombre y apellido">
-        <input
-          type="text"
-          required
-          autoComplete="name"
-          placeholder="María Pérez"
-          value={nombre}
-          onChange={(e) => setNombre(e.target.value)}
-          className={CLASE_INPUT}
-        />
-      </Campo>
-
       <Campo etiqueta="Correo">
         <input
           type="email"
@@ -86,7 +78,7 @@ export function WifiForm({ origen }: { origen: string | null }) {
         />
       </Campo>
 
-      <Campo etiqueta="Número de WhatsApp">
+      <Campo etiqueta="WhatsApp">
         <input
           type="tel"
           required
@@ -99,30 +91,31 @@ export function WifiForm({ origen }: { origen: string | null }) {
         />
       </Campo>
 
-      <Campo etiqueta="Fecha de nacimiento">
+      <Campo etiqueta="Cédula">
         <input
-          type="date"
+          type="text"
           required
-          max={new Date().toISOString().slice(0, 10)}
-          value={nacimiento}
-          onChange={(e) => setNacimiento(e.target.value)}
+          inputMode="numeric"
+          autoComplete="off"
+          placeholder="V-12345678"
+          value={cedula}
+          onChange={(e) => setCedula(e.target.value)}
           className={CLASE_INPUT}
         />
       </Campo>
 
       <fieldset>
-        <legend className="text-sm font-medium text-cacao">
-          ¿Qué te interesa más de la Quinta?
-        </legend>
+        <legend className="text-sm font-medium text-cacao">¿A qué viniste?</legend>
+        <p className="mt-0.5 text-xs text-cacao-mute">Puedes marcar varias.</p>
         <div className="mt-2 grid grid-cols-2 gap-2">
           {INTERESES.map((op) => {
-            const activo = interes === op.valor;
+            const activo = intereses.includes(op.valor);
             return (
               <button
                 key={op.valor}
                 type="button"
                 aria-pressed={activo}
-                onClick={() => setInteres(op.valor)}
+                onClick={() => alternar(op.valor)}
                 className={`flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm text-left ring-1 transition-colors ${
                   activo
                     ? "bg-terracotta text-white ring-terracotta"
