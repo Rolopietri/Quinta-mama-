@@ -19,7 +19,7 @@ import {
   guardarWifiConfig,
   listarInvitados,
 } from "@/lib/data/wifi";
-import { cumplenEsteMes, etiquetaInteres, type WifiConfig, type WifiInvitado } from "@/lib/wifi";
+import { etiquetaInteres, type WifiConfig, type WifiInvitado } from "@/lib/wifi";
 
 export function WifiAdminClient({ baseUrl }: { baseUrl: string }) {
   const [cargando, setCargando] = useState(true);
@@ -85,13 +85,13 @@ function Resumen({ invitados }: { invitados: WifiInvitado[] }) {
 
   const delMes = invitados.filter((i) => i.ultima_visita >= inicioMes).length;
   const deHoy = invitados.filter((i) => i.ultima_visita >= desdeHoy).length;
-  const cumples = cumplenEsteMes(invitados, hoy.getMonth() + 1).length;
+  const conPromos = invitados.filter((i) => i.acepta_promos).length;
 
   const tarjetas = [
     { icono: <UsersIcon className="size-5" />, valor: invitados.length, etiqueta: "Clientes en la base" },
     { icono: <WifiIcon className="size-5" />, valor: deHoy, etiqueta: "Conectados hoy" },
     { icono: <WifiIcon className="size-5" />, valor: delMes, etiqueta: "Este mes" },
-    { icono: <CakeIcon className="size-5" />, valor: cumples, etiqueta: "Cumpleaños del mes" },
+    { icono: <CakeIcon className="size-5" />, valor: conPromos, etiqueta: "Aceptan promociones" },
   ];
 
   return (
@@ -316,7 +316,7 @@ function ListaInvitados({
     const q = busca.trim().toLowerCase();
     if (!q) return invitados;
     return invitados.filter((i) =>
-      [i.nombre, i.email, i.telefono, i.origen ?? ""].some((c) =>
+      [i.nombre ?? "", i.cedula ?? "", i.email, i.telefono, i.origen ?? ""].some((c) =>
         c.toLowerCase().includes(q),
       ),
     );
@@ -324,10 +324,10 @@ function ListaInvitados({
 
   function exportarCsv() {
     const cabecera = [
-      "nombre",
+      "cedula",
       "email",
       "telefono",
-      "fecha_nacimiento",
+      "nombre",
       "acepta_promos",
       "interes",
       "visitas",
@@ -338,10 +338,10 @@ function ListaInvitados({
     const escapar = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
     const filas = filtrados.map((i) =>
       [
-        i.nombre,
+        i.cedula ?? "",
         i.email,
         i.telefono,
-        i.fecha_nacimiento ?? "",
+        i.nombre ?? "",
         i.acepta_promos ? "sí" : "no",
         etiquetaInteres(i.interes),
         i.visitas,
@@ -384,7 +384,7 @@ function ListaInvitados({
         <input
           value={busca}
           onChange={(e) => setBusca(e.target.value)}
-          placeholder="Buscar por nombre, correo, teléfono o punto"
+          placeholder="Buscar por cédula, correo, WhatsApp o punto"
           className="w-full bg-transparent text-cacao placeholder:text-cacao-mute focus:outline-none"
         />
       </label>
@@ -401,8 +401,8 @@ function ListaInvitados({
             <thead>
               <tr className="text-left font-display text-[10px] tracking-[0.2em] uppercase text-cacao-mute">
                 <th className="py-2 pr-3">Cliente</th>
-                <th className="py-2 pr-3">Teléfono</th>
-                <th className="py-2 pr-3">Nacimiento</th>
+                <th className="py-2 pr-3">WhatsApp</th>
+                <th className="py-2 pr-3">Cédula</th>
                 <th className="py-2 pr-3">Interés</th>
                 <th className="py-2 pr-3">Visitas</th>
                 <th className="py-2 pr-3">Última</th>
@@ -413,8 +413,10 @@ function ListaInvitados({
               {filtrados.map((i) => (
                 <tr key={i.id} className="border-t border-marfil-light align-top">
                   <td className="py-2.5 pr-3">
-                    <div className="text-cacao">{i.nombre}</div>
-                    <div className="text-xs text-cacao-soft break-all">{i.email}</div>
+                    <div className="text-cacao break-all">{i.nombre ?? i.email}</div>
+                    {i.nombre && (
+                      <div className="text-xs text-cacao-soft break-all">{i.email}</div>
+                    )}
                     {i.origen && (
                       <div className="mt-1 inline-flex items-center gap-1.5 rounded-full bg-marfil-soft px-2 py-0.5 text-[11px] text-cacao-soft">
                         <span className="size-1.5 rounded-full bg-azul-polvo" />
@@ -426,7 +428,7 @@ function ListaInvitados({
                     {i.telefono}
                   </td>
                   <td className="py-2.5 pr-3 text-cacao-soft whitespace-nowrap">
-                    {i.fecha_nacimiento ?? "—"}
+                    {i.cedula ?? "—"}
                   </td>
                   <td className="py-2.5 pr-3 text-cacao-soft whitespace-nowrap">
                     {etiquetaInteres(i.interes)}
@@ -440,7 +442,7 @@ function ListaInvitados({
                       type="button"
                       onClick={() => onBorrar(i.id)}
                       className="text-cacao-mute hover:text-terracotta transition-colors"
-                      aria-label={`Borrar a ${i.nombre}`}
+                      aria-label={`Borrar a ${i.nombre ?? i.email}`}
                       title="Borrar"
                     >
                       <TrashIcon className="size-4" />
