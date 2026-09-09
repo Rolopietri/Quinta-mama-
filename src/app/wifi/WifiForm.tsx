@@ -4,9 +4,10 @@ import { useState } from "react";
 import { ClaveWifi } from "./ClaveWifi";
 import { INTERESES, validarRegistro, type WifiConfig } from "@/lib/wifi";
 
-type Respuesta = WifiConfig & { nuevo: boolean; visitas: number };
+type Respuesta = WifiConfig & { nuevo: boolean; visitas: number; nombre: string };
 
 export function WifiForm({ origen }: { origen: string | null }) {
+  const [nombre, setNombre] = useState("");
   const [email, setEmail] = useState("");
   const [telefono, setTelefono] = useState("");
   const [cedula, setCedula] = useState("");
@@ -24,7 +25,7 @@ export function WifiForm({ origen }: { origen: string | null }) {
 
   async function enviar(e: React.FormEvent) {
     e.preventDefault();
-    const registro = { email, telefono, cedula, promos, intereses };
+    const registro = { nombre, email, telefono, cedula, promos, intereses };
     const errores = validarRegistro(registro);
     if (errores.length) {
       setError(errores[0]);
@@ -51,6 +52,7 @@ export function WifiForm({ origen }: { origen: string | null }) {
     return (
       <ClaveWifi
         credenciales={{ ssid: ok.ssid, clave: ok.clave, mensaje: ok.mensaje }}
+        nombre={ok.nombre}
         visitas={ok.visitas}
       />
     );
@@ -64,6 +66,18 @@ export function WifiForm({ origen }: { origen: string | null }) {
       <p className="text-sm text-cacao-soft">
         Déjanos tus datos y te damos la clave del WiFi. Es una sola vez.
       </p>
+
+      <Campo etiqueta="Nombre">
+        <input
+          type="text"
+          required
+          autoComplete="name"
+          placeholder="María Pérez"
+          value={nombre}
+          onChange={(e) => setNombre(e.target.value)}
+          className={CLASE_INPUT}
+        />
+      </Campo>
 
       <Campo etiqueta="Correo">
         <input
