@@ -59,6 +59,7 @@ export async function POST(request: NextRequest) {
     telefono: String(body.telefono ?? "").trim(),
     nacimiento: String(body.nacimiento ?? "").trim(),
     promos: body.promos !== false,
+    interes: String(body.interes ?? "").trim().toLowerCase(),
     origen: body.origen ? String(body.origen).slice(0, 40) : null,
   };
 
@@ -87,6 +88,7 @@ export async function POST(request: NextRequest) {
     p_telefono: normalizarTelefono(registro.telefono),
     p_nacimiento: registro.nacimiento,
     p_promos: registro.promos,
+    p_interes: registro.interes,
     p_origen: registro.origen,
   });
 
