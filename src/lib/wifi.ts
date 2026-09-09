@@ -7,6 +7,7 @@ export type WifiInvitado = {
   telefono: string;
   fecha_nacimiento: string | null;
   acepta_promos: boolean;
+  interes: string | null;
   visitas: number;
   origen: string | null;
   primera_visita: string;
@@ -25,8 +26,29 @@ export type RegistroInvitado = {
   telefono: string;
   nacimiento: string; // yyyy-mm-dd
   promos: boolean;
+  interes: string;
   origen?: string | null;
 };
+
+/** Lo que más le interesa al invitado de la Quinta (elige una). */
+export const INTERESES = [
+  { valor: "salud", etiqueta: "Salud", emoji: "🌿" },
+  { valor: "deporte", etiqueta: "Deporte", emoji: "🎾" },
+  { valor: "consumo", etiqueta: "Comer y tomar", emoji: "☕" },
+  { valor: "cultura", etiqueta: "Cultura", emoji: "🎨" },
+  { valor: "arquitectura", etiqueta: "Arquitectura", emoji: "🏛️" },
+  { valor: "otros", etiqueta: "Otros", emoji: "✨" },
+] as const;
+
+export type Interes = (typeof INTERESES)[number]["valor"];
+
+export function interesValido(v: string): v is Interes {
+  return INTERESES.some((i) => i.valor === v);
+}
+
+export function etiquetaInteres(v: string | null | undefined): string {
+  return INTERESES.find((i) => i.valor === v)?.etiqueta ?? "—";
+}
 
 /** Correo en minúsculas y sin espacios. */
 export function normalizarEmail(v: string): string {
@@ -66,6 +88,8 @@ export function validarRegistro(r: Partial<RegistroInvitado>): string[] {
   if (!r.telefono || !telefonoValido(r.telefono)) errores.push("Escribe un teléfono válido.");
   if (!r.nacimiento || !nacimientoValido(r.nacimiento))
     errores.push("Escribe tu fecha de nacimiento.");
+  if (!r.interes || !interesValido(r.interes))
+    errores.push("Cuéntanos qué te interesa más de la Quinta.");
   return errores;
 }
 
