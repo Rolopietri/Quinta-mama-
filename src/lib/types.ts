@@ -89,6 +89,71 @@ export const ESTADOS_EVENTO: { value: EstadoEvento; label: string; color: string
 ];
 
 // ────────────────────────────────────────────────────────────────
+// CALENDARIO — Agenda unificada (eventos, reuniones, objetivos, tareas)
+// ────────────────────────────────────────────────────────────────
+
+export type TipoCalendario = "evento" | "reunion" | "objetivo" | "tarea";
+
+export type EstadoCalendario =
+  | "pendiente"
+  | "en_proceso"
+  | "completado"
+  | "cancelado";
+
+export type CalendarioItem = {
+  id: string;
+  tipo: TipoCalendario;
+  titulo: string;
+  fecha: string; // YYYY-MM-DD (día de inicio)
+  /** Último día (inclusive). Si no se define, ocupa un solo día. */
+  fechaFin?: string;
+  /** Hora opcional, formato "HH:MM" (24h). */
+  hora?: string;
+  /** Nombre de la persona responsable (texto libre). */
+  responsable?: string;
+  /** Área (texto libre / una de AREAS). */
+  area?: string;
+  estado: EstadoCalendario;
+  notas?: string;
+};
+
+/** Los 4 tipos del calendario, con su color para diferenciarlos de un vistazo.
+ *  `color` = clases del pill (fondo + texto + ring); `dot` = color del puntito. */
+export const TIPOS_CALENDARIO: {
+  value: TipoCalendario;
+  label: string;
+  color: string;
+  dot: string;
+}[] = [
+  { value: "evento", label: "Evento", color: "bg-rose-50 text-rose-800 ring-rose-200", dot: "bg-rose-500" },
+  { value: "reunion", label: "Reunión", color: "bg-blue-50 text-blue-800 ring-blue-200", dot: "bg-blue-500" },
+  { value: "objetivo", label: "Objetivo / Meta", color: "bg-emerald-50 text-emerald-800 ring-emerald-200", dot: "bg-emerald-500" },
+  { value: "tarea", label: "Tarea", color: "bg-amber-50 text-amber-800 ring-amber-200", dot: "bg-amber-500" },
+];
+
+export const ESTADOS_CALENDARIO: {
+  value: EstadoCalendario;
+  label: string;
+  color: string;
+  dot: string;
+}[] = [
+  { value: "pendiente", label: "Pendiente", color: "bg-stone-100 text-stone-700 ring-stone-200", dot: "bg-stone-400" },
+  { value: "en_proceso", label: "En proceso", color: "bg-amber-50 text-amber-800 ring-amber-200", dot: "bg-amber-500" },
+  { value: "completado", label: "Completado", color: "bg-emerald-50 text-emerald-800 ring-emerald-200", dot: "bg-emerald-500" },
+  { value: "cancelado", label: "Cancelado", color: "bg-stone-100 text-stone-500 ring-stone-200", dot: "bg-stone-300" },
+];
+
+/** Metadatos (label/color/dot) de un tipo; cae al primero si no se reconoce. */
+export function tipoCalendarioMeta(t: string) {
+  return TIPOS_CALENDARIO.find((x) => x.value === t) ?? TIPOS_CALENDARIO[0];
+}
+
+/** Metadatos (label/color/dot) de un estado; cae al primero si no se reconoce. */
+export function estadoCalendarioMeta(e: string) {
+  return ESTADOS_CALENDARIO.find((x) => x.value === e) ?? ESTADOS_CALENDARIO[0];
+}
+
+// ────────────────────────────────────────────────────────────────
 // EVENTOS — Checklist por fase + Cronograma + Plantillas
 // (Replica el flujo del spreadsheet de Beatriz)
 // ────────────────────────────────────────────────────────────────

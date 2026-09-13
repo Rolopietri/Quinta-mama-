@@ -385,6 +385,33 @@ Tagline oficial: *"Donde la cultura y el bienestar florecen."*
 
 ---
 
+## Calendario compartido (sept 2026)
+
+Se agregó un **calendario tipo Google Calendar** en la página inicial (y en su
+propia ruta `/calendario`, "pantalla completa"). Objetivo: que todo el equipo
+vea reuniones y eventos del año, y ponga **objetivos/metas** con fecha para
+darles seguimiento en las reuniones semanales.
+
+Decisiones:
+
+- **Tabla propia `calendario_items`** (SQL en `supabase/calendario.sql`), en vez
+  de mezclar las tablas `eventos`/`tareas` existentes. Mantiene el calendario
+  simple y autocontenido. Mismo patrón de RLS que `eventos` (authenticated =
+  todo permitido) y trigger `set_updated_at`.
+- **4 tipos** diferenciados por color (pill + puntito, sin emojis, según
+  `AGENTS.md`): Evento (rosa), Reunión (azul), Objetivo/Meta (verde), Tarea
+  (ámbar). Config en `TIPOS_CALENDARIO` (`src/lib/types.ts`).
+- **Responsable**: se elige de la lista real del equipo (`so_persona` vía
+  `listPersonas()`), guardado como texto para seguir la convención de la app.
+  **Área**: reusa `AREAS`.
+- Vista de mes con navegación, filtros (tipo / persona / área), agenda del día
+  seleccionado, y alta/edición/borrado. Los **eventos del módulo Eventos** se
+  superponen en solo-lectura (toggle "Mostrar eventos"; clic → su ficha).
+- Data-access en `src/lib/data/calendario.ts` con respaldo `localStorage` (igual
+  que `eventos.ts`). UI en `src/app/calendario/CalendarioClient.tsx`.
+- **Pendiente de operación**: aplicar `supabase/calendario.sql` una vez en el
+  SQL Editor de Supabase para crear la tabla en producción.
+
 ## Cómo me hablo conmigo mismo en futuras sesiones
 
 Si abres una conversación nueva con Claude (o Claude Code) sobre este proyecto:
