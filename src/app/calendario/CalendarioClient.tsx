@@ -172,16 +172,22 @@ export function CalendarioClient() {
         setSelected(iso);
         setCursor({ y: now.getFullYear(), m: now.getMonth() });
       }
-      try {
-        const [its, evs] = await Promise.all([listCalendario(), listEventos()]);
-        if (cancelled) return;
-        setItems(its);
-        setEventos(evs);
-      } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
-      } finally {
-        if (!cancelled) setLoading(false);
+      // Cargamos por separado: si el calendario falla (p. ej. la tabla aún no
+      // existe en Supabase) seguimos mostrando el mes y los eventos, sin un
+      // banner de error alarmante en la página inicial. Solo avisamos si TODO
+      // falla (problema real de conexión).
+      const [itsRes, evsRes] = await Promise.allSettled([
+        listCalendario(),
+        listEventos(),
+      ]);
+      if (cancelled) return;
+      if (itsRes.status === "fulfilled") setItems(itsRes.value);
+      if (evsRes.status === "fulfilled") setEventos(evsRes.value);
+      if (itsRes.status === "rejected" && evsRes.status === "rejected") {
+        const e = itsRes.reason;
+        setError(e instanceof Error ? e.message : String(e));
       }
+      setLoading(false);
     })();
     return () => {
       cancelled = true;
