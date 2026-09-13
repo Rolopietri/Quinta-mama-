@@ -159,6 +159,14 @@ export function CalendarioClient() {
   const [formError, setFormError] = useState<string | null>(null);
   const [confirmDel, setConfirmDel] = useState<string | null>(null);
 
+  // Tooltip que sigue al cursor (aparece al pasar el mouse, sin hacer clic)
+  const [tip, setTip] = useState<{
+    x: number;
+    y: number;
+    title: string;
+    sub: string;
+  } | null>(null);
+
   // Inicializa hoy + carga datos. Todo dentro del IIFE async para no fijar
   // estado en el cuerpo del efecto (evita también desajustes de SSR: la fecha
   // "hoy" se calcula en el cliente, no en el prerender).
@@ -378,11 +386,18 @@ export function CalendarioClient() {
   }
 
   function onDispClick(d: Disp) {
+    setTip(null);
     if (d.source === "evento") {
       router.push(`/eventos/${d.id}`);
     } else if (d.raw) {
       openEdit(d.raw);
     }
+  }
+
+  /** Texto del tooltip: responsable para items; para eventos, "Evento". */
+  function tipSub(d: Disp): string {
+    if (d.source === "evento") return "Evento";
+    return `Responsable: ${d.responsable ?? "sin asignar"}`;
   }
 
   // ── Render ───────────────────────────────────────────────────────
@@ -570,7 +585,18 @@ export function CalendarioClient() {
                           e.stopPropagation();
                           onDispClick(di);
                         }}
-                        title={`${di.hora ? di.hora + " · " : ""}${di.titulo}`}
+                        onMouseEnter={(e) =>
+                          setTip({
+                            x: e.clientX,
+                            y: e.clientY,
+                            title: di.titulo,
+                            sub: tipSub(di),
+                          })
+                        }
+                        onMouseMove={(e) =>
+                          setTip((t) => (t ? { ...t, x: e.clientX, y: e.clientY } : t))
+                        }
+                        onMouseLeave={() => setTip(null)}
                         className={`flex w-full items-center gap-1 rounded px-1 py-0.5 text-left text-[10px] leading-tight ring-1 ${meta.color} ${
                           done ? "opacity-55 line-through" : ""
                         }`}
@@ -886,6 +912,17 @@ export function CalendarioClient() {
         onConfirm={() => confirmDel && borrar(confirmDel)}
         onCancel={() => setConfirmDel(null)}
       />
+
+      {/* Tooltip al pasar el cursor (responsable / nombre del evento) */}
+      {tip && (
+        <div
+          className="pointer-events-none fixed z-[60] max-w-[16rem] rounded-lg bg-cacao px-2.5 py-1.5 text-xs text-white shadow-xl"
+          style={{ left: tip.x + 14, top: tip.y + 14 }}
+        >
+          <div className="font-medium leading-snug">{tip.title}</div>
+          <div className="mt-0.5 text-white/70 leading-snug">{tip.sub}</div>
+        </div>
+      )}
     </div>
   );
 }
