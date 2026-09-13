@@ -135,6 +135,61 @@ export async function ajustarStockConteo(
   return Number(data);
 }
 
+// ── Merma por conteo (Fase 1) ────────────────────────────────────────
+// Cada conteo físico deja un movimiento tipo 'ajuste' con motivo 'Conteo físico'
+// y cantidad = (físico − sistema): negativo = faltó (merma), positivo = sobró.
+// Esto lee ese historial con el nombre/unidad del insumo, para el reporte.
+export type AjusteConteo = {
+  id: string;
+  insumoId: string;
+  insumoNombre: string;
+  categoria: string | null;
+  unidad: string;
+  fecha: string;
+  /** físico − sistema. Negativo = merma (faltó); positivo = sobró. */
+  cantidad: number;
+  /** Precio base del insumo (USD por unidad base), para valorar la merma. */
+  precioBase: number | null;
+  nota?: string;
+};
+
+type AjusteRow = {
+  id: string;
+  insumo_id: string;
+  cantidad: number | string;
+  fecha: string;
+  nota: string | null;
+  insumos: {
+    nombre: string | null;
+    unidad_base: string | null;
+    categoria_compra: string | null;
+    precio_base_usd: number | string | null;
+  } | null;
+};
+
+export async function listAjustesConteo(): Promise<AjusteConteo[]> {
+  const sb = createSupabaseBrowserClient();
+  const { data, error } = await sb
+    .from("stock_movimientos")
+    .select("id, insumo_id, cantidad, fecha, nota, insumos(nombre, unidad_base, categoria_compra, precio_base_usd)")
+    .eq("tipo", "ajuste")
+    .eq("motivo", "Conteo físico")
+    .order("fecha", { ascending: false })
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return ((data ?? []) as unknown as AjusteRow[]).map((r) => ({
+    id: r.id,
+    insumoId: r.insumo_id,
+    insumoNombre: r.insumos?.nombre ?? "(insumo)",
+    categoria: r.insumos?.categoria_compra ?? null,
+    unidad: r.insumos?.unidad_base ?? "",
+    fecha: r.fecha,
+    cantidad: Number(r.cantidad),
+    precioBase: r.insumos?.precio_base_usd == null ? null : Number(r.insumos.precio_base_usd),
+    nota: r.nota ?? undefined,
+  }));
+}
+
 export async function deleteMovimiento(
   id: string,
   opts: { devolverStock?: boolean } = {},

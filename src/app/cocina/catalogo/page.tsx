@@ -14,14 +14,19 @@ const SUBMODULOS: SubModulo[] = [
     desc: "Contactos y modalidades de pago (Bs BCV, paralela, USD efectivo o divisa).",
   },
   {
+    href: "/cocina/alertas",
+    label: "Alertas de stock",
+    desc: "Insumos agotados o por debajo del mínimo de compra.",
+  },
+  {
     href: "/cocina/auditoria",
     label: "Auditoría de stock",
     desc: "Historial automático de cada cambio de stock: cuándo, cuánto y de dónde vino.",
   },
   {
-    href: "/cocina/alertas",
-    label: "Alertas de stock",
-    desc: "Insumos agotados o por debajo del mínimo de compra.",
+    href: "/cocina/inventario/conteo",
+    label: "Conteo físico y mermas",
+    desc: "Cuadrá el inventario (a mano o importando el Excel) y revisa la merma de cada conteo, valorada en $.",
   },
 ];
 

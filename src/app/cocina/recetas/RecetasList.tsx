@@ -14,6 +14,7 @@ import {
 } from "@/lib/types";
 import { listRecetas, calcularCostoReceta } from "@/lib/data/recetas";
 import { listInsumos } from "@/lib/data/cocina";
+import { listCategoriasProducto, type CategoriaProducto } from "@/lib/data/categorias";
 import { getCocinaConfig } from "@/lib/data/cocinaConfig";
 import { normalizarBusqueda } from "@/lib/text";
 import { ErrorBanner } from "@/components/ErrorBanner";
@@ -25,6 +26,7 @@ export function RecetasList() {
 
   const [items, setItems] = useState<Receta[]>([]);
   const [insumos, setInsumos] = useState<Insumo[]>([]);
+  const [categoriasUser, setCategoriasUser] = useState<CategoriaProducto[]>([]);
   /** % de IVA configurado (default 16). Lo usamos para mostrar el precio
    *  con IVA al lado del precio sin IVA. */
   const [ivaPorc, setIvaPorc] = useState(16);
@@ -46,10 +48,11 @@ export function RecetasList() {
     let cancelled = false;
     (async () => {
       try {
-        const [rec, ins, cfg] = await Promise.all([
+        const [rec, ins, cfg, cats] = await Promise.all([
           listRecetas(),
           listInsumos(),
           getCocinaConfig(),
+          listCategoriasProducto().catch(() => [] as CategoriaProducto[]),
         ]);
         if (!cancelled) {
           setItems(rec);
@@ -57,6 +60,7 @@ export function RecetasList() {
           setIvaPorc(cfg.ivaPorc);
           setMargenVerdeMin(cfg.margenVerdeMin);
           setMargenAmarilloMin(cfg.margenAmarilloMin);
+          setCategoriasUser(cats);
         }
       } catch (e) {
         if (!cancelled)
@@ -127,20 +131,32 @@ export function RecetasList() {
     [items],
   );
 
-  // Categorías para los pills de filtro: las sugeridas (por slug) + cualquier
-  // categoría nueva que ya exista en recetas (no sub-recetas).
+  // Categorías para los pills de filtro: las categorías de RECETA (aplica_receta)
+  // + cualquier categoría que alguna receta use pero no esté marcada (para no
+  // esconder recetas). Ya NO se pinta toda la lista fija del código (adiós chips
+  // vacíos como "Café espresso"). Si la tabla está vacía/sin migrar, se cae a la
+  // lista fija para no dejar el filtro en blanco.
   const categoriasFiltro = useMemo(() => {
-    const conocidas = CATEGORIAS_RECETA.map((c) => c.value as string);
+    const recetaCats = categoriasUser.filter((c) => c.aplicaReceta !== false);
+    const conocidas =
+      categoriasUser.length > 0
+        ? recetaCats.map((c) => c.nombre)
+        : CATEGORIAS_RECETA.map((c) => c.value as string);
+    const conocidasNorm = new Set(conocidas.map((c) => c.trim().toLowerCase()));
     const set = new Set<string>();
     items.forEach((r) => {
-      if (r.categoria && !r.esSubreceta && !conocidas.includes(r.categoria))
+      if (
+        r.categoria &&
+        !r.esSubreceta &&
+        !conocidasNorm.has(r.categoria.trim().toLowerCase())
+      )
         set.add(r.categoria);
     });
     const nuevas = Array.from(set).sort((a, b) =>
       categoriaRecetaLabel(a).localeCompare(categoriaRecetaLabel(b)),
     );
     return [...conocidas, ...nuevas];
-  }, [items]);
+  }, [items, categoriasUser]);
 
   if (loading) {
     return (

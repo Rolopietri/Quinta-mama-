@@ -9,7 +9,7 @@
 import crypto from "node:crypto";
 
 export const ADMIN_COOKIE = "qm_admin";
-const DURACION_MS = 8 * 60 * 60 * 1000; // 8 horas
+const DURACION_MS = 30 * 24 * 60 * 60 * 1000; // 30 días (uso diario; "Salir" cierra)
 
 function secret(): string | null {
   return process.env.ADMIN_PASSWORD || null;

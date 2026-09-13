@@ -15,6 +15,9 @@ export type FilaFactura = {
   nro: string; // N° de factura / NE
   orden: string; // Nro. Órden
   cliente: string;
+  cedula: string; // RIF / CI del cliente, si el reporte lo trae
+  telefono: string;
+  email: string;
   fecha: string; // YYYY-MM-DD (por fecha de ORDEN)
   fechaFactura: string | null; // YYYY-MM-DD (cierre), informativo
   ventaNeta: number; // sin IVA
@@ -34,9 +37,20 @@ export type DiaFactura = {
   tickets: number; // facturas cerradas ese día (por fecha de orden)
 };
 
+// Desglose por método de pago (como el "Detallado por Forma de Pago" de Xetux).
+export type MetodoAgg = { metodo: string; categoria: CategoriaPago; neto: number; iva: number; monto: number; tickets: number };
+// Detalle de cuentas por cobrar por cliente (crédito del reporte).
+export type CxCDetalleCliente = { cliente: string; total: number; docs: { ref: string; fecha: string; monto: number }[] };
+// Factura pagada con DOS o más métodos distintos: el reporte no trae el monto
+// por método, así que el usuario lo especifica antes de importar.
+export type FacturaMixta = { nro: string; fecha: string; cliente: string; total: number; ventaNeta: number; impuesto: number; metodos: string[] };
+
 export type ReporteFacturas = {
   filas: FilaFactura[];
   dias: DiaFactura[];
+  porMetodo: MetodoAgg[];
+  cxcDetalle: CxCDetalleCliente[];
+  mixtas: FacturaMixta[];
   desde: string; hasta: string;
   totales: {
     ingresoNeto: number; ingresoBruto: number;
@@ -105,30 +119,68 @@ function col(headers: string[], ...alias: string[]): number {
   return -1;
 }
 
+// Nombre CANÓNICO de un método de pago: unifica sinónimos, casing y acentos de
+// Xetux y de los importadores viejos. Efectivo y Dólar se tratan como el MISMO
+// método, bajo el nombre "Dólar". Ajusta aquí si cambian los criterios.
+export function canonMetodo(raw: string): string {
+  const k = (raw || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase().trim().replace(/\s+/g, " ");
+  if (!k) return "—";
+  if (k.includes("PUNTO") || k === "PTO DE VENTA" || k === "PTO VENTA" || k === "PDV" || k === "POS") return "Punto de Venta";
+  if (k.includes("PAGO MOVIL") || k === "PM") return "Pago Móvil";
+  if (k === "ZELLE") return "Zelle";
+  if (k === "TRANSFERENCIA" || k === "TRANSF" || k.includes("TRANSFEREN")) return "Transferencia";
+  if (k === "DOLAR" || k === "DOLARES" || k === "USD" || k === "DIVISA" || k === "EFECTIVO" || k === "CASH" || k === "$") return "Dólar";
+  if (k === "BS" || k.includes("BOLIVAR")) return "Bolívares";
+  if (k === "CXC") return "CXC";
+  if (k === "RPP") return "RPP";
+  return raw.trim().toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+// Métodos canónicos distintos de una forma de pago (colapsa los repetidos).
+export function metodosDe(forma: string): string[] {
+  return [...new Set(forma.split("|").map((p) => canonMetodo(p)).filter((p) => p !== "—"))];
+}
+
+// Método(s) canónicos de una forma de pago: colapsa los del mismo método;
+// los pagos partidos entre métodos distintos quedan como "Mixto (A + B)".
+export function metodoCanonico(forma: string): string {
+  const partes = metodosDe(forma);
+  if (partes.length === 0) return "—";
+  if (partes.length === 1) return partes[0];
+  return `Mixto (${partes.join(" + ")})`;
+}
+
 export function parseReporteFacturas(buf: Buffer): ReporteFacturas {
   const wb = XLSX.read(buf, { type: "buffer", cellDates: true });
   const hoja = wb.SheetNames[0];
   if (!hoja) throw new Error("El archivo no tiene ninguna hoja.");
   const filasCrudas = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[hoja], { header: 1, raw: false, defval: "" });
 
-  // Fila de encabezado: la primera que contenga "Formas de Pago" y "Fecha de Orden".
+  // Fila de encabezado: la primera con una columna de forma(s) de pago y otra de
+  // fecha de orden. Tolerante a singular/plural y a texto extra ("Fecha de la
+  // Orden", "Forma de Pago", etc.) — el matching fino de columnas va luego.
   let hIdx = -1;
   for (let i = 0; i < Math.min(filasCrudas.length, 15); i++) {
     const r = (filasCrudas[i] ?? []).map((c) => norm(c));
-    if (r.includes("formas de pago") && r.some((c) => c.includes("fecha de orden"))) { hIdx = i; break; }
+    const tieneForma = r.some((c) => c.includes("forma") && c.includes("pago"));
+    const tieneFechaOrden = r.some((c) => c.includes("fecha") && c.includes("orden"));
+    if (tieneForma && tieneFechaOrden) { hIdx = i; break; }
   }
   if (hIdx < 0) throw new Error("No reconocí el encabezado. ¿Es el 'Reporte Detallado por Factura' de Xetux?");
   const headers = (filasCrudas[hIdx] ?? []).map((c) => String(c ?? ""));
 
   const cNro = col(headers, "N° de Factura / NE", "N de Factura / NE", "Nro de Factura");
   const cOrden = col(headers, "Nro. Órden", "Nro. Orden", "Nro Orden", "N Orden");
-  const cCliente = col(headers, "Cliente");
+  const cCliente = col(headers, "Cliente", "Nombre del Cliente", "Nombre Cliente");
+  const cCedula = col(headers, "RIF", "RIF/CI", "CI/RIF", "Cédula", "Cedula", "C.I.", "CI", "Documento", "Identificación", "Identificacion", "Nro. Documento");
+  const cTel = col(headers, "Teléfono", "Telefono", "Celular", "WhatsApp");
+  const cEmail = col(headers, "Correo", "Email", "E-mail", "Correo Electrónico", "Correo Electronico");
   const cNeta = col(headers, "Venta Neta");
   const cImp = col(headers, "Impuesto");
   const cTotal = col(headers, "Total Venta");
   const cProp = col(headers, "Propinas", "Propina");
   const cForma = col(headers, "Formas de Pago", "Forma de Pago");
-  const cFOrden = col(headers, "Fecha de Orden");
+  const cFOrden = col(headers, "Fecha de Orden", "Fecha de la Orden", "Fecha de la Órden", "Fecha Orden");
   const cFFactura = col(headers, "Fecha de la factura", "Fecha de la Factura");
   if (cForma < 0 || cFOrden < 0 || cNeta < 0 || cTotal < 0) {
     throw new Error("Faltan columnas clave (Formas de Pago, Venta Neta, Total Venta o Fecha de Orden).");
@@ -148,6 +200,9 @@ export function parseReporteFacturas(buf: Buffer): ReporteFacturas {
       nro: String(r[cNro] ?? "").trim(),
       orden: cOrden >= 0 ? String(r[cOrden] ?? "").trim() : "",
       cliente: cCliente >= 0 ? String(r[cCliente] ?? "").trim() : "",
+      cedula: cCedula >= 0 ? String(r[cCedula] ?? "").trim() : "",
+      telefono: cTel >= 0 ? String(r[cTel] ?? "").trim() : "",
+      email: cEmail >= 0 ? String(r[cEmail] ?? "").trim() : "",
       fecha,
       fechaFactura: cFFactura >= 0 ? fechaISO(r[cFFactura]) : null,
       ventaNeta: neta,
@@ -200,5 +255,33 @@ export function parseReporteFacturas(buf: Buffer): ReporteFacturas {
     ticketPromedioNeto: r2(tickets > 0 ? totalNeto / tickets : 0),
   };
 
-  return { filas, dias, desde: dias[0]?.fecha ?? "", hasta: dias[dias.length - 1]?.fecha ?? "", totales };
+  // Desglose por método de pago (bruto = Total Venta), con nombres CANÓNICOS.
+  const metodoDe = metodoCanonico;
+  const mm = new Map<string, MetodoAgg>();
+  for (const f of filas) {
+    const metodo = metodoDe(f.formaPago);
+    const cur = mm.get(metodo) ?? { metodo, categoria: f.categoria, neto: 0, iva: 0, monto: 0, tickets: 0 };
+    cur.neto += f.ventaNeta; cur.iva += f.impuesto; cur.monto += f.total; cur.tickets += 1; mm.set(metodo, cur);
+  }
+  const porMetodo = Array.from(mm.values()).map((m) => ({ ...m, neto: r2(m.neto), iva: r2(m.iva), monto: r2(m.monto) })).sort((a, b) => b.monto - a.monto);
+
+  // Detalle de cuentas por cobrar por cliente (crédito, bruto).
+  const cm = new Map<string, CxCDetalleCliente>();
+  for (const f of filas) {
+    if (f.categoria !== "CXC") continue;
+    const cliente = f.cliente || "—";
+    const cur = cm.get(cliente) ?? { cliente, total: 0, docs: [] };
+    cur.total += f.total;
+    cur.docs.push({ ref: f.orden || f.nro || "", fecha: f.fecha, monto: r2(f.total) });
+    cm.set(cliente, cur);
+  }
+  const cxcDetalle = Array.from(cm.values()).map((c) => ({ ...c, total: r2(c.total) })).sort((a, b) => b.total - a.total);
+
+  // Facturas con pago mixto (2+ métodos distintos) — para especificar el split.
+  const mixtas: FacturaMixta[] = filas
+    .map((f) => ({ f, ms: metodosDe(f.formaPago) }))
+    .filter((x) => x.ms.length > 1)
+    .map(({ f, ms }) => ({ nro: f.orden || f.nro, fecha: f.fecha, cliente: f.cliente, total: r2(f.total), ventaNeta: r2(f.ventaNeta), impuesto: r2(f.impuesto), metodos: ms }));
+
+  return { filas, dias, porMetodo, cxcDetalle, mixtas, desde: dias[0]?.fecha ?? "", hasta: dias[dias.length - 1]?.fecha ?? "", totales };
 }

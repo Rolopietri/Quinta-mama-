@@ -59,7 +59,7 @@ export function PerdidaInsumoDialog({
     if (cocido) {
       const pct = Number(mermaPct);
       if (!Number.isFinite(pct) || pct < 0 || pct >= 100) {
-        setError("La merma por cocción debe estar entre 0 y 99%.");
+        setError("La merma por procesamiento debe estar entre 0 y 99%.");
         return;
       }
       cantidadCruda = c / (1 - pct / 100);
@@ -158,7 +158,7 @@ export function PerdidaInsumoDialog({
           {cocido && (
             <div className="mt-3 space-y-2">
               <label className="text-sm text-cacao block">
-                Merma por cocción (%)
+                Merma por procesamiento (%)
                 <input
                   type="number"
                   step="1"

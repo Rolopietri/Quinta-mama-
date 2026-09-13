@@ -439,6 +439,51 @@ export async function listComprasRango(desde: string, hasta: string): Promise<Co
   return out;
 }
 
+/** Compras PAGADAS que cuentan como egreso del mes [desde, hasta] por CAJA REAL:
+ *  su fecha efectiva es la de PAGO (fecha_pago). Las que no tienen fecha_pago
+ *  (datos viejos) cuentan por su fecha de compra, para no perderlas. Así cada
+ *  compra cuenta en un solo mes: el de su pago. Pagina el tope de 1000. */
+export async function listComprasEgresoMes(desde: string, hasta: string): Promise<Compra[]> {
+  const sb = createSupabaseBrowserClient();
+  // Dos consultas simples (más robustas que un .or anidado):
+  //  1) pagadas con fecha_pago dentro del mes (cuentan por fecha de pago).
+  //  2) pagadas SIN fecha_pago (dato viejo) con fecha de compra dentro del mes.
+  const [porPago, sinPago] = await Promise.all([
+    sb.from("compras").select("*").eq("pagada", true).gte("fecha_pago", desde).lte("fecha_pago", hasta),
+    sb.from("compras").select("*").eq("pagada", true).is("fecha_pago", null).gte("fecha", desde).lte("fecha", hasta),
+  ]);
+  if (porPago.error) throw porPago.error;
+  const seen = new Set<string>();
+  const out: Compra[] = [];
+  for (const r of [...(porPago.data ?? []), ...(sinPago.error ? [] : sinPago.data ?? [])] as CompraRow[]) {
+    if (seen.has(r.id)) continue;
+    seen.add(r.id);
+    out.push(rowToCompra(r));
+  }
+  return out;
+}
+
+/** Compras pendientes de pago (pagada=false), sin filtro de fecha — son deudas
+ *  vigentes. Ordenadas de más antigua a más nueva. Pagina el tope de 1000. */
+export async function listComprasPendientes(): Promise<Compra[]> {
+  const sb = createSupabaseBrowserClient();
+  const PAGE = 1000;
+  const out: Compra[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await sb
+      .from("compras")
+      .select("*")
+      .eq("pagada", false)
+      .order("fecha", { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    const rows = (data as CompraRow[]) ?? [];
+    out.push(...rows.map(rowToCompra));
+    if (rows.length < PAGE) break;
+  }
+  return out;
+}
+
 export async function createCompra(input: CompraInput): Promise<Compra> {
   const sb = createSupabaseBrowserClient();
   const { data, error } = await sb
@@ -485,11 +530,12 @@ export async function updateCompra(
 export async function marcarCompraPagada(
   id: string,
   pagada: boolean,
+  fechaPago?: string,
 ): Promise<void> {
   const sb = createSupabaseBrowserClient();
   const { error } = await sb
     .from("compras")
-    .update({ pagada, fecha_pago: pagada ? hoyISO() : null })
+    .update({ pagada, fecha_pago: pagada ? (fechaPago ?? hoyISO()) : null })
     .eq("id", id);
   if (error) throw error;
 }
@@ -501,11 +547,12 @@ export async function marcarFacturaPagada(
   numeroFactura: string,
   proveedorId: string | null,
   pagada: boolean,
+  fechaPago?: string,
 ): Promise<string[]> {
   const sb = createSupabaseBrowserClient();
   let q = sb
     .from("compras")
-    .update({ pagada, fecha_pago: pagada ? hoyISO() : null })
+    .update({ pagada, fecha_pago: pagada ? (fechaPago ?? hoyISO()) : null })
     .eq("numero_factura", numeroFactura);
   q = proveedorId ? q.eq("proveedor_id", proveedorId) : q.is("proveedor_id", null);
   const { data, error } = await q.select("id");
@@ -555,6 +602,30 @@ export async function listTasasBcvRango(desde: string, hasta: string): Promise<T
     paralelaBs: r.paralela_bs === null ? undefined : Number(r.paralela_bs),
     fuente: r.fuente ?? "bcv",
   }));
+}
+
+/** Tasa BCV aplicable a una fecha: la más reciente con fecha ≤ la pedida (el BCV
+ *  no publica fines de semana/feriados, así que se usa la última vigente). Si no
+ *  hay ninguna anterior, cae a la más antigua disponible. null si no hay tasas. */
+export async function getTasaBcvPorFecha(fecha: string): Promise<TasaBcv | null> {
+  const sb = createSupabaseBrowserClient();
+  const toTasa = (r: TasaRow): TasaBcv => ({
+    fecha: r.fecha,
+    usdBs: Number(r.usd_bs),
+    eurBs: r.eur_bs === null ? undefined : Number(r.eur_bs),
+    paralelaBs: r.paralela_bs === null ? undefined : Number(r.paralela_bs),
+    fuente: r.fuente ?? "bcv",
+  });
+  const enOAntes = await sb
+    .from("tasa_bcv").select("*").lte("fecha", fecha)
+    .order("fecha", { ascending: false }).limit(1).maybeSingle();
+  if (!enOAntes.error && enOAntes.data) return toTasa(enOAntes.data as TasaRow);
+  // Sin tasa anterior (fecha muy vieja): usa la más antigua que exista.
+  const masVieja = await sb
+    .from("tasa_bcv").select("*")
+    .order("fecha", { ascending: true }).limit(1).maybeSingle();
+  if (!masVieja.error && masVieja.data) return toTasa(masVieja.data as TasaRow);
+  return null;
 }
 
 export async function getTasaBcvActual(): Promise<TasaBcv | null> {

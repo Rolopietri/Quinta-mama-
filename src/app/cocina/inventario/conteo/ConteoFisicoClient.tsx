@@ -5,11 +5,18 @@
 // de cada uno al valor contado (RPC ajustar_stock_conteo, registra el ajuste).
 
 import { useEffect, useMemo, useState } from "react";
-import type { Insumo, Seccion } from "@/lib/types";
-import { SECCIONES, stockLibre } from "@/lib/types";
+import type { Insumo } from "@/lib/types";
+import { stockLibre } from "@/lib/types";
 import { listInsumos } from "@/lib/data/cocina";
 import { ajustarStockConteo } from "@/lib/data/stock-movimientos";
+import { ultimaVentaFecha } from "@/lib/data/ventas";
 import { ErrorBanner } from "@/components/ErrorBanner";
+
+// Formatea una fecha ISO (YYYY-MM-DD) a dd/mm/yyyy.
+function fFecha(iso: string): string {
+  const [y, m, d] = iso.split("-");
+  return d && m && y ? `${d}/${m}/${y}` : iso;
+}
 
 // Formatea una cantidad de stock: entero si aplica, si no hasta 2 decimales.
 function fNum(n: number): string {
@@ -23,26 +30,29 @@ function parse(v: string): number | null {
   const n = Number(s);
   return Number.isFinite(n) && n >= 0 ? n : null;
 }
-const seccionLabel = (s: Seccion) => SECCIONES.find((x) => x.value === s)?.label ?? s;
+// Categoría de compra del insumo (etiqueta para agrupar/filtrar el conteo).
+const catDe = (i: Insumo) => (i.categoriaCompra ?? "").trim() || "Sin categoría";
 
 export function ConteoFisicoClient() {
   const [items, setItems] = useState<Insumo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  const [filterSec, setFilterSec] = useState<Seccion | "todas">("todas");
+  const [filterCat, setFilterCat] = useState<string>("todas");
   const [soloDif, setSoloDif] = useState(false);
   // Conteos escritos por el usuario: insumoId -> texto del input.
   const [conteos, setConteos] = useState<Record<string, string>>({});
   const [guardando, setGuardando] = useState(false);
   const [resultado, setResultado] = useState<string | null>(null);
+  // Fecha de la última venta importada = "corte" del stock del sistema.
+  const [ultimaVenta, setUltimaVenta] = useState<string | null>(null);
 
   useEffect(() => {
     let cancel = false;
     (async () => {
       try {
-        const ins = await listInsumos();
-        if (!cancel) setItems(ins.filter((i) => i.activo));
+        const [ins, uv] = await Promise.all([listInsumos(), ultimaVentaFecha()]);
+        if (!cancel) { setItems(ins.filter((i) => i.activo)); setUltimaVenta(uv); }
       } catch (e) {
         if (!cancel) setError(e instanceof Error ? e.message : "Error cargando insumos");
       } finally {
@@ -59,10 +69,16 @@ export function ConteoFisicoClient() {
     return n - ins.stockTotal;
   }
 
+  // Categorías presentes (para el filtro).
+  const categoriasEnUso = useMemo(
+    () => Array.from(new Set(items.map(catDe))).sort((a, b) => a.localeCompare(b)),
+    [items],
+  );
+
   const filtrados = useMemo(() => {
     const q = search.trim().toLowerCase();
     return items
-      .filter((i) => filterSec === "todas" || i.seccion === filterSec || i.seccion === "ambos")
+      .filter((i) => filterCat === "todas" || catDe(i) === filterCat)
       .filter((i) => (q ? i.nombre.toLowerCase().includes(q) : true))
       .filter((i) => {
         if (!soloDif) return true;
@@ -71,16 +87,17 @@ export function ConteoFisicoClient() {
       })
       .sort((a, b) => a.nombre.localeCompare(b.nombre));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items, search, filterSec, soloDif, conteos]);
+  }, [items, search, filterCat, soloDif, conteos]);
 
-  // Agrupar por sección para contar estante por estante.
+  // Agrupar por categoría de insumo para contar por tipo de producto.
   const grupos = useMemo(() => {
-    const m = new Map<Seccion, Insumo[]>();
+    const m = new Map<string, Insumo[]>();
     filtrados.forEach((i) => {
-      if (!m.has(i.seccion)) m.set(i.seccion, []);
-      m.get(i.seccion)!.push(i);
+      const c = catDe(i);
+      if (!m.has(c)) m.set(c, []);
+      m.get(c)!.push(i);
     });
-    return Array.from(m.entries());
+    return Array.from(m.entries()).sort((a, b) => a[0].localeCompare(b[0]));
   }, [filtrados]);
 
   // Resumen: cuántos tienen conteo y cuántos difieren del stock actual.
@@ -128,6 +145,69 @@ export function ConteoFisicoClient() {
     );
   }
 
+  // Exporta la plantilla de conteo (.xlsx) con el stock actual: se llena la
+  // columna `conteo_fisico` afuera y se vuelve a importar. Empareja por `id`.
+  async function exportarPlantilla() {
+    setError(null);
+    try {
+      const XLSX = await import("xlsx");
+      const filas = [...items]
+        .sort((a, b) => catDe(a).localeCompare(catDe(b)) || a.nombre.localeCompare(b.nombre))
+        .map((i) => ({
+          id: i.id,
+          categoria: catDe(i),
+          nombre: i.nombre,
+          unidad_base: i.unidadBase,
+          total_sistema: i.stockTotal,
+          comprometido: i.stockComprometido,
+          libre_sistema: stockLibre(i),
+          conteo_fisico: "",
+        }));
+      const ws = XLSX.utils.json_to_sheet(filas);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "conteo");
+      XLSX.writeFile(wb, `Conteo_Insumos_${new Date().toISOString().slice(0, 7)}.xlsx`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo exportar la plantilla.");
+    }
+  }
+
+  // Importa un conteo desde el .xlsx (la plantilla llena). Empareja por `id`,
+  // lee la columna `conteo_fisico`, y PRE-LLENA el formulario (no guarda solo):
+  // el usuario revisa las diferencias abajo y le da "Guardar conteo".
+  async function importarConteo(file: File) {
+    setError(null); setResultado(null);
+    try {
+      const XLSX = await import("xlsx");
+      const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      if (!ws) throw new Error("El archivo no tiene ninguna hoja.");
+      const filas = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: "" });
+      const ids = new Set(items.map((i) => i.id));
+      const nuevos: Record<string, string> = {};
+      let ok = 0, sinValor = 0, noHallados = 0;
+      for (const r of filas) {
+        const id = String(r.id ?? r.ID ?? "").trim();
+        const val = parse(String(r.conteo_fisico ?? r.conteo ?? r.conteo_real ?? ""));
+        if (!id) continue;
+        if (val === null) { sinValor++; continue; }
+        if (!ids.has(id)) { noHallados++; continue; }
+        nuevos[id] = String(val);
+        ok++;
+      }
+      if (ok === 0) throw new Error("No encontré conteos válidos. Revisa que el archivo tenga las columnas 'id' y 'conteo_fisico'.");
+      setConteos((prev) => ({ ...prev, ...nuevos }));
+      setResultado(
+        `Cargué ${ok} conteo${ok === 1 ? "" : "s"} del Excel.` +
+          (noHallados ? ` ${noHallados} id(s) no coincidieron (insumo inactivo o borrado).` : "") +
+          (sinValor ? ` ${sinValor} sin valor (ignoradas).` : "") +
+          ` Revisa abajo y dale "Guardar conteo".`,
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo leer el archivo.");
+    }
+  }
+
   if (loading) {
     return <div className="rounded-2xl bg-white ring-1 ring-marfil p-10 text-center text-cacao-soft">Cargando insumos…</div>;
   }
@@ -138,6 +218,16 @@ export function ConteoFisicoClient() {
     <div className="space-y-4">
       {error && <ErrorBanner>{error}</ErrorBanner>}
 
+      {/* Corte de ventas: recordatorio de timing para que la merma sea exacta. */}
+      <div className="rounded-xl bg-[#FBF3E2] ring-1 ring-[#E8D9B0] px-3 py-2 text-[12px] text-[#7A5A18]">
+        {ultimaVenta ? (
+          <>Ventas importadas hasta el <b>{fFecha(ultimaVenta)}</b> — el stock del sistema refleja las ventas hasta esa fecha. </>
+        ) : (
+          <>Aún no hay ventas importadas. </>
+        )}
+        Para una merma exacta, cuenta <b>antes de abrir</b>, después de importar el día anterior (así el sistema y el estante coinciden).
+      </div>
+
       {/* Controles + resumen (sticky) */}
       <div className="sticky top-0 z-10 rounded-2xl bg-white/95 backdrop-blur ring-1 ring-marfil p-3 space-y-3">
         <div className="flex flex-wrap items-center gap-2">
@@ -147,14 +237,23 @@ export function ConteoFisicoClient() {
             placeholder="Buscar insumo…"
             className="flex-1 min-w-[160px] rounded-lg ring-1 ring-marfil px-3 py-2 text-sm"
           />
-          <select value={filterSec} onChange={(e) => setFilterSec(e.target.value as Seccion | "todas")} className={selCls}>
-            <option value="todas">Todas las secciones</option>
-            {SECCIONES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+          <select value={filterCat} onChange={(e) => setFilterCat(e.target.value)} className={selCls}>
+            <option value="todas">Todas las categorías</option>
+            {categoriasEnUso.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
           <label className="flex items-center gap-1.5 text-xs text-cacao-soft cursor-pointer">
             <input type="checkbox" checked={soloDif} onChange={(e) => setSoloDif(e.target.checked)} className="accent-cacao" />
             Solo con diferencia
           </label>
+        </div>
+        {/* Conteo por Excel: exportar plantilla → llenar 'conteo_fisico' → importar. */}
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" onClick={exportarPlantilla} className="rounded-lg ring-1 ring-marfil text-cacao px-3 py-1.5 text-[11px] uppercase tracking-widest hover:bg-marfil-soft">Exportar plantilla (Excel)</button>
+          <label className="rounded-lg ring-1 ring-marfil text-cacao px-3 py-1.5 text-[11px] uppercase tracking-widest hover:bg-marfil-soft cursor-pointer">
+            Importar conteo (Excel)
+            <input type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) importarConteo(f); e.target.value = ""; }} />
+          </label>
+          <span className="text-[10px] text-cacao-mute">Exporta → llena la columna <b>conteo_fisico</b> → importa. Empareja por id.</span>
         </div>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-xs text-cacao-soft">
@@ -186,10 +285,10 @@ export function ConteoFisicoClient() {
           {soloDif ? "Ningún insumo con diferencia." : "Sin insumos que coincidan."}
         </div>
       ) : (
-        grupos.map(([sec, list]) => (
-          <section key={sec} className="rounded-2xl bg-white ring-1 ring-marfil overflow-hidden">
+        grupos.map(([cat, list]) => (
+          <section key={cat} className="rounded-2xl bg-white ring-1 ring-marfil overflow-hidden">
             <header className="px-4 py-2.5 border-b border-marfil bg-marfil-soft/50">
-              <span className="font-display text-xs tracking-[0.3em] uppercase text-cacao">{seccionLabel(sec)}</span>
+              <span className="font-display text-xs tracking-[0.3em] uppercase text-cacao">{cat}</span>
               <span className="text-[11px] text-cacao-mute ml-2">{list.length}</span>
             </header>
             <div className="overflow-x-auto">

@@ -37,12 +37,17 @@ export async function POST(req: NextRequest) {
   if (!isFinite(monto) || monto <= 0) {
     return NextResponse.json({ error: "El monto debe ser mayor a 0." }, { status: 400 });
   }
+  // tipo "entrega" = pago de propina al personal → SALE del bolsillo de propinas
+  // (monto negativo). No es egreso ni toca ingresos: solo baja el saldo por
+  // entregar. "recibida" (por defecto) = propina que entró (monto positivo).
+  const esEntrega = b.tipo === "entrega";
   const fecha = typeof b.fecha === "string" && /^\d{4}-\d{2}-\d{2}$/.test(b.fecha) ? b.fecha : undefined;
   const moneda = b.moneda === "USD" || b.moneda === "Bs" ? (b.moneda as string) : "EUR";
   const nota = typeof b.nota === "string" && b.nota.trim() ? b.nota.trim() : null;
+  const signo = esEntrega ? -1 : 1;
   const { data, error } = await sb
     .from("admin_propina")
-    .insert({ fecha, monto: Math.round(monto * 100) / 100, moneda, fuente: "manual", nota })
+    .insert({ fecha, monto: signo * Math.round(monto * 100) / 100, moneda, fuente: esEntrega ? "entrega" : "manual", nota })
     .select("*")
     .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

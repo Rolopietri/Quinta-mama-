@@ -1,7 +1,9 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const PUBLIC_PATHS = ["/login", "/auth"];
+// Rutas sin sesión: el login y el portal de WiFi de invitados (el QR de las
+// mesas cae en /wifi y el formulario postea a /api/wifi/registro).
+const PUBLIC_PATHS = ["/login", "/auth", "/wifi", "/api/wifi/registro"];
 
 export async function updateSession(request: NextRequest) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;

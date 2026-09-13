@@ -329,12 +329,18 @@ export async function POST(req: NextRequest) {
     const g = clientes.find((c) => c.key === clave(nombre));
     if (!g) return NextResponse.json({ error: "No encontré ese cliente." }, { status: 400 });
     if (g.saldo_usd >= -0.005) return NextResponse.json({ error: "Ese cliente no tiene saldo a favor que ajustar." }, { status: 400 });
+    // motivo "sobrante" = el cliente pagó de más y no pidió vuelto (redondeo): la
+    // empresa se queda el excedente. El dinero YA está en ingresos (por el pago);
+    // esto solo cierra el falso "saldo a favor". Otros casos = ajuste genérico.
+    const esSobrante = texto(b.motivo) === "sobrante";
     const favorUsd = -g.saldo_usd; // positivo
     const tasa = await getTasaEurUsd(sb);
     const montoEur = tasa > 0 ? r2(favorUsd / tasa) : r2(favorUsd);
     const { error } = await sb.from("admin_cuenta_cobrar").insert({
       fecha: new Date().toISOString().slice(0, 10),
-      descripcion: "Ajuste: deudas ya saldadas (cuentas eliminadas)",
+      descripcion: esSobrante
+        ? "Sobrante de redondeo (pagó de más, sin vuelto)"
+        : "Ajuste: deudas ya saldadas (cuentas eliminadas)",
       deudor: g.cliente,
       ref: null,
       monto: montoEur,

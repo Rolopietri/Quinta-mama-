@@ -102,6 +102,22 @@ export type VentaInput = {
  * filas (que puede dejar una fecha incompleta en el borde), aquí cada fecha que
  * aparece trae todos sus ítems — así el total por día del historial es fiel.
  */
+/** Fecha (YYYY-MM-DD) de la venta real más reciente importada, o null si no hay.
+ *  Sirve como "corte" para el conteo físico: el stock del sistema refleja ventas
+ *  hasta esta fecha. */
+export async function ultimaVentaFecha(): Promise<string | null> {
+  const sb = createSupabaseBrowserClient();
+  const { data, error } = await sb
+    .from("ventas")
+    .select("fecha")
+    .eq("es_merma", false)
+    .order("fecha", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) return null;
+  return (data as { fecha: string } | null)?.fecha ?? null;
+}
+
 export async function listVentasDiasCompletos(dias = 30): Promise<Venta[]> {
   const sb = createSupabaseBrowserClient();
   // Paso 1: derivar las fechas distintas más recientes (columna liviana).

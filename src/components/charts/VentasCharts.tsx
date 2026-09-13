@@ -186,21 +186,24 @@ export function LineaEvolucion({
             />
           );
         })}
-        {/* etiquetas eje X */}
-        {puntos.map((p, i) =>
-          i % step === 0 || i === n - 1 ? (
+        {/* etiquetas eje X. La primera se ancla a la izquierda y la última a la
+            derecha para que no se salgan (y se corten) en los bordes del SVG. */}
+        {puntos.map((p, i) => {
+          if (!(i % step === 0 || i === n - 1)) return null;
+          const anchor = i === 0 ? "start" : i === n - 1 ? "end" : "middle";
+          return (
             <text
               key={i}
               x={x(i)}
               y={H - 8}
-              textAnchor="middle"
+              textAnchor={anchor}
               className="fill-cacao-mute"
               style={{ fontSize: 11 }}
             >
               {p.label}
             </text>
-          ) : null,
-        )}
+          );
+        })}
       </svg>
       {hover !== null && (() => {
         // Ancla el tooltip según dónde esté el punto para que NO se salga del

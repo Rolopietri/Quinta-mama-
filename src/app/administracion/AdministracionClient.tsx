@@ -7,8 +7,8 @@
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { totalesVentasPorMes } from "@/lib/data/ventas";
-import { listTasasBcvRango, listComprasRango } from "@/lib/data/cocina";
-import type { TasaBcv, Compra } from "@/lib/types";
+import { listTasasBcvRango, listComprasRango, listComprasEgresoMes, listComprasPendientes, listProveedores, listInsumos, marcarCompraPagada, marcarFacturaPagada, getTasaBcvPorFecha } from "@/lib/data/cocina";
+import type { TasaBcv, Compra, Proveedor as ProveedorCocina, Insumo } from "@/lib/types";
 import { AnalisisAdministrativo } from "./AnalisisAdministrativo";
 
 type Seccion = "proveedores" | "solicitudes" | "ingresos" | "analisis-ventas" | "cobrar" | "egresos" | "estado" | "historico";
@@ -34,6 +34,26 @@ export function AdministracionClient() {
       })
       .catch(() => setEstado("bloqueado"));
   }, []);
+
+  // Si la sesión expira mientras la página está abierta, cualquier llamada a
+  // /api/admin/* devuelve 401. En vez de un error críptico ("no autorizado"),
+  // volvemos a mostrar la puerta de contraseña para re-entrar sin perder nada.
+  useEffect(() => {
+    if (estado !== "abierto") return;
+    const orig = window.fetch;
+    window.fetch = async (...args: Parameters<typeof window.fetch>) => {
+      const res = await orig(...args);
+      try {
+        const input = args[0];
+        const url = typeof input === "string" ? input : input instanceof URL ? input.href : (input as Request).url;
+        if (res.status === 401 && url.includes("/api/admin/") && !url.includes("/api/admin/login")) {
+          setEstado("bloqueado");
+        }
+      } catch { /* noop */ }
+      return res;
+    };
+    return () => { window.fetch = orig; };
+  }, [estado]);
 
   if (estado === "cargando") return <p className="text-cacao-soft italic font-serif">Cargando…</p>;
   if (estado === "sin-config") return <SinConfig />;
@@ -438,8 +458,14 @@ function FormProveedor({
 // historial (pendiente → procesada). Moneda original + conversión a USD.
 
 const MONEDAS = ["Bs", "USD", "EUR"] as const;
-const METODOS = ["Transferencia", "Pago móvil", "Zelle", "Efectivo", "USDT", "Otro"] as const;
-const TASA_TIPOS = ["dólar", "del día", "promedio", "VNC", "USDT", "otra"] as const;
+const METODOS = ["Transferencia", "Pago Móvil", "Zelle", "Dólar", "Bolívares", "Otro"] as const;
+// Forma de pago que aparece entre paréntesis en la solicitud (ej. "75.00$ (BCV Dólar)").
+// "BCV Dólar" y "BCV Euro" toman su tasa automática por fecha; "Tasa particular"
+// se escribe a mano.
+const METODOS_SOLICITUD = ["BCV Dólar", "BCV Euro", "Tasa particular", "Zelle", "Transferencia", "Pago Móvil", "Efectivo", "Otro"] as const;
+// ¿La forma usa una tasa oficial del BCV (auto por fecha)?
+const esFormaBcvDolar = (f: string) => /bcv\s*d[oó]lar/i.test(f);
+const esFormaBcvEuro = (f: string) => /bcv\s*euro/i.test(f);
 
 type LineaForm = {
   uid: string;
@@ -476,8 +502,8 @@ function nuevaLinea(tipo: "proveedor" | "adicional"): LineaForm {
     datos_registrados: false,
     concepto: "",
     monto: "",
-    moneda: "Bs",
-    metodo: tipo === "proveedor" ? "Transferencia" : "",
+    moneda: "USD",
+    metodo: "Tasa BCV",
     tasa: "",
     tasa_tipo: "dólar",
     factura: "",
@@ -528,29 +554,45 @@ function equivUSD(monto: number | null, moneda: string, tasa: number | null): nu
   return null;
 }
 
+// Monto al estilo de la solicitud: "75.00$" / "1.200,00 Bs" / "50.00€".
+function montoSolicitud(m: number | null, moneda: string): string {
+  if (m == null) return "(sin monto)";
+  const n = m.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  if (moneda === "USD") return `${n}$`;
+  if (moneda === "EUR") return `${n}€`;
+  return `${n} ${moneda}`;
+}
+
+// Arma el texto de la solicitud tal como se envía (por WhatsApp). Formato:
+//   Pagos que necesitamos gestionar hoy:
+//
+//   1. Proveedor: <nombre>
+//   Monto: 75.00$ (Tasa BCV)         ← método/forma entre paréntesis
+//   Concepto: NR - 9983
+//   Datos Registrados                 ← o "Datos: <x>" / "Datos (Registrar): <x>"
+//
+//   2. <concepto>                     ← ítems sin proveedor (recargas, etc.)
+//   Monto: 80.00$ (Tasa BCV)
 function textoSolicitud(lineas: LineaForm[]): string {
-  const provs = lineas.filter((l) => l.tipo === "proveedor");
-  const adics = lineas.filter((l) => l.tipo === "adicional");
   const bloques: string[] = [];
-  provs.forEach((l, i) => {
+  lineas.forEach((l, i) => {
     const m = parseMonto(l.monto);
-    const b: string[] = [`${i + 1}. Proveedor: ${l.proveedor_nombre || "(sin nombre)"}`];
-    if (l.concepto) b.push(`Concepto: ${l.concepto}`);
-    b.push(`Monto: ${m != null ? fmtMonto(m, l.moneda) : "(sin monto)"}`);
-    if (l.metodo) b.push(`Método: ${l.metodo}`);
-    if (l.factura) b.push(`Factura: ${l.factura}`);
-    if (l.nota) b.push(`NOTA: ${l.nota}`);
-    b.push(l.datos_registrados ? "✓ Datos registrados" : "✕ Faltan datos");
+    let forma = l.metodo?.trim();
+    // "Tasa particular" muestra la tasa escrita (ej. "Tasa 45,20"); BCV/otros van tal cual.
+    if (/tasa particular/i.test(forma ?? "") && l.tasa?.trim()) forma = `Tasa ${l.tasa.trim()}`;
+    const b: string[] = [];
+    if (l.tipo === "proveedor") b.push(`${i + 1}. Proveedor: ${l.proveedor_nombre || "(sin nombre)"}`);
+    else b.push(`${i + 1}. ${l.concepto || "(concepto)"}`);
+    b.push(`Monto: ${montoSolicitud(m, l.moneda)}${forma ? ` (${forma})` : ""}`);
+    if (l.tipo === "proveedor" && l.concepto) b.push(`Concepto: ${l.concepto}`);
+    if (l.tipo === "proveedor") {
+      if (l.datos_registrados) b.push("Datos Registrados");
+      else if (/zelle/i.test(forma ?? "")) b.push(`Datos:${l.nota ? ` ${l.nota}` : ""}`);
+      else b.push(`Datos (Registrar):${l.nota ? ` ${l.nota}` : ""}`);
+    }
     bloques.push(b.join("\n"));
   });
-  if (adics.length) {
-    const items = adics.map((l) => {
-      const m = parseMonto(l.monto);
-      return `${l.concepto || "(concepto)"}: ${m != null ? fmtMonto(m, l.moneda) : "(sin monto)"}`;
-    });
-    bloques.push(["Adicionales:", ...items].join("\n"));
-  }
-  return bloques.join("\n\n");
+  return ["Pagos que necesitamos gestionar hoy:", "", bloques.join("\n\n")].join("\n");
 }
 
 function SeccionSolicitudes() {
@@ -577,6 +619,8 @@ function SeccionSolicitudes() {
 function NuevaSolicitud() {
   const [proveedores, setProveedores] = useState<Proveedor[]>([]);
   const [lineas, setLineas] = useState<LineaForm[]>([]);
+  const [fecha, setFecha] = useState(hoyISO());
+  const [tasaBcv, setTasaBcv] = useState<{ usdBs?: number; eurBs?: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [copiado, setCopiado] = useState(false);
@@ -596,8 +640,42 @@ function NuevaSolicitud() {
     return () => { a = false; };
   }, []);
 
+  // Tasa BCV (dólar y euro) de la fecha elegida — auto para las formas oficiales.
+  useEffect(() => {
+    let a = true;
+    getTasaBcvPorFecha(fecha).then((t) => { if (a) setTasaBcv(t ? { usdBs: t.usdBs, eurBs: t.eurBs } : null); }).catch(() => { if (a) setTasaBcv(null); });
+    return () => { a = false; };
+  }, [fecha]);
+
+  // Tasa que corresponde a una forma de pago (auto para BCV $/€, vacío para el resto).
+  const tasaDeForma = useCallback((forma: string): string => {
+    if (esFormaBcvDolar(forma)) return tasaBcv?.usdBs ? String(tasaBcv.usdBs) : "";
+    if (esFormaBcvEuro(forma)) return tasaBcv?.eurBs ? String(tasaBcv.eurBs) : "";
+    return "";
+  }, [tasaBcv]);
+
+  // Al cambiar la fecha (o cargar la tasa), re-aplica la tasa oficial a las líneas
+  // BCV. Las de "Tasa particular" u otras formas conservan lo que el usuario puso.
+  useEffect(() => {
+    (async () => {
+      setLineas((ls) => ls.map((l) => {
+        const auto = tasaDeForma(l.metodo);
+        return auto && auto !== l.tasa ? { ...l, tasa: auto } : l;
+      }));
+    })();
+  }, [tasaBcv, tasaDeForma]);
+
   function actualizar(uid: string, cambios: Partial<LineaForm>) {
-    setLineas((ls) => ls.map((l) => (l.uid === uid ? { ...l, ...cambios } : l)));
+    setLineas((ls) => ls.map((l) => {
+      if (l.uid !== uid) return l;
+      const next = { ...l, ...cambios };
+      // Si cambió la forma de pago, ajusta la tasa: auto para BCV, manual para el resto.
+      if (cambios.metodo !== undefined) {
+        const auto = tasaDeForma(cambios.metodo);
+        if (auto) next.tasa = auto;
+      }
+      return next;
+    }));
   }
   function elegirProveedor(uid: string, id: string) {
     const p = proveedores.find((x) => x.id === id);
@@ -670,9 +748,16 @@ function NuevaSolicitud() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap gap-2">
-        <button type="button" onClick={() => setLineas((l) => [...l, nuevaLinea("proveedor")])} className="rounded-lg bg-cacao text-white px-4 py-2 text-xs uppercase tracking-widest hover:bg-terracotta">+ Agregar proveedor al pago</button>
-        <button type="button" onClick={() => setLineas((l) => [...l, nuevaLinea("adicional")])} className="rounded-lg ring-1 ring-marfil text-cacao px-4 py-2 text-xs uppercase tracking-widest hover:bg-marfil-soft">+ Concepto adicional</button>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => setLineas((l) => [...l, nuevaLinea("proveedor")])} className="rounded-lg bg-cacao text-white px-4 py-2 text-xs uppercase tracking-widest hover:bg-terracotta">+ Agregar proveedor al pago</button>
+          <button type="button" onClick={() => setLineas((l) => [...l, nuevaLinea("adicional")])} className="rounded-lg ring-1 ring-marfil text-cacao px-4 py-2 text-xs uppercase tracking-widest hover:bg-marfil-soft">+ Concepto adicional</button>
+        </div>
+        <label className="text-[11px] text-cacao-soft">
+          Fecha (para la tasa BCV)
+          <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} className="mt-0.5 block rounded-lg ring-1 ring-marfil px-2 py-1.5 text-sm text-cacao" />
+          <span className="block text-[10px] text-cacao-mute mt-0.5">{tasaBcv?.usdBs ? `BCV $ ${tasaBcv.usdBs} · € ${tasaBcv.eurBs ?? "—"}` : "Sin tasa BCV para esa fecha"}</span>
+        </label>
       </div>
 
       {error && <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419]">{error}</div>}
@@ -689,6 +774,7 @@ function NuevaSolicitud() {
               key={l.uid}
               linea={l}
               indice={i + 1}
+              fecha={fecha}
               proveedores={proveedores}
               onCambio={(c) => actualizar(l.uid, c)}
               onElegirProveedor={(id) => elegirProveedor(l.uid, id)}
@@ -728,6 +814,7 @@ function NuevaSolicitud() {
 function LineaEditor({
   linea,
   indice,
+  fecha,
   proveedores,
   onCambio,
   onElegirProveedor,
@@ -735,6 +822,7 @@ function LineaEditor({
 }: {
   linea: LineaForm;
   indice: number;
+  fecha: string;
   proveedores: Proveedor[];
   onCambio: (c: Partial<LineaForm>) => void;
   onElegirProveedor: (id: string) => void;
@@ -749,26 +837,31 @@ function LineaEditor({
         </span>
         <div className="flex items-center gap-2">
           {esProv && (
-            <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] uppercase tracking-widest ${linea.datos_registrados ? "bg-[#F1F4ED] text-[#2F4A1F]" : "bg-[#F9EBE7] text-[#7A2419]"}`}>
-              <span className={`h-1.5 w-1.5 rounded-full ${linea.datos_registrados ? "bg-[#4B7A2F]" : "bg-[#C0563F]"}`} />
-              {linea.datos_registrados ? "Datos registrados" : "Faltan datos"}
-            </span>
+            <label className="inline-flex items-center gap-1.5 text-[11px] text-cacao-soft cursor-pointer select-none">
+              <input type="checkbox" checked={linea.datos_registrados} onChange={(e) => onCambio({ datos_registrados: e.target.checked })} className="accent-terracotta" />
+              Datos registrados
+            </label>
           )}
           <button type="button" onClick={onQuitar} className="text-cacao-soft hover:text-terracotta text-sm" aria-label="Quitar">✕</button>
         </div>
       </div>
 
       {esProv && (
-        <div>
-          <label className="block font-display text-[10px] tracking-[0.2em] uppercase text-cacao-mute mb-1">Proveedor</label>
-          <select
-            value={linea.proveedor_id ?? ""}
-            onChange={(e) => onElegirProveedor(e.target.value)}
-            className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao bg-white"
-          >
-            <option value="">— Elegir de la base —</option>
-            {proveedores.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
-          </select>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <label className="block font-display text-[10px] tracking-[0.2em] uppercase text-cacao-mute mb-1">Proveedor (de la base)</label>
+            <select
+              value={linea.proveedor_id ?? ""}
+              onChange={(e) => onElegirProveedor(e.target.value)}
+              className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao bg-white"
+            >
+              <option value="">— Nuevo / no registrado —</option>
+              {proveedores.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+            </select>
+          </div>
+          <Campo label="Nombre del proveedor">
+            <input value={linea.proveedor_nombre} onChange={(e) => onCambio({ proveedor_nombre: e.target.value })} placeholder="Escríbelo si no está en la base" className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
+          </Campo>
         </div>
       )}
 
@@ -788,35 +881,38 @@ function LineaEditor({
         </div>
       </div>
 
-      {esProv && (
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Campo label="Método de pago">
-            <select value={linea.metodo} onChange={(e) => onCambio({ metodo: e.target.value })} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
-              {METODOS.map((m) => <option key={m} value={m}>{m}</option>)}
-            </select>
-          </Campo>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Campo label="Forma de pago (aparece en paréntesis)">
+          <select value={linea.metodo} onChange={(e) => onCambio({ metodo: e.target.value })} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
+            {METODOS_SOLICITUD.map((m) => <option key={m} value={m}>{m}</option>)}
+          </select>
+        </Campo>
+        {esProv && (
           <Campo label="Factura (opcional)">
             <input value={linea.factura} onChange={(e) => onCambio({ factura: e.target.value })} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
           </Campo>
-        </div>
+        )}
+      </div>
+
+      {/* Tasa según la forma: BCV $/€ es automática por fecha; particular es manual. */}
+      {(esFormaBcvDolar(linea.metodo) || esFormaBcvEuro(linea.metodo)) && (
+        <p className="text-[12px] text-cacao-soft">
+          {linea.tasa
+            ? <>Tasa {esFormaBcvEuro(linea.metodo) ? "BCV Euro" : "BCV Dólar"} del {fmtFecha(fecha)}: <span className="text-cacao tabular-nums">Bs {linea.tasa}</span> · automática</>
+            : <span className="text-[#7A2419]">No hay tasa BCV cargada para {fmtFecha(fecha)}. Cárgala o usa “Tasa particular”.</span>}
+        </p>
+      )}
+      {/tasa particular/i.test(linea.metodo) && (
+        <Campo label="Tasa particular (Bs por USD/EUR)">
+          <input inputMode="decimal" value={linea.tasa} onChange={(e) => onCambio({ tasa: e.target.value })} placeholder="Ej: 45,20" className="w-full sm:w-56 border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
+        </Campo>
       )}
 
-      {linea.moneda !== "USD" && (
-        <div className="grid grid-cols-2 gap-2">
-          <Campo label="Tasa a USD (opcional)">
-            <input inputMode="decimal" value={linea.tasa} onChange={(e) => onCambio({ tasa: e.target.value })} placeholder={linea.moneda === "Bs" ? "Bs por USD" : "USD por EUR"} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
-          </Campo>
-          <Campo label="Tipo de tasa">
-            <select value={linea.tasa_tipo} onChange={(e) => onCambio({ tasa_tipo: e.target.value })} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
-              {TASA_TIPOS.map((t) => <option key={t} value={t}>{t}</option>)}
-            </select>
-          </Campo>
-        </div>
+      {esProv && (
+        <Campo label={linea.datos_registrados ? "Datos (opcional — el proveedor ya está registrado)" : "Datos para registrar (Rif/banco/cuenta) o email de Zelle"}>
+          <textarea value={linea.nota} onChange={(e) => onCambio({ nota: e.target.value })} rows={linea.datos_registrados ? 1 : 3} placeholder={/zelle/i.test(linea.metodo) ? "correo@ejemplo.com" : "Rif. J-… · Banco · N° de cuenta"} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao resize-y" />
+        </Campo>
       )}
-
-      <Campo label="Nota (opcional)">
-        <input value={linea.nota} onChange={(e) => onCambio({ nota: e.target.value })} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
-      </Campo>
     </div>
   );
 }
@@ -1005,6 +1101,18 @@ type Egreso = {
   factura: string | null;
   nota: string | null;
   solicitud_linea_id: string | null;
+  pagada?: boolean | null;
+  fecha_pago?: string | null;
+  flete?: number | null;
+};
+
+// Una cuenta por pagar en el panel de Egresos: compra de Cocina pendiente
+// (agrupada por factura) o egreso manual pendiente.
+type CuentaPagar = {
+  key: string; tipo: "compra" | "egreso"; ids: string[]; fecha: string;
+  titulo: string; detalle: string; usd: number;
+  monto?: number | null; moneda?: string | null; // moneda/monto originales (egreso)
+  numeroFactura?: string | null; proveedorId?: string | null; // para compras
 };
 
 // Confirmar pago de una solicitud pendiente → registrar egresos y marcar procesada.
@@ -1160,15 +1268,20 @@ function EgresosMes() {
   const [mes, setMes] = useState<string>(mesActualISO());
   const [egresos, setEgresos] = useState<Egreso[]>([]);
   const [compras, setCompras] = useState<Compra[]>([]); // compras de insumos (Cocina) reflejadas
+  const [comprasPend, setComprasPend] = useState<Compra[]>([]); // compras por pagar (todas)
+  const [egresosPend, setEgresosPend] = useState<Egreso[]>([]); // cuentas por pagar manuales
+  const [provCocina, setProvCocina] = useState<ProveedorCocina[]>([]);
+  const [insumos, setInsumos] = useState<Insumo[]>([]);
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [proveedores, setProveedores] = useState<Proveedor[]>([]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
-  const [modo, setModo] = useState<"lista" | "form">("lista");
+  const [modo, setModo] = useState<"lista" | "form" | "porpagar">("lista");
   const [editando, setEditando] = useState<Egreso | null>(null);
   const [reclasificando, setReclasificando] = useState<string | null>(null);
   const [mostrarClasif, setMostrarClasif] = useState(false);
+  const [cuentaPagar, setCuentaPagar] = useState<CuentaPagar | null>(null);
   const [tick, setTick] = useState(0);
   const recargar = useCallback(() => setTick((t) => t + 1), []);
 
@@ -1178,16 +1291,24 @@ function EgresosMes() {
       try {
         const [y, m] = mes.split("-").map((x) => parseInt(x, 10));
         const finMes = `${mes}-${String(new Date(y, m, 0).getDate()).padStart(2, "0")}`;
-        const [re, rc, rp, cp] = await Promise.all([
-          fetch(`/api/admin/egresos?mes=${mes}`, { cache: "no-store" }),
+        const [re, rc, rp, rpe, cp, cpend, pcoc, ins] = await Promise.all([
+          fetch(`/api/admin/egresos?mesPago=${mes}`, { cache: "no-store" }),
           fetch("/api/admin/categorias", { cache: "no-store" }),
           fetch("/api/admin/proveedores", { cache: "no-store" }),
-          listComprasRango(`${mes}-01`, finMes).catch(() => [] as Compra[]),
+          fetch("/api/admin/egresos?pendientes=1", { cache: "no-store" }),
+          listComprasEgresoMes(`${mes}-01`, finMes).catch(() => [] as Compra[]),
+          listComprasPendientes().catch(() => [] as Compra[]),
+          listProveedores().catch(() => [] as ProveedorCocina[]),
+          listInsumos().catch(() => [] as Insumo[]),
         ]);
-        const [de, dc, dp] = await Promise.all([re.json(), rc.json(), rp.json()]);
+        const [de, dc, dp, dpe] = await Promise.all([re.json(), rc.json(), rp.json(), rpe.json()]);
         if (a) {
           setEgresos(de.egresos ?? []);
+          setEgresosPend(dpe.egresos ?? []);
           setCompras(cp);
+          setComprasPend(cpend);
+          setProvCocina(pcoc);
+          setInsumos(ins);
           setCategorias(dc.categorias ?? []);
           setProveedores(dp.proveedores ?? []);
         }
@@ -1201,18 +1322,87 @@ function EgresosMes() {
   }, [mes, tick]);
 
   // Compras de insumos (Cocina) reflejadas como egresos en $ (solo lectura).
+  // CAJA REAL: `compras` ya viene filtrado a las PAGADAS que cuentan en el mes por
+  // su fecha de PAGO (una factura vieja pagada este mes aparece este mes).
   const comprasEgreso: Egreso[] = compras
     .filter((c) => (c.precioTotalUsd ?? 0) > 0.005)
-    .map((c) => ({
-      id: `compra:${c.id}`, fecha: c.fecha, concepto: "Compra de insumos", categoria_id: null,
-      categoria_nombre: "Insumos (Cocina)", clasificacion: "variable",
-      proveedor_id: null, proveedor_nombre: null,
-      monto: c.precioTotalUsd, moneda: "USD", tasa: null, monto_usd: c.precioTotalUsd,
-      metodo: c.modalidadPago ?? null, factura: null, nota: null, solicitud_linea_id: null,
-    }) as unknown as Egreso);
-  const egresosAll: Egreso[] = [...egresos, ...comprasEgreso]
+    .map((c) => {
+      const prov = c.proveedorId ? provCocina.find((p) => p.id === c.proveedorId)?.nombre ?? null : null;
+      const ins = insumos.find((i) => i.id === c.insumoId)?.nombre;
+      return {
+        id: `compra:${c.id}`, fecha: c.fechaPago ?? c.fecha,
+        concepto: `Compra Cocina${c.numeroFactura ? ` · Factura ${c.numeroFactura}` : ins ? ` · ${ins}` : ""}`,
+        categoria_id: null, categoria_nombre: "Insumos (Cocina)", clasificacion: "variable",
+        proveedor_id: null, proveedor_nombre: prov,
+        monto: c.precioTotalUsd, moneda: "USD", tasa: null, monto_usd: c.precioTotalUsd,
+        metodo: c.modalidadPago ?? null, factura: c.numeroFactura ?? null, nota: null, solicitud_linea_id: null,
+      } as unknown as Egreso;
+    });
+  // Egresos manuales pagados del mes (caja real): los pendientes no cuentan.
+  const egresosPagados = egresos.filter((e) => e.pagada !== false);
+  const egresosAll: Egreso[] = [...egresosPagados, ...comprasEgreso]
     .sort((a2, b2) => (b2.fecha ?? "").localeCompare(a2.fecha ?? ""));
   const esCocina = (e: Egreso) => e.id.startsWith("compra:");
+  const nombreInsumo = (id: string) => insumos.find((i) => i.id === id)?.nombre ?? "insumo";
+  const nombreProvCocina = (id?: string) => (id ? provCocina.find((p) => p.id === id)?.nombre : null) ?? null;
+
+  // ── Cuentas por pagar: compras de Cocina pendientes (agrupadas por factura) +
+  //    egresos manuales pendientes. Todo en USD para el total "por pagar". ──
+  const cuentasPagar: CuentaPagar[] = (() => {
+    const out: CuentaPagar[] = [];
+    // Compras pendientes agrupadas por (proveedor + nº de factura). Sin factura → individual.
+    const grupos = new Map<string, Compra[]>();
+    for (const c of comprasPend) {
+      const k = c.numeroFactura ? `f:${c.proveedorId ?? "-"}|${c.numeroFactura}` : `c:${c.id}`;
+      const arr = grupos.get(k) ?? []; arr.push(c); grupos.set(k, arr);
+    }
+    for (const [k, arr] of grupos) {
+      const usd = arr.reduce((s, c) => s + (c.precioTotalUsd ?? 0), 0);
+      if (usd <= 0.005) continue;
+      const prov = nombreProvCocina(arr[0].proveedorId);
+      const fact = arr[0].numeroFactura;
+      const items = arr.map((c) => nombreInsumo(c.insumoId)).slice(0, 3).join(", ");
+      out.push({
+        key: `compra:${k}`, tipo: "compra", ids: arr.map((c) => c.id),
+        fecha: arr.map((c) => c.fecha).sort()[0],
+        titulo: prov ? `${prov}${fact ? ` · Factura ${fact}` : ""}` : `Compra de insumos${fact ? ` · Factura ${fact}` : ""}`,
+        detalle: `${items}${arr.length > 3 ? "…" : ""} · ${arr.length} línea${arr.length === 1 ? "" : "s"} (Cocina)`,
+        usd, monto: usd, moneda: "USD",
+        numeroFactura: fact ?? null, proveedorId: arr[0].proveedorId ?? null,
+      });
+    }
+    // Egresos manuales pendientes.
+    for (const e of egresosPend) {
+      const usd = e.monto_usd ?? 0;
+      out.push({
+        key: `egreso:${e.id}`, tipo: "egreso", ids: [e.id], fecha: e.fecha,
+        titulo: e.proveedor_nombre || e.concepto || "Cuenta por pagar",
+        detalle: [e.concepto && e.proveedor_nombre ? e.concepto : null, e.categoria_nombre].filter(Boolean).join(" · ") || "Manual",
+        usd, monto: e.monto, moneda: e.moneda,
+      });
+    }
+    return out.sort((x, z) => (x.fecha ?? "").localeCompare(z.fecha ?? ""));
+  })();
+  const totalPorPagarUSD = cuentasPagar.reduce((s, c) => s + c.usd, 0);
+
+  // Pagar una cuenta con los datos del modal (fecha/método/monto). Compras → marca
+  // pagada la factura/línea con esa fecha; egreso → PATCH pagar (actualiza monto/
+  // método/tasa). Lanza el error para que el modal lo muestre; al lograrlo, cierra.
+  async function pagarCuenta(c: CuentaPagar, det: { fecha: string; metodo: string; monto?: number | null; moneda?: string | null; tasa?: number | null }) {
+    if (c.tipo === "compra") {
+      if (c.numeroFactura) await marcarFacturaPagada(c.numeroFactura, c.proveedorId ?? null, true, det.fecha);
+      else for (const id of c.ids) await marcarCompraPagada(id, true, det.fecha);
+    } else {
+      const r = await fetch("/api/admin/egresos", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pagar: true, id: c.ids[0], fecha_pago: det.fecha, metodo: det.metodo, monto: det.monto, moneda: det.moneda, tasa: det.tasa }),
+      });
+      if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || "No se pudo pagar."); }
+    }
+    setMsg("Cuenta pagada. Ya cuenta como egreso del mes.");
+    setCuentaPagar(null);
+    recargar();
+  }
 
   const totalUSD = egresosAll.reduce((s, e) => s + (e.monto_usd ?? 0), 0);
   const fijasUSD = egresosAll.filter((e) => e.clasificacion === "fija").reduce((s, e) => s + (e.monto_usd ?? 0), 0);
@@ -1245,15 +1435,15 @@ function EgresosMes() {
     }
   }
 
-  if (modo === "form") {
+  if (modo === "form" || modo === "porpagar") {
     return (
       <FormEgreso
         inicial={editando}
-        mes={mes}
         categorias={categorias}
         proveedores={proveedores}
+        porPagar={modo === "porpagar"}
         onCancelar={() => { setModo("lista"); setEditando(null); }}
-        onGuardado={(esEdicion) => { setModo("lista"); setEditando(null); setMsg(esEdicion ? "Egreso actualizado." : "Egreso registrado."); recargar(); }}
+        onGuardado={(esEdicion) => { setModo("lista"); setEditando(null); setMsg(esEdicion ? "Egreso actualizado." : modo === "porpagar" ? "Cuenta por pagar registrada." : "Egreso registrado."); recargar(); }}
       />
     );
   }
@@ -1266,18 +1456,52 @@ function EgresosMes() {
           <span className="font-cinzel text-base text-cacao min-w-[9rem] text-center">{nombreMes(mes)}</span>
           <button type="button" onClick={() => { setCargando(true); setMes((m) => moverMes(m, 1)); }} className="rounded-lg ring-1 ring-marfil px-2.5 py-1.5 text-cacao hover:bg-marfil-soft" aria-label="Mes siguiente">→</button>
         </div>
-        <button type="button" onClick={() => { setEditando(null); setModo("form"); }} className="rounded-lg bg-cacao text-white px-4 py-2 text-xs uppercase tracking-widest hover:bg-terracotta">+ Registrar egreso</button>
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={() => { setEditando(null); setModo("porpagar"); }} className="rounded-lg ring-1 ring-cacao text-cacao px-4 py-2 text-xs uppercase tracking-widest hover:bg-marfil-soft">+ Cuenta por pagar</button>
+          <button type="button" onClick={() => { setEditando(null); setModo("form"); }} className="rounded-lg bg-cacao text-white px-4 py-2 text-xs uppercase tracking-widest hover:bg-terracotta">+ Registrar egreso</button>
+        </div>
       </div>
 
       {error && <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419]">{error}</div>}
       {msg && <div className="rounded-lg bg-[#F1F4ED] ring-1 ring-[#C9D6BC] p-3 text-sm text-[#2F4A1F]">{msg}</div>}
 
-      <div className="grid grid-cols-3 gap-3">
+      {cuentaPagar && <ModalPago cuenta={cuentaPagar} onCerrar={() => setCuentaPagar(null)} onPagar={pagarCuenta} />}
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <ResumenCaja titulo="Total del mes" valor={fmtMonto(totalUSD, "USD")} fuerte />
         <ResumenCaja titulo="Fijas" valor={fmtMonto(fijasUSD, "USD")} />
         <ResumenCaja titulo="Variables" valor={fmtMonto(variablesUSD, "USD")} />
+        <ResumenCaja titulo="Por pagar" valor={fmtMonto(totalPorPagarUSD, "USD")} />
       </div>
-      {sinTasa && <p className="text-[11px] text-cacao-mute">Hay egresos sin tasa: no se suman al total en USD hasta que les pongas la tasa.</p>}
+      <p className="text-[11px] text-cacao-mute">El total del mes es caja real: solo lo pagado. Lo pendiente está en “Cuentas por pagar”.{sinTasa ? " Hay egresos sin tasa: no se suman al total en USD hasta que les pongas la tasa." : ""}</p>
+
+      {/* ── Cuentas por pagar ─────────────────────────────────── */}
+      <section className="rounded-2xl bg-white ring-1 ring-marfil p-4">
+        <div className="flex items-center justify-between gap-2 mb-1">
+          <h3 className="font-cinzel text-base text-cacao">Cuentas por pagar</h3>
+          {cuentasPagar.length > 0 && <span className="rounded-full bg-[#FBF3E2] text-[#7A5A18] ring-1 ring-[#E7D3A1] px-2.5 py-0.5 text-[10px] uppercase tracking-widest">{cuentasPagar.length} · {fmtMonto(totalPorPagarUSD, "USD")}</span>}
+        </div>
+        <p className="text-[11px] text-cacao-mute mb-3">Compras de Cocina pendientes y cuentas manuales que aún no has pagado. Al marcar “Pagar”, cuenta como egreso del mes.</p>
+        {cuentasPagar.length === 0 ? (
+          <p className="text-sm text-cacao-soft italic py-2">Nada pendiente por pagar. ✓</p>
+        ) : (
+          <div className="rounded-xl ring-1 ring-marfil overflow-hidden divide-y divide-marfil">
+            {cuentasPagar.map((c) => (
+              <div key={c.key} className="flex items-center gap-3 px-3 py-2">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-cacao text-sm truncate">{c.titulo}</span>
+                    {c.tipo === "compra" && <span className="rounded-full bg-marfil-soft text-cacao-soft ring-1 ring-marfil px-1.5 py-0.5 text-[9px] uppercase tracking-widest shrink-0">Cocina</span>}
+                  </div>
+                  <p className="text-[11px] text-cacao-mute truncate">{fmtFecha(c.fecha)} · {c.detalle}</p>
+                </div>
+                <span className="tabular-nums text-cacao text-sm whitespace-nowrap">{fmtMonto(c.usd, "USD")}</span>
+                <button type="button" onClick={() => setCuentaPagar(c)} className="rounded-lg bg-cacao text-white px-3 py-1.5 text-[11px] uppercase tracking-widest hover:bg-terracotta shrink-0">Pagar</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
 
       {/* Clasificar egresos: asigna/cambia la categoría de cada egreso cargado. */}
       {egresos.length > 0 && (() => {
@@ -1297,7 +1521,7 @@ function EgresosMes() {
                 <p className="text-[12px] text-cacao-soft mb-2">Asigna la categoría de cada egreso cargado (sin categoría primero). Se guarda al instante y se refleja en el análisis.</p>
                 <div className="rounded-xl ring-1 ring-marfil overflow-hidden max-h-[28rem] overflow-y-auto">
                   <table className="w-full text-xs">
-                    <thead className="sticky top-0 bg-white"><tr className="text-cacao-mute uppercase tracking-widest text-left"><th className="py-1.5 px-2 font-normal">Fecha</th><th className="py-1.5 px-2 font-normal">Concepto / Proveedor</th><th className="py-1.5 px-2 font-normal text-right">Monto</th><th className="py-1.5 px-2 font-normal">Categoría</th></tr></thead>
+                    <thead><tr className="text-cacao-mute uppercase tracking-widest text-left"><th className="sticky top-0 z-10 bg-white py-1.5 px-2 font-normal">Fecha</th><th className="sticky top-0 z-10 bg-white py-1.5 px-2 font-normal">Concepto / Proveedor</th><th className="sticky top-0 z-10 bg-white py-1.5 px-2 font-normal text-right">Monto</th><th className="sticky top-0 z-10 bg-white py-1.5 px-2 font-normal">Categoría</th></tr></thead>
                     <tbody>
                       {ordenados.map((e) => (
                         <tr key={e.id} className={`border-t border-marfil ${!e.categoria_id ? "bg-amber-50/50" : ""}`}>
@@ -1377,34 +1601,120 @@ function ResumenCaja({ titulo, valor, sub, fuerte }: { titulo: string; valor: st
   );
 }
 
+// Modal para PAGAR una cuenta por pagar: pide fecha, método y (en egresos) monto/
+// moneda/tasa antes de marcarla pagada. En compras de Cocina el monto viene de
+// Cocina, así que solo se elige la fecha de pago.
+function ModalPago({ cuenta, onCerrar, onPagar }: {
+  cuenta: CuentaPagar;
+  onCerrar: () => void;
+  onPagar: (c: CuentaPagar, det: { fecha: string; metodo: string; monto?: number | null; moneda?: string | null; tasa?: number | null }) => Promise<void>;
+}) {
+  const esCompra = cuenta.tipo === "compra";
+  const [fecha, setFecha] = useState(hoyISO());
+  const [metodo, setMetodo] = useState("Transferencia");
+  const [moneda, setMoneda] = useState(cuenta.moneda || "Bs");
+  const [montoStr, setMontoStr] = useState(cuenta.monto != null ? String(cuenta.monto) : "");
+  const [tasaStr, setTasaStr] = useState("");
+  const [guardando, setGuardando] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function confirmar() {
+    setError(null);
+    let det: { fecha: string; metodo: string; monto?: number | null; moneda?: string | null; tasa?: number | null };
+    if (esCompra) {
+      det = { fecha, metodo };
+    } else {
+      const monto = parseMonto(montoStr);
+      if (monto == null || monto <= 0) { setError("Pon el monto pagado."); return; }
+      det = { fecha, metodo, monto, moneda, tasa: moneda === "Bs" ? parseTasa(tasaStr) : null };
+    }
+    setGuardando(true);
+    try {
+      await onPagar(cuenta, det);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo registrar el pago.");
+      setGuardando(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30" onClick={onCerrar}>
+      <div className="w-full max-w-md rounded-2xl bg-white ring-1 ring-marfil p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
+        <h2 className="font-display text-xs tracking-[0.3em] uppercase text-cacao-mute">Registrar pago</h2>
+        <div className="rounded-xl bg-marfil-soft/60 ring-1 ring-marfil px-3 py-2">
+          <p className="text-sm text-cacao">{cuenta.titulo}</p>
+          <p className="text-[11px] text-cacao-mute">{cuenta.detalle} · {fmtMonto(cuenta.usd, "USD")}</p>
+        </div>
+        {error && <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-2.5 text-sm text-[#7A2419]">{error}</div>}
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Campo label="Fecha de pago"><input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" /></Campo>
+          <Campo label="Método de pago">
+            <select value={metodo} onChange={(e) => setMetodo(e.target.value)} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
+              {METODOS.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </Campo>
+        </div>
+        {esCompra ? (
+          <p className="text-[11px] text-cacao-mute">Compra de Cocina: el monto ({fmtMonto(cuenta.usd, "USD")}) y su detalle vienen del módulo de Cocina. Aquí solo confirmas la fecha y el método de pago.</p>
+        ) : (
+          <div className="grid grid-cols-3 gap-2">
+            <Campo label="Monto"><input inputMode="decimal" value={montoStr} onChange={(e) => setMontoStr(e.target.value)} placeholder="0,00" className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" /></Campo>
+            <Campo label="Moneda">
+              <select value={moneda} onChange={(e) => setMoneda(e.target.value)} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
+                {MONEDAS.map((m) => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </Campo>
+            <Campo label="Tasa a USD">
+              <input inputMode="decimal" value={tasaStr} onChange={(e) => setTasaStr(e.target.value)} disabled={moneda === "USD"} placeholder={moneda === "Bs" ? "BCV del día" : moneda === "USD" ? "—" : ""} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao disabled:bg-marfil-soft" />
+            </Campo>
+          </div>
+        )}
+        {!esCompra && moneda === "Bs" && !parseTasa(tasaStr) && <p className="text-[11px] text-cacao-mute">Si dejas la tasa vacía, se usa la tasa BCV ($) del día de pago.</p>}
+        <div className="flex gap-2 pt-1">
+          <button type="button" onClick={confirmar} disabled={guardando} className="rounded-lg bg-cacao text-white px-5 py-2.5 text-xs uppercase tracking-widest hover:bg-terracotta disabled:bg-marfil disabled:text-cacao-mute">{guardando ? "Pagando…" : "Registrar pago"}</button>
+          <button type="button" onClick={onCerrar} className="rounded-lg ring-1 ring-marfil text-cacao px-5 py-2.5 text-xs uppercase tracking-widest">Cancelar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function FormEgreso({
   inicial,
-  mes,
   categorias,
   proveedores,
   onGuardado,
   onCancelar,
+  porPagar = false,
 }: {
   inicial: Egreso | null;
-  mes: string;
   categorias: Categoria[];
   proveedores: Proveedor[];
   onGuardado: (esEdicion: boolean) => void;
   onCancelar: () => void;
+  /** true = registra una CUENTA POR PAGAR (pagada=false): no cuenta como egreso
+   *  hasta que se pague desde el panel "Cuentas por pagar". */
+  porPagar?: boolean;
 }) {
   const esEdicion = !!inicial;
+  // `monto` en el form es la BASE (bienes) sin flete; el guardado suma el flete.
+  // En edición, monto guardado = base + flete → se recupera la base restando.
+  const fleteIni = inicial?.flete ?? 0;
+  const baseIni = inicial?.monto != null ? Math.round((inicial.monto - fleteIni) * 100) / 100 : null;
   const [f, setF] = useState({
-    fecha: inicial?.fecha ?? `${mes}-01`,
+    fecha: inicial?.fecha ?? hoyISO(),
     categoria_id: inicial?.categoria_id ?? "",
     proveedor_id: inicial?.proveedor_id ?? "",
     concepto: inicial?.concepto ?? "",
-    monto: inicial?.monto != null ? String(inicial.monto) : "",
+    monto: baseIni != null ? String(baseIni) : "",
     moneda: inicial?.moneda ?? "Bs",
     tasa: inicial?.tasa != null ? String(inicial.tasa) : "",
     metodo: inicial?.metodo ?? "Transferencia",
     factura: inicial?.factura ?? "",
     nota: inicial?.nota ?? "",
+    flete: fleteIni > 0 ? String(fleteIni) : "",
   });
+  const [tieneFlete, setTieneFlete] = useState(fleteIni > 0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Registro de un proveedor NUEVO desde aquí mismo (se guarda en el catálogo).
@@ -1416,6 +1726,8 @@ function FormEgreso({
 
   async function guardar() {
     if (parseMonto(f.monto) == null) { setError("Pon un monto."); return; }
+    const fleteVal = tieneFlete ? (parseMonto(f.flete) ?? 0) : 0;
+    if (tieneFlete && fleteVal <= 0) { setError("Pon el monto del flete (o desmarca “Tiene flete”)."); return; }
     if (creandoProv && !nprov.nombre.trim()) { setError("Pon el nombre del proveedor nuevo (o elige “— Ninguno —”)."); return; }
     setBusy(true);
     setError(null);
@@ -1440,12 +1752,15 @@ function FormEgreso({
         clasificacion: cat?.clasificacion ?? null,
         proveedor_id: provId,
         proveedor_nombre: provNombre,
-        monto: parseMonto(f.monto),
+        // El monto guardado es base + flete (misma moneda). El flete se desglosa.
+        monto: (parseMonto(f.monto) ?? 0) + fleteVal,
         moneda: f.moneda,
         tasa: parseTasa(f.tasa),
         metodo: f.metodo,
         factura: f.factura,
         nota: f.nota,
+        flete: fleteVal > 0 ? fleteVal : null,
+        ...(porPagar && !esEdicion ? { pagada: false } : {}),
       };
       const r = await fetch("/api/admin/egresos", {
         method: esEdicion ? "PATCH" : "POST",
@@ -1464,7 +1779,8 @@ function FormEgreso({
 
   return (
     <div className="rounded-2xl bg-white ring-1 ring-marfil p-5 max-w-lg space-y-3">
-      <h2 className="font-display text-xs tracking-[0.3em] uppercase text-cacao-mute">{esEdicion ? "Editar egreso" : "Registrar egreso"}</h2>
+      <h2 className="font-display text-xs tracking-[0.3em] uppercase text-cacao-mute">{esEdicion ? "Editar egreso" : porPagar ? "Registrar cuenta por pagar" : "Registrar egreso"}</h2>
+      {porPagar && !esEdicion && <p className="text-[11px] text-cacao-mute">No cuenta como egreso todavía. Aparecerá en “Cuentas por pagar” y contará al marcarla pagada.</p>}
       {error && <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-2.5 text-sm text-[#7A2419]">{error}</div>}
       <div className="grid gap-3 sm:grid-cols-2">
         <Campo label="Fecha"><input type="date" value={f.fecha} onChange={(e) => set("fecha", e.target.value)} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" /></Campo>
@@ -1510,6 +1826,19 @@ function FormEgreso({
         <Campo label="Tasa a USD">
           <input inputMode="decimal" value={f.tasa} onChange={(e) => set("tasa", e.target.value)} disabled={f.moneda === "USD"} placeholder={f.moneda === "USD" ? "—" : ""} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao disabled:bg-marfil-soft" />
         </Campo>
+      </div>
+      {/* Flete (opcional): misma moneda, se SUMA al monto. */}
+      <div className="rounded-xl ring-1 ring-marfil p-3 space-y-2">
+        <label className="flex items-center gap-2 text-sm text-cacao cursor-pointer">
+          <input type="checkbox" checked={tieneFlete} onChange={(e) => setTieneFlete(e.target.checked)} className="accent-terracotta" />
+          Tiene flete
+        </label>
+        {tieneFlete && (
+          <div className="grid grid-cols-2 gap-2 items-end">
+            <Campo label={`Flete (${f.moneda})`}><input inputMode="decimal" value={f.flete} onChange={(e) => set("flete", e.target.value)} placeholder="0,00" className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" /></Campo>
+            <p className="text-[11px] text-cacao-mute pb-2">Total con flete: <span className="text-cacao">{fmtMonto((parseMonto(f.monto) ?? 0) + (parseMonto(f.flete) ?? 0), f.moneda)}</span></p>
+          </div>
+        )}
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
         <Campo label="Método">
@@ -1643,14 +1972,10 @@ type Ingreso = {
 };
 
 function SeccionIngresos() {
-  const [vista, setVista] = useState<"ingresos" | "importar" | "factura" | "categorias">("ingresos");
-  // "Por factura (cuadre)" se habilita el 1 de septiembre de 2026 (cuando pasa a
-  // reemplazar la carga). Hasta entonces queda oculta.
-  const habilitarFactura = new Date() >= new Date("2026-09-01T00:00:00");
+  const [vista, setVista] = useState<"ingresos" | "factura" | "categorias">("ingresos");
   const tabs: [typeof vista, string][] = [
     ["ingresos", "Ingresos"],
-    ["importar", "Importar (Setux)"],
-    ...(habilitarFactura ? ([["factura", "Por factura (cuadre)"]] as [typeof vista, string][]) : []),
+    ["factura", "Importar por factura"],
     ["categorias", "Categorías"],
   ];
   return (
@@ -1662,7 +1987,7 @@ function SeccionIngresos() {
           </button>
         ))}
       </div>
-      {vista === "ingresos" ? <IngresosMes /> : vista === "importar" ? <ImportarSetux /> : vista === "factura" && habilitarFactura ? <CuadreFacturas /> : <CategoriasIngresoCatalogo />}
+      {vista === "ingresos" ? <IngresosMes /> : vista === "factura" ? <CuadreFacturas /> : <CategoriasIngresoCatalogo />}
     </div>
   );
 }
@@ -1672,23 +1997,25 @@ function SeccionIngresos() {
 // promedio, y los COMPARA con lo ya cargado en Administración — sin guardar.
 type DiaFacturaUI = { fecha: string; ingresoNeto: number; ingresoBruto: number; cxcNeto: number; cxcBruto: number; rppNeto: number; rppBruto: number; propina: number; tickets: number };
 type TotalesFacturaUI = { ingresoNeto: number; ingresoBruto: number; cxcNeto: number; cxcBruto: number; rppNeto: number; rppBruto: number; totalNeto: number; totalBruto: number; propina: number; tickets: number; ticketPromedioBruto: number; ticketPromedioNeto: number };
-type CargadoUI = { porDia: Record<string, { ingreso: number; cxc: number; rpp: number }>; totales: { ingreso: number; cxc: number; rpp: number } };
+type MetodoUI = { metodo: string; categoria: "INGRESO" | "CXC" | "RPP"; neto: number; iva: number; monto: number; tickets: number };
+type CxCClienteUI = { cliente: string; total: number; docs: { ref: string; fecha: string; monto: number }[] };
+type MixtaUI = { nro: string; fecha: string; cliente: string; total: number; ventaNeta: number; impuesto: number; metodos: string[] };
 
 function CuadreFacturas() {
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [rep, setRep] = useState<{ desde: string; hasta: string; dias: DiaFacturaUI[]; totales: TotalesFacturaUI } | null>(null);
-  const [cargado, setCargado] = useState<CargadoUI | null>(null);
-  const [base, setBase] = useState<"neto" | "bruto">("bruto");
+  const [rep, setRep] = useState<{ desde: string; hasta: string; dias: DiaFacturaUI[]; totales: TotalesFacturaUI; porMetodo?: MetodoUI[]; cxcDetalle?: CxCClienteUI[]; mixtas?: MixtaUI[] } | null>(null);
+  // Split de pagos mixtos: nro de factura → { método: montoStr }.
+  const [splits, setSplits] = useState<Record<string, Record<string, string>>>({});
   const [archivoB64, setArchivoB64] = useState<string | null>(null);
   const [guardando, setGuardando] = useState(false);
+  const [confirmando, setConfirmando] = useState(false);
   const [ok, setOk] = useState<string | null>(null);
 
   const fEUR = (v: number) => `${(v ?? 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
-  const dif = (a: number, b: number) => Math.round((a - b) * 100) / 100;
 
   async function subir(file: File) {
-    setError(null); setOk(null); setCargando(true); setRep(null); setCargado(null); setArchivoB64(null);
+    setError(null); setOk(null); setCargando(true); setRep(null); setArchivoB64(null);
     try {
       const b64 = await new Promise<string>((resolve, reject) => {
         const fr = new FileReader();
@@ -1700,34 +2027,44 @@ function CuadreFacturas() {
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || "No se pudo leer el archivo.");
       setRep(d.reporte);
-      setCargado(d.cargado ?? null);
+      // Inicializa el split de cada mixta repartiendo el total en partes iguales.
+      const ini: Record<string, Record<string, string>> = {};
+      for (const m of (d.reporte.mixtas ?? []) as MixtaUI[]) {
+        const n = m.metodos.length || 1;
+        const base = Math.floor((m.total / n) * 100) / 100;
+        const obj: Record<string, string> = {};
+        m.metodos.forEach((met, i) => { const v = i === n - 1 ? Math.round((m.total - base * (n - 1)) * 100) / 100 : base; obj[met] = String(v).replace(".", ","); });
+        ini[m.nro] = obj;
+      }
+      setSplits(ini);
       setArchivoB64(b64);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error");
     } finally { setCargando(false); }
   }
 
+  const parseNum = (s: string) => Number((s || "").replace(/\./g, "").replace(",", ".")) || 0;
+  // Suma del split de una mixta y si cuadra con su total.
+  const sumaSplit = (m: MixtaUI) => m.metodos.reduce((s, met) => s + parseNum(splits[m.nro]?.[met] ?? ""), 0);
+  const mixtasDescuadradas = (rep?.mixtas ?? []).filter((m) => Math.abs(sumaSplit(m) - m.total) > 0.02);
+
   async function guardar() {
     if (!archivoB64 || !rep) return;
-    if (!confirm(`Se guardará el período ${rep.desde} → ${rep.hasta}, reemplazando lo que este importador haya cargado en ese rango (Ingresos, CXC, RPP, propina y tickets). ¿Continuar?`)) return;
+    if (mixtasDescuadradas.length > 0) { setError(`Hay ${mixtasDescuadradas.length} pago(s) mixto(s) cuyo desglose no suma el total de la factura. Ajústalos antes de importar.`); return; }
+    setConfirmando(false);
     setGuardando(true); setError(null); setOk(null);
     try {
-      const r = await fetch("/api/admin/importar-facturas", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ file_base64: archivoB64 }) });
+      const splitsNum: Record<string, Record<string, number>> = {};
+      for (const m of rep.mixtas ?? []) { splitsNum[m.nro] = {}; for (const met of m.metodos) splitsNum[m.nro][met] = parseNum(splits[m.nro]?.[met] ?? ""); }
+      const r = await fetch("/api/admin/importar-facturas", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ file_base64: archivoB64, splits: splitsNum }) });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || "No se pudo guardar.");
-      setOk(`Guardado ${d.desde} → ${d.hasta}: ${d.ingresos} ingreso(s), ${d.cxc} CXC, ${d.rpp} RPP, ${d.dias} día(s) de tickets. Ticket promedio ${fEUR(d.ticketPromedio)}.`);
-      // Refresca el cuadre (ahora "cargado" debería igualar el reporte).
-      const rr = await fetch("/api/admin/importar-facturas", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ file_base64: archivoB64 }) });
-      const dd = await rr.json();
-      if (rr.ok) setCargado(dd.cargado ?? null);
+      const cl = d.clientes ? ` Base de clientes: ${d.clientes.nuevos} nuevo(s), ${d.clientes.actualizados} ya registrado(s).` : "";
+      setOk(`Importado ${d.desde} → ${d.hasta}: ${d.ingresos} ingreso(s), ${d.cxc} CXC, ${d.rpp} RPP, ${d.dias} día(s) de tickets. Ticket promedio ${fEUR(d.ticketPromedio)}.${cl}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error");
     } finally { setGuardando(false); }
   }
-
-  // Ingreso del reporte según base; CXC/RPP se comparan en BRUTO (así se guardan).
-  const repIngreso = (t: TotalesFacturaUI) => (base === "neto" ? t.ingresoNeto : t.ingresoBruto);
-  const diaIngreso = (d: DiaFacturaUI) => (base === "neto" ? d.ingresoNeto : d.ingresoBruto);
 
   return (
     <div className="rounded-2xl bg-white ring-1 ring-marfil p-4 space-y-4">
@@ -1736,8 +2073,8 @@ function CuadreFacturas() {
 
       {!rep ? (
         <div className="text-center py-4">
-          <p className="font-display text-[11px] tracking-[0.3em] uppercase text-cacao-mute mb-1">Cuadre por factura</p>
-          <p className="text-sm text-cacao-soft mb-4 font-serif italic max-w-xl mx-auto">Sube el <strong>“Reporte Detallado por Factura”</strong> (Excel .xlsx/.xls o CSV). De un solo archivo salen Ingresos, CXC, RPP y el ticket promedio, fechados por la <strong>fecha de orden</strong>. Aquí solo se <strong>compara</strong> con lo ya cargado — no se guarda nada.</p>
+          <p className="font-display text-[11px] tracking-[0.3em] uppercase text-cacao-mute mb-1">Importar por factura</p>
+          <p className="text-sm text-cacao-soft mb-4 font-serif italic max-w-xl mx-auto">Sube el <strong>“Reporte Detallado por Factura”</strong> (Excel .xlsx/.xls o CSV). De un solo archivo salen Ingresos (por método, con IVA), CXC, RPP y el ticket promedio, fechados por la <strong>fecha de orden</strong>. Verás el desglose y con “Guardar” se carga todo.</p>
           <p className="text-[11px] text-cacao-mute mb-3">En iOS: en Numbers usa Compartir → Exportar → Excel (o CSV). En Windows: Excel directo.</p>
           <label className="inline-block rounded-lg bg-cacao text-white px-5 py-2.5 text-xs uppercase tracking-widest hover:bg-terracotta cursor-pointer">
             {cargando ? "Leyendo…" : "Elegir archivo (Excel o CSV)"}
@@ -1749,12 +2086,26 @@ function CuadreFacturas() {
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <span className="font-display text-[10px] tracking-[0.25em] uppercase text-cacao-mute">Período {rep.desde} → {rep.hasta} · {rep.totales.tickets} facturas</span>
             <div className="flex items-center gap-2">
-              <button type="button" onClick={guardar} disabled={guardando || !archivoB64} className="rounded-lg bg-terracotta text-white px-4 py-2 text-xs uppercase tracking-widest hover:opacity-90 disabled:opacity-40">
-                {guardando ? "Guardando…" : "Guardar (reemplaza el rango)"}
-              </button>
-              <button type="button" onClick={() => { setRep(null); setCargado(null); setArchivoB64(null); setOk(null); }} className="text-xs uppercase tracking-widest text-cacao-soft hover:text-cacao">Cambiar archivo</button>
+              {confirmando ? (
+                <>
+                  <button type="button" onClick={guardar} disabled={guardando} className="rounded-lg bg-terracotta text-white px-4 py-2 text-xs uppercase tracking-widest hover:opacity-90 disabled:opacity-40">
+                    {guardando ? "Importando…" : "Confirmar"}
+                  </button>
+                  <button type="button" onClick={() => setConfirmando(false)} disabled={guardando} className="text-xs uppercase tracking-widest text-cacao-soft hover:text-cacao">Cancelar</button>
+                </>
+              ) : (
+                <>
+                  <button type="button" onClick={() => setConfirmando(true)} disabled={guardando || !archivoB64 || mixtasDescuadradas.length > 0} title={mixtasDescuadradas.length > 0 ? "Ajusta los pagos mixtos: deben sumar el total de su factura" : undefined} className="rounded-lg bg-terracotta text-white px-4 py-2 text-xs uppercase tracking-widest hover:opacity-90 disabled:opacity-40">
+                    Importar
+                  </button>
+                  <button type="button" onClick={() => { setRep(null); setArchivoB64(null); setOk(null); }} className="text-xs uppercase tracking-widest text-cacao-soft hover:text-cacao">Cambiar archivo</button>
+                </>
+              )}
             </div>
           </div>
+          {confirmando && (
+            <p className="text-[12px] text-cacao-soft rounded-lg bg-marfil-soft ring-1 ring-marfil px-3 py-2">Se cargarán los días {rep.desde} → {rep.hasta}: Ingresos, CXC, RPP y tickets. Reimportar los mismos días los actualiza (no duplica). Pulsa <strong>Confirmar</strong>.</p>
+          )}
 
           {/* KPIs del reporte */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -1764,72 +2115,87 @@ function CuadreFacturas() {
             <MiniKpi titulo="RPP (cortesías)" valor={fEUR(rep.totales.rppBruto)} sub={`neto ${fEUR(rep.totales.rppNeto)}`} />
           </div>
 
-          {/* Cuadre vs cargado */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-[11px] uppercase tracking-widest text-cacao-mute">Comparar ingreso en</span>
-            {(["bruto", "neto"] as const).map((b) => (
-              <button key={b} type="button" onClick={() => setBase(b)} className={`rounded-full px-3 py-1 text-[11px] uppercase tracking-widest ring-1 ${base === b ? "bg-cacao text-white ring-cacao" : "bg-white text-cacao-soft ring-marfil"}`}>{b === "bruto" ? "Con IVA" : "Neto"}</button>
-            ))}
-            <span className="text-[11px] text-cacao-mute">CXC y RPP se comparan con IVA (así se guardan hoy).</span>
-          </div>
-
-          {cargado ? (() => {
-            const dT = { ing: dif(repIngreso(rep.totales), cargado.totales.ingreso), cxc: dif(rep.totales.cxcBruto, cargado.totales.cxc), rpp: dif(rep.totales.rppBruto, cargado.totales.rpp) };
-            const fechas = Array.from(new Set([...rep.dias.map((d) => d.fecha), ...Object.keys(cargado.porDia)])).sort();
-            const chip = (n: number) => n === 0 ? "text-cacao-mute" : Math.abs(n) < 0.005 ? "text-cacao-mute" : "text-[#7A2419]";
-            return (
-              <div className="space-y-3">
-                <div className="rounded-xl bg-marfil-soft ring-1 ring-marfil p-3">
-                  <p className="text-[11px] uppercase tracking-widest text-cacao-mute mb-2">Totales del período — reporte vs cargado</p>
-                  <div className="grid grid-cols-3 gap-3 text-sm">
-                    <CuadreTot label="Ingresos" rep={repIngreso(rep.totales)} car={cargado.totales.ingreso} d={dT.ing} fEUR={fEUR} />
-                    <CuadreTot label="CXC" rep={rep.totales.cxcBruto} car={cargado.totales.cxc} d={dT.cxc} fEUR={fEUR} />
-                    <CuadreTot label="RPP" rep={rep.totales.rppBruto} car={cargado.totales.rpp} d={dT.rpp} fEUR={fEUR} />
-                  </div>
-                </div>
-
-                <div className="rounded-xl ring-1 ring-marfil overflow-hidden max-h-[26rem] overflow-y-auto">
-                  <table className="w-full text-xs">
-                    <thead className="sticky top-0 bg-white">
-                      <tr className="text-cacao-mute uppercase tracking-widest text-left">
-                        <th className="py-1.5 px-2 font-normal">Día</th>
-                        <th className="py-1.5 px-2 font-normal text-right">Ingreso rep.</th>
-                        <th className="py-1.5 px-2 font-normal text-right">Ingreso carg.</th>
-                        <th className="py-1.5 px-2 font-normal text-right">Δ Ing</th>
-                        <th className="py-1.5 px-2 font-normal text-right">Δ CXC</th>
-                        <th className="py-1.5 px-2 font-normal text-right">Δ RPP</th>
-                        <th className="py-1.5 px-2 font-normal text-right">Tickets</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {fechas.map((f) => {
-                        const dd = rep.dias.find((x) => x.fecha === f);
-                        const cc = cargado.porDia[f] ?? { ingreso: 0, cxc: 0, rpp: 0 };
-                        const ingRep = dd ? diaIngreso(dd) : 0;
-                        const dIng = dif(ingRep, cc.ingreso);
-                        const dCxc = dif(dd?.cxcBruto ?? 0, cc.cxc);
-                        const dRpp = dif(dd?.rppBruto ?? 0, cc.rpp);
-                        return (
-                          <tr key={f} className="border-t border-marfil">
-                            <td className="py-1 px-2 text-cacao whitespace-nowrap">{f}</td>
-                            <td className="py-1 px-2 text-right tabular-nums text-cacao">{fEUR(ingRep)}</td>
-                            <td className="py-1 px-2 text-right tabular-nums text-cacao-soft">{fEUR(cc.ingreso)}</td>
-                            <td className={`py-1 px-2 text-right tabular-nums ${chip(dIng)}`}>{dIng === 0 ? "—" : fEUR(dIng)}</td>
-                            <td className={`py-1 px-2 text-right tabular-nums ${chip(dCxc)}`}>{dCxc === 0 ? "—" : fEUR(dCxc)}</td>
-                            <td className={`py-1 px-2 text-right tabular-nums ${chip(dRpp)}`}>{dRpp === 0 ? "—" : fEUR(dRpp)}</td>
-                            <td className="py-1 px-2 text-right tabular-nums text-cacao-soft">{dd?.tickets ?? 0}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-                <p className="text-[11px] text-cacao-soft">Δ = reporte − cargado. En rojo lo que cambiaría al guardar. Con <strong>“Guardar”</strong> se escribe este rango (Ingresos, CXC, RPP, propina y tickets) reemplazando solo lo que este importador haya cargado antes en esas fechas — no toca cargas hechas por otros medios (agosto queda intacto).</p>
+          {/* Desglose por método de pago (como el Detallado por Forma de Pago) */}
+          {rep.porMetodo && rep.porMetodo.length > 0 && (
+            <div className="rounded-xl ring-1 ring-marfil overflow-hidden">
+              <div className="px-3 py-2 bg-marfil-soft font-display text-[10px] tracking-[0.25em] uppercase text-cacao-mute">Desglose por método de pago</div>
+              <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead><tr className="text-cacao-mute uppercase tracking-widest text-left"><th className="py-1.5 px-3 font-normal">Método</th><th className="py-1.5 px-3 font-normal">Tipo</th><th className="py-1.5 px-3 font-normal text-right">Fact.</th><th className="py-1.5 px-3 font-normal text-right">Neto</th><th className="py-1.5 px-3 font-normal text-right">IVA</th><th className="py-1.5 px-3 font-normal text-right">Total</th></tr></thead>
+                <tbody>
+                  {rep.porMetodo.map((m) => (
+                    <tr key={m.metodo} className="border-t border-marfil">
+                      <td className="py-1 px-3 text-cacao whitespace-nowrap">{m.metodo}</td>
+                      <td className="py-1 px-3 text-cacao-soft">{m.categoria === "INGRESO" ? "Ingreso" : m.categoria === "CXC" ? "Crédito (CXC)" : "Cortesía (RPP)"}</td>
+                      <td className="py-1 px-3 text-right tabular-nums text-cacao-soft">{m.tickets}</td>
+                      <td className="py-1 px-3 text-right tabular-nums text-cacao-soft">{fEUR(m.neto)}</td>
+                      <td className="py-1 px-3 text-right tabular-nums text-cacao-soft">{fEUR(m.iva)}</td>
+                      <td className="py-1 px-3 text-right tabular-nums text-cacao">{fEUR(m.monto)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot><tr className="border-t-2 border-marfil font-medium"><td className="py-1 px-3 text-cacao" colSpan={3}>Total</td><td className="py-1 px-3 text-right tabular-nums text-cacao-soft">{fEUR(rep.totales.totalNeto)}</td><td className="py-1 px-3 text-right tabular-nums text-cacao-soft">{fEUR(rep.totales.totalBruto - rep.totales.totalNeto)}</td><td className="py-1 px-3 text-right tabular-nums text-cacao">{fEUR(rep.totales.totalBruto)}</td></tr></tfoot>
+              </table>
               </div>
-            );
-          })() : (
-            <p className="text-sm text-cacao-soft italic">No pude leer lo ya cargado para comparar (¿servidor sin configurar?). Igual tienes arriba los totales del reporte.</p>
+            </div>
           )}
+
+          {/* Detalle de cuentas por cobrar (crédito) por cliente */}
+          {rep.cxcDetalle && rep.cxcDetalle.length > 0 && (
+            <div className="rounded-xl ring-1 ring-marfil overflow-hidden">
+              <div className="px-3 py-2 bg-marfil-soft font-display text-[10px] tracking-[0.25em] uppercase text-cacao-mute flex items-center justify-between">
+                <span>Cuentas por cobrar (crédito) · {rep.cxcDetalle.length} cliente{rep.cxcDetalle.length === 1 ? "" : "s"}</span>
+                <span className="text-cacao">{fEUR(rep.totales.cxcBruto)}</span>
+              </div>
+              <div className="max-h-72 overflow-y-auto">
+                <table className="w-full text-xs">
+                  <tbody>
+                    {rep.cxcDetalle.map((c) => (
+                      <tr key={c.cliente} className="border-t border-marfil">
+                        <td className="py-1.5 px-3 text-cacao">{c.cliente}<span className="text-cacao-mute"> · {c.docs.length} doc{c.docs.length === 1 ? "" : "s"} ({c.docs.map((d) => d.ref).filter(Boolean).join(", ")})</span></td>
+                        <td className="py-1.5 px-3 text-right tabular-nums text-cacao whitespace-nowrap">{fEUR(c.total)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Pagos mixtos: el reporte no trae el monto por método → especifícalo */}
+          {rep.mixtas && rep.mixtas.length > 0 && (
+            <div className="rounded-xl ring-1 ring-[#E7D3A1] overflow-hidden">
+              <div className="px-3 py-2 bg-[#FBF3E2] font-display text-[10px] tracking-[0.25em] uppercase text-[#7A5A18] flex items-center justify-between">
+                <span>Pagos mixtos — especifica el monto por método ({rep.mixtas.length})</span>
+                {mixtasDescuadradas.length > 0 && <span className="normal-case tracking-normal text-[11px]">{mixtasDescuadradas.length} sin cuadrar</span>}
+              </div>
+              <p className="px-3 py-2 text-[11px] text-cacao-mute">Estas facturas se pagaron con 2+ métodos y el reporte no dice cuánto fue a cada uno. Reparte el total; cada parte irá a su rubro (Punto de Venta → ingreso, CXC → cuenta por cobrar, etc.). Debe sumar el total de la factura.</p>
+              <div className="max-h-80 overflow-y-auto divide-y divide-marfil">
+                {rep.mixtas.map((m) => {
+                  const suma = m.metodos.reduce((s, met) => s + parseNum(splits[m.nro]?.[met] ?? ""), 0);
+                  const cuadra = Math.abs(suma - m.total) <= 0.02;
+                  return (
+                    <div key={m.nro} className="px-3 py-2">
+                      <div className="flex items-center justify-between gap-2 text-[12px]">
+                        <span className="text-cacao min-w-0 truncate">{fmtFecha(m.fecha)} · {m.cliente || m.nro || "factura"}</span>
+                        <span className={`tabular-nums whitespace-nowrap ${cuadra ? "text-[#2F4A1F]" : "text-[#7A2419]"}`}>Total {fEUR(m.total)}{cuadra ? " ✓" : ` · suma ${fEUR(suma)}`}</span>
+                      </div>
+                      <div className="mt-1 flex flex-wrap gap-2">
+                        {m.metodos.map((met) => (
+                          <label key={met} className="flex items-center gap-1 text-[11px] text-cacao-soft">
+                            <span className="whitespace-nowrap">{met}</span>
+                            <input inputMode="decimal" value={splits[m.nro]?.[met] ?? ""} onChange={(e) => setSplits((s) => ({ ...s, [m.nro]: { ...s[m.nro], [met]: e.target.value } }))} className="w-24 border border-marfil rounded-lg px-2 py-1 text-right text-cacao" />
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          <p className="text-[11px] text-cacao-soft">Con <strong>“Importar”</strong> se cargan los días del reporte ({rep.desde} → {rep.hasta}): Ingresos (por método, neto + IVA), CXC (por cliente), RPP, propina y tickets. Es idempotente: reimportar los mismos días los actualiza (no duplica), y los días que no vienen en el archivo no se tocan.</p>
         </div>
       )}
     </div>
@@ -1846,18 +2212,6 @@ function MiniKpi({ titulo, valor, sub }: { titulo: string; valor: string; sub?: 
   );
 }
 
-function CuadreTot({ label, rep, car, d, fEUR }: { label: string; rep: number; car: number; d: number; fEUR: (n: number) => string }) {
-  const col = Math.abs(d) < 0.005 ? "text-[#2F4A1F]" : "text-[#7A2419]";
-  return (
-    <div>
-      <div className="text-[10px] uppercase tracking-widest text-cacao-mute">{label}</div>
-      <div className="text-cacao tabular-nums">{fEUR(rep)}</div>
-      <div className="text-[11px] text-cacao-soft tabular-nums">cargado {fEUR(car)}</div>
-      <div className={`text-[11px] tabular-nums ${col}`}>{Math.abs(d) < 0.005 ? "cuadra ✓" : `Δ ${fEUR(d)}`}</div>
-    </div>
-  );
-}
-
 function IngresosMes() {
   const [mes, setMes] = useState<string>(mesActualISO());
   const [ingresos, setIngresos] = useState<Ingreso[]>([]);
@@ -1868,11 +2222,6 @@ function IngresosMes() {
   const [modo, setModo] = useState<"lista" | "form">("lista");
   const [editando, setEditando] = useState<Ingreso | null>(null);
   const [ventasMes, setVentasMes] = useState<Record<string, number>>({});
-  const [propinas, setPropinas] = useState<{ id: string; fecha: string; monto: number | null; moneda: string | null }[]>([]);
-  const [propFecha, setPropFecha] = useState(() => new Date().toISOString().slice(0, 10));
-  const [propMonto, setPropMonto] = useState("");
-  const [propNota, setPropNota] = useState("");
-  const [guardandoProp, setGuardandoProp] = useState(false);
   const [tasaInput, setTasaInput] = useState("1.17");
   const [guardandoTasa, setGuardandoTasa] = useState(false);
   const [recalculando, setRecalculando] = useState(false);
@@ -1887,16 +2236,14 @@ function IngresosMes() {
     let a = true;
     (async () => {
       try {
-        const [ri, rc, rp] = await Promise.all([
+        const [ri, rc] = await Promise.all([
           fetch(`/api/admin/ingresos?mes=${mes}`, { cache: "no-store" }),
           fetch("/api/admin/categorias-ingreso", { cache: "no-store" }),
-          fetch(`/api/admin/propinas?mes=${mes}`, { cache: "no-store" }),
         ]);
-        const [di, dc, dp] = await Promise.all([ri.json(), rc.json(), rp.json()]);
+        const [di, dc] = await Promise.all([ri.json(), rc.json()]);
         if (a) {
           setIngresos(di.ingresos ?? []);
           setCategorias(dc.categorias ?? []);
-          setPropinas(dp.propinas ?? []);
         }
       } catch {
         if (a) setError("No se pudieron cargar los ingresos.");
@@ -1999,7 +2346,7 @@ function IngresosMes() {
       const r = await fetch("/api/admin/recalcular-iva", { method: "POST" });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || "No se pudo recalcular el IVA.");
-      setMsg(`IVA separado (${d.ivaPct}%) en ${d.ajustados} ingresos de Setux.`);
+      setMsg(`IVA separado (${d.ivaPct}%) en ${d.ajustados} ingresos de Xetux.`);
       recargar();
     } catch (e) {
       setError(e instanceof Error ? e.message : "No se pudo recalcular el IVA.");
@@ -2023,7 +2370,14 @@ function IngresosMes() {
   // Así se ve por qué canal entró (Zelle/Dólar = dólares, Pago Móvil/Pto de Venta = Bs tasa euro).
   const porMetodo: Record<string, Record<string, number>> = {};
   for (const e of ingresos) {
-    const metodo = e.metodo || "Sin método";
+    // Dólar (efectivo USD) y Efectivo se muestran unidos como "Efectivo". El
+    // dato crudo (e.metodo) no se toca: esto solo agrupa la vista.
+    const up = (e.metodo || "").trim().toUpperCase();
+    const metodo = !e.metodo
+      ? "Sin método"
+      : up === "DOLAR" || up === "DÓLAR" || up === "EFECTIVO"
+        ? "Efectivo"
+        : e.metodo;
     const k = e.moneda || "EUR";
     (porMetodo[metodo] ??= {})[k] = (porMetodo[metodo][k] ?? 0) + (e.monto ?? 0);
   }
@@ -2042,41 +2396,7 @@ function IngresosMes() {
     }
   }
 
-  const propinasMes = propinas.reduce((s, p) => s + (Number(p.monto) || 0), 0);
   const ivaMes = ingresos.reduce((s, e) => s + (Number(e.iva) || 0), 0);
-  async function borrarPropina(id: string) {
-    try {
-      await fetch(`/api/admin/propinas?id=${id}`, { method: "DELETE" });
-      setMsg("Propina eliminada.");
-      recargar();
-    } catch {
-      setError("No se pudo eliminar la propina.");
-    }
-  }
-  async function agregarPropina(e: React.FormEvent) {
-    e.preventDefault();
-    const monto = parseMonto(propMonto);
-    if (monto == null || monto <= 0) { setError("Pon un monto de propina válido."); return; }
-    setGuardandoProp(true);
-    setError(null);
-    try {
-      const r = await fetch("/api/admin/propinas", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fecha: propFecha || undefined, monto, moneda: "EUR", nota: propNota.trim() || undefined }),
-      });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error || "No se pudo registrar la propina.");
-      setPropMonto("");
-      setPropNota("");
-      setMsg("Propina registrada.");
-      recargar();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo registrar la propina.");
-    } finally {
-      setGuardandoProp(false);
-    }
-  }
 
   if (modo === "form") {
     return (
@@ -2147,7 +2467,7 @@ function IngresosMes() {
               ))}
             </div>
           )}
-          {monedasPresentes.length > 1 && <div className="text-[10px] text-[#9A938B] mt-1.5">Cada moneda por separado (Setux en €, alquileres en $).</div>}
+          {monedasPresentes.length > 1 && <div className="text-[10px] text-[#9A938B] mt-1.5">Cada moneda por separado (Xetux en €, alquileres en $).</div>}
           {/* Ingreso: total y comparación con Cocina, juntos arriba */}
           <div className="mt-2 pt-2 border-t border-[#333]">
             <div className="text-[9px] tracking-[0.2em] uppercase text-[#9A938B]">Ventas en Cocina (POS)</div>
@@ -2155,21 +2475,13 @@ function IngresosMes() {
             <div className="text-[10px] text-[#9A938B] mt-0.5">Para comparar (misma moneda). La diferencia con los ingresos suele ser CXC y cortesías.</div>
           </div>
           {/* No es ingreso: al fondo */}
-          {(ivaMes > 0 || propinasMes > 0) && (
+          {ivaMes > 0 && (
             <div className="mt-3 pt-2 border-t border-[#444]">
               <div className="text-[9px] tracking-[0.2em] uppercase text-[#7C766E]">No es ingreso</div>
-              {ivaMes > 0 && (
-                <div className="flex justify-between text-[13px] mt-1">
-                  <span className="text-[#9A938B]">IVA</span>
-                  <span className="text-[#EDE7E0]">{fmtMonto(ivaMes, "EUR")}</span>
-                </div>
-              )}
-              {propinasMes > 0 && (
-                <div className="flex justify-between text-[13px] mt-0.5">
-                  <span className="text-[#9A938B]">Propinas</span>
-                  <span className="text-[#EDE7E0]">{fmtMonto(propinasMes, "EUR")}</span>
-                </div>
-              )}
+              <div className="flex justify-between text-[13px] mt-1">
+                <span className="text-[#9A938B]">IVA</span>
+                <span className="text-[#EDE7E0]">{fmtMonto(ivaMes, "EUR")}</span>
+              </div>
             </div>
           )}
         </div>
@@ -2190,47 +2502,6 @@ function IngresosMes() {
             </ul>
           )}
         </div>
-      </div>
-
-      <div className="rounded-2xl bg-white ring-1 ring-marfil p-4">
-        <div className="flex items-center justify-between mb-2">
-          <span className="font-display text-[9px] tracking-[0.25em] uppercase text-cacao-mute">Propinas del mes (no es ingreso)</span>
-          <span className="text-sm font-medium text-cacao">{fmtMonto(propinasMes, "EUR")}</span>
-        </div>
-        {/* Registrar propina manual (p.ej. un cliente que deja propina al pagar una CxC). */}
-        <form onSubmit={agregarPropina} className="flex flex-wrap items-end gap-2 mb-3">
-          <label className="text-[11px] text-cacao-soft">
-            Fecha
-            <input type="date" value={propFecha} onChange={(e) => setPropFecha(e.target.value)} className="mt-0.5 block rounded-lg ring-1 ring-marfil px-2 py-1 text-sm" />
-          </label>
-          <label className="text-[11px] text-cacao-soft">
-            Monto (€)
-            <input inputMode="decimal" value={propMonto} onChange={(e) => setPropMonto(e.target.value)} placeholder="0.00" className="mt-0.5 block w-24 rounded-lg ring-1 ring-marfil px-2 py-1 text-sm text-right tabular-nums" />
-          </label>
-          <label className="text-[11px] text-cacao-soft flex-1 min-w-[140px]">
-            Nota (opcional)
-            <input value={propNota} onChange={(e) => setPropNota(e.target.value)} placeholder="Ej: propina de <cliente> al pagar CxC" className="mt-0.5 block w-full rounded-lg ring-1 ring-marfil px-2 py-1 text-sm" />
-          </label>
-          <button type="submit" disabled={guardandoProp || !propMonto.trim()} className="rounded-lg bg-cacao text-white px-3 py-1.5 text-xs uppercase tracking-widest hover:bg-terracotta disabled:opacity-40">
-            {guardandoProp ? "Guardando…" : "+ Propina"}
-          </button>
-        </form>
-        {propinas.length > 0 ? (
-          <ul className="divide-y divide-marfil">
-            {propinas.map((p) => (
-              <li key={p.id} className="flex items-center justify-between gap-3 py-1.5 text-sm">
-                <span className="text-cacao-soft">{fmtFecha(p.fecha)}</span>
-                <span className="flex items-center gap-3">
-                  <span className="text-cacao tabular-nums">{fmtMonto(Number(p.monto) || 0, p.moneda || "EUR")}</span>
-                  <button type="button" onClick={() => borrarPropina(p.id)} className="text-cacao-soft hover:text-terracotta" aria-label="Eliminar propina">✕</button>
-                </span>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="text-[12px] text-cacao-soft italic">Sin propinas registradas este mes.</p>
-        )}
-        <p className="text-[11px] text-cacao-mute mt-2">La propina no es ingreso: se cobra para el personal. Si borras las ventas de un día, borra también su propina aquí (son registros separados).</p>
       </div>
 
       <section className="rounded-2xl bg-white ring-1 ring-marfil overflow-hidden">
@@ -2655,233 +2926,6 @@ function DesgloseUnico({ titulo, filas, moneda }: { titulo: string; filas: [stri
   );
 }
 
-// ── Importar ventas de Setux ────────────────────────────────────────
-// Beatriz sube el PDF diario de Setux; el servidor lo lee y muestra la vista
-// previa; confirma → crea un ingreso por método (en euros; el USD sale con la
-// tasa fija del panel).
-type LineaSetuxUI = { metodo: string; metodoBonito: string; cantidad: number | null; total: number; propina: number | null; incluir: boolean; destino: "ingreso" | "detalle" | "excluir" };
-type ReporteSetuxUI = { fecha: string | null; desde: string | null; hasta: string | null; usuario: string | null; total: number | null };
-
-function ImportarSetux() {
-  const [cargando, setCargando] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [msg, setMsg] = useState<string | null>(null);
-  const [reporte, setReporte] = useState<ReporteSetuxUI | null>(null);
-  const [lineas, setLineas] = useState<LineaSetuxUI[]>([]);
-  const [fecha, setFecha] = useState("");
-  const [categorias, setCategorias] = useState<CategoriaIngreso[]>([]);
-  const [categoriaId, setCategoriaId] = useState("");
-  const [propinaEdit, setPropinaEdit] = useState("");
-  const [guardando, setGuardando] = useState(false);
-  const [conflicto, setConflicto] = useState<number | null>(null);
-
-  useEffect(() => {
-    let a = true;
-    (async () => {
-      try {
-        const r = await fetch("/api/admin/categorias-ingreso", { cache: "no-store" });
-        const d = await r.json();
-        if (a) {
-          const cats: CategoriaIngreso[] = d.categorias ?? [];
-          setCategorias(cats);
-          const ventas = cats.find((c) => c.nombre.toLowerCase() === "ventas");
-          if (ventas) setCategoriaId(ventas.id);
-        }
-      } catch {
-        /* sin categorías igual se puede guardar */
-      }
-    })();
-    return () => { a = false; };
-  }, []);
-
-  function limpiar() {
-    setReporte(null);
-    setLineas([]);
-    setFecha("");
-    setConflicto(null);
-  }
-
-  async function subir(file: File) {
-    setError(null);
-    setMsg(null);
-    setConflicto(null);
-    setCargando(true);
-    try {
-      const b64 = await new Promise<string>((resolve, reject) => {
-        const fr = new FileReader();
-        fr.onload = () => resolve(String(fr.result));
-        fr.onerror = () => reject(new Error("no se pudo leer"));
-        fr.readAsDataURL(file);
-      });
-      const r = await fetch("/api/admin/importar-setux", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pdf_base64: b64 }),
-      });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error || "No se pudo leer el PDF.");
-      const rep = d.reporte;
-      setReporte({ fecha: rep.fecha, desde: rep.desde, hasta: rep.hasta, usuario: rep.usuario, total: rep.total });
-      setFecha(rep.fecha ?? "");
-      // RPP (cortesías) no se cuenta: llega desmarcado.
-      const ls = (rep.lineas as Omit<LineaSetuxUI, "incluir">[]).map((l) => ({ ...l, incluir: l.destino !== "excluir" && l.destino !== "detalle" }));
-      setLineas(ls);
-      // Propina por defecto = suma de TODAS las propinas (editable para quitar errores).
-      const propAuto = ls.filter((l) => l.destino !== "excluir").reduce((s, l) => s + (l.propina ?? 0), 0);
-      setPropinaEdit(propAuto > 0 ? propAuto.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Error");
-      limpiar();
-    } finally {
-      setCargando(false);
-    }
-  }
-
-  const incluidas = lineas.filter((l) => l.incluir && l.destino === "ingreso");
-  const ingresoEUR = incluidas.filter((l) => l.destino === "ingreso").reduce((s, l) => s + l.total, 0);
-  // Propina: aparte (no es ingreso). El total lo controlas tú (editable).
-  const propinaTotal = parseTasa(propinaEdit) ?? 0;
-  // Métodos con propina para mostrar el desglose de referencia.
-  const propinasPorMetodo = incluidas.filter((l) => l.propina != null && l.propina > 0);
-
-  async function registrar(reemplazar: boolean) {
-    if (!fecha) { setError("Falta la fecha del reporte."); return; }
-    if (incluidas.length === 0) { setError("Marca al menos un método para registrar."); return; }
-    setGuardando(true);
-    setError(null);
-    try {
-      const cat = categorias.find((c) => c.id === categoriaId);
-      const r = await fetch("/api/admin/importar-setux", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          fecha,
-          categoria_id: categoriaId || null,
-          categoria_nombre: cat?.nombre ?? null,
-          propina: propinaTotal,
-          reemplazar,
-          lineas: incluidas.map((l) => ({ metodo: l.metodoBonito, total: l.total, cantidad: l.cantidad })),
-        }),
-      });
-      const d = await r.json();
-      if (r.status === 409 && d.yaExiste) { setConflicto(d.cuantos ?? 0); setGuardando(false); return; }
-      if (!r.ok) throw new Error(d.error || "No se pudo registrar.");
-      const partes = [`${d.creados} ingreso${d.creados === 1 ? "" : "s"}`];
-      let extra = "";
-      if (d.propina > 0) extra = ` Propina registrada aparte: ${fmtMonto(d.propina, "EUR")}.`;
-      setMsg(`Listo (${fmtFecha(fecha)}): ${partes.join(" y ")}.${extra}`);
-      limpiar();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Error");
-    } finally {
-      setGuardando(false);
-    }
-  }
-
-  return (
-    <div className="space-y-4">
-      {error && <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419]">{error}</div>}
-      {msg && <div className="rounded-lg bg-[#F1F4ED] ring-1 ring-[#C9D6BC] p-3 text-sm text-[#2F4A1F]">{msg}</div>}
-
-      {!reporte ? (
-        <div className="rounded-2xl bg-white ring-1 ring-marfil p-6 text-center">
-          <p className="font-display text-[11px] tracking-[0.3em] uppercase text-cacao-mute mb-1">Importar ventas del día</p>
-          <p className="text-sm text-cacao-soft mb-4 font-serif italic">Sube el PDF “Consolidado de ventas por formas de pago” de Setux.</p>
-          <label className="inline-block rounded-lg bg-cacao text-white px-5 py-2.5 text-xs uppercase tracking-widest hover:bg-terracotta cursor-pointer">
-            {cargando ? "Leyendo…" : "Elegir PDF"}
-            <input type="file" accept="application/pdf,.pdf" className="hidden" disabled={cargando} onChange={(e) => { const f = e.target.files?.[0]; if (f) subir(f); e.target.value = ""; }} />
-          </label>
-        </div>
-      ) : (
-        <div className="space-y-4">
-          <div className="rounded-2xl bg-white ring-1 ring-marfil p-4 space-y-3">
-            <div className="flex items-center justify-between gap-3">
-              <span className="font-display text-[10px] tracking-[0.25em] uppercase text-cacao-mute">Vista previa</span>
-              <button type="button" onClick={limpiar} className="text-xs uppercase tracking-widest text-cacao-soft hover:text-cacao">Cambiar PDF</button>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Campo label="Fecha del reporte"><input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" /></Campo>
-              <Campo label="Categoría">
-                <select value={categoriaId} onChange={(e) => setCategoriaId(e.target.value)} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
-                  <option value="">Sin categoría</option>
-                  {categorias.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-                </select>
-              </Campo>
-            </div>
-            {reporte.usuario && <p className="text-[11px] text-cacao-mute">Usuario: {reporte.usuario}{reporte.desde && reporte.hasta && reporte.desde !== reporte.hasta ? ` · rango ${fmtFecha(reporte.desde)} → ${fmtFecha(reporte.hasta)}` : ""}</p>}
-          </div>
-
-          <section className="rounded-2xl bg-white ring-1 ring-marfil overflow-hidden">
-            <div className="px-4 py-2.5 font-display text-[10px] tracking-[0.25em] uppercase text-cacao-mute border-b border-marfil grid grid-cols-[auto_1fr_auto_auto] gap-3 items-center">
-              <span></span><span>Método</span><span className="text-right">Ventas</span><span className="text-right">Total</span>
-            </div>
-            <ul className="divide-y divide-marfil">
-              {lineas.map((l, i) => (
-                <li key={i} className={`px-4 py-2.5 grid grid-cols-[auto_1fr_auto_auto] gap-3 items-center ${l.incluir && l.destino !== "excluir" ? "" : "opacity-40"}`}>
-                  <input type="checkbox" checked={l.incluir} disabled={l.destino === "excluir"} onChange={() => setLineas((ls) => ls.map((x, j) => (j === i ? { ...x, incluir: !x.incluir } : x)))} className="accent-[#0F0F0F]" />
-                  <span className="text-cacao text-sm">
-                    {l.metodoBonito}
-                    {l.destino === "detalle" && <span className="ml-2 inline-block rounded-full bg-[#FBF3E2] text-[#7A5A18] text-[9px] uppercase tracking-widest px-2 py-0.5 align-middle">→ Archivo aparte (CXC/RPP)</span>}
-                    {l.destino === "excluir" && <span className="ml-2 inline-block rounded-full bg-marfil-soft text-cacao-mute text-[9px] uppercase tracking-widest px-2 py-0.5 align-middle">No cuenta</span>}
-                  </span>
-                  <span className="text-cacao-mute text-sm text-right tabular-nums">{l.cantidad ?? "—"}</span>
-                  <span className="text-cacao text-sm text-right tabular-nums">{fmtMonto(l.total, "EUR")}</span>
-                </li>
-              ))}
-            </ul>
-            <div className="px-4 py-2.5 border-t border-marfil space-y-1 text-sm">
-              <div className="grid grid-cols-[1fr_auto] gap-3">
-                <span className="font-medium text-cacao">Ventas del día (con IVA)</span>
-                <span className="text-right font-medium text-cacao tabular-nums">
-                  {fmtMonto(ingresoEUR, "EUR")}
-                </span>
-              </div>
-              <div className="text-[11px] text-cacao-mute">Al guardar se registra el NETO (sin IVA) y el IVA queda aparte. Zelle y Dólar no llevan IVA.</div>
-              {lineas.some((l) => l.destino === "detalle") && (
-                <div className="grid grid-cols-[1fr_auto] gap-3 text-[#7A5A18]">
-                  <span>CXC y RPP (no son ingreso de contado)</span>
-                  <span className="text-right text-[11px]">Se importan por su archivo aparte (CXC → cuentas por cobrar, RPP → egresos)</span>
-                </div>
-              )}
-              {propinasPorMetodo.length > 0 && (
-                <div className="pt-1 mt-1 border-t border-marfil">
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-cacao-mute">Propina del día (aparte, no es ingreso)</span>
-                    <div className="flex items-center gap-1">
-                      <input inputMode="decimal" value={propinaEdit} onChange={(e) => setPropinaEdit(e.target.value)} className="w-28 border border-marfil rounded-lg px-2 py-1 text-sm text-cacao text-right" />
-                      <span className="text-cacao-mute">€</span>
-                    </div>
-                  </div>
-                  <div className="text-[11px] text-cacao-mute mt-1">
-                    Por método: {propinasPorMetodo.map((l) => `${l.metodoBonito} ${fmtMonto(l.propina!, "EUR")}`).join(" · ")}. Edita el total si hay un error (ej. una propina disparada).
-                  </div>
-                </div>
-              )}
-            </div>
-          </section>
-
-          {reporte.total != null && Math.abs(reporte.total - lineas.reduce((s, l) => s + l.total, 0)) > 0.01 && (
-            <p className="text-[11px] text-cacao-mute">Nota: el total del PDF ({fmtMonto(reporte.total, "EUR")}) no coincide con la suma de las líneas leídas; revisa antes de guardar.</p>
-          )}
-
-          {conflicto != null ? (
-            <div className="rounded-xl bg-[#FBF3E2] ring-1 ring-[#E7D3A1] p-3 flex flex-wrap items-center justify-between gap-3">
-              <span className="text-sm text-[#7A5A18]">Ya importaste ventas de este día ({conflicto} ingreso{conflicto === 1 ? "" : "s"}). ¿Reemplazarlas?</span>
-              <div className="flex gap-2">
-                <button type="button" onClick={() => registrar(true)} disabled={guardando} className="rounded-lg bg-terracotta text-white px-4 py-2 text-xs uppercase tracking-widest">Reemplazar</button>
-                <button type="button" onClick={() => setConflicto(null)} className="rounded-lg ring-1 ring-marfil text-cacao px-4 py-2 text-xs uppercase tracking-widest">Cancelar</button>
-              </div>
-            </div>
-          ) : (
-            <button type="button" onClick={() => registrar(false)} disabled={guardando} className="rounded-lg bg-cacao text-white px-5 py-2.5 text-xs uppercase tracking-widest hover:bg-terracotta disabled:bg-marfil disabled:text-cacao-mute">
-              {guardando ? "Registrando…" : "Registrar ventas del día"}
-            </button>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ── Cuentas por cobrar (CXC) ────────────────────────────────────────
 // ── Cuentas por cobrar (CXC) · saldos por cliente ───────────────────
@@ -2909,7 +2953,12 @@ type IncobrableUI = {
 };
 
 // Métodos de pago disponibles (los mismos que reporta el sistema/Setux).
-const METODOS_COBRO = ["Efectivo", "Pago Móvil", "Zelle", "Punto de Venta", "Transferencia", "Dólar", "Tarjeta de crédito", "Tarjeta de débito", "Otro"];
+const METODOS_COBRO = ["Punto de Venta", "Pago Móvil", "Zelle", "Transferencia", "Dólar", "Bolívares", "Otro"];
+
+// Un saldo a favor de hasta este monto (EUR) se considera sobrante de redondeo
+// (pagó de más, sin vuelto) → se ofrece "Marcar sobrante" en la fila. Por encima,
+// se trata como crédito real del cliente.
+const SOBRANTE_MAX_EUR = 2;
 
 function hoyISO(): string {
   const d = new Date();
@@ -2989,7 +3038,6 @@ function SeccionCuentasCobrar() {
   const [correosInput, setCorreosInput] = useState("");
   const [guardandoCorreos, setGuardandoCorreos] = useState(false);
   const [probando, setProbando] = useState(false);
-  const [mostrarImport, setMostrarImport] = useState(false);
   const [verSaldados, setVerSaldados] = useState(false);
   const [mostrarAjustes, setMostrarAjustes] = useState(false);
   const [aliases, setAliases] = useState<{ alias_key: string; canonico: string }[]>([]);
@@ -3088,15 +3136,22 @@ function SeccionCuentasCobrar() {
       setMsg("Monto de la cuenta actualizado."); recargar();
     } catch (e) { setError(e instanceof Error ? e.message : "No se pudo editar."); }
   }
-  async function ajustarSaldo(clienteNombre: string) {
-    if (!confirm("Se creará una deuda de ajuste que cuadra el pago existente y deja el saldo en cero (NO borra el pago ni su ingreso). Úsalo cuando el cliente pagó cuentas que luego se eliminaron. ¿Continuar?")) return;
+  async function ajustarSaldo(clienteNombre: string, motivo?: "sobrante") {
+    if (!motivo && !confirm("Se creará una deuda de ajuste que cuadra el pago existente y deja el saldo en cero (NO borra el pago ni su ingreso). Úsalo cuando el cliente pagó cuentas que luego se eliminaron. ¿Continuar?")) return;
     setError(null);
     try {
-      const r = await fetch("/api/admin/cuentas-cobrar", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accion: "ajustar", cliente: clienteNombre }) });
+      const r = await fetch("/api/admin/cuentas-cobrar", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accion: "ajustar", cliente: clienteNombre, motivo }) });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || "No se pudo ajustar.");
-      setMsg("Saldo ajustado a cero."); recargar();
+      setMsg(motivo === "sobrante" ? "Sobrante marcado; el saldo a favor pasó a cero." : "Saldo ajustado a cero."); recargar();
     } catch (e) { setError(e instanceof Error ? e.message : "No se pudo ajustar."); }
+  }
+  // Sobrante de redondeo: el cliente pagó de más y no pidió vuelto. La Quinta se
+  // queda el excedente (ya está en ingresos); solo se cierra el falso "a favor".
+  async function marcarSobrante(c: ClienteCXC) {
+    const eur = eurDe(Math.abs(c.saldo_usd));
+    if (!confirm(`${c.cliente} pagó de más ${fmtMonto(eur, "EUR")} y no pidió vuelto. Se marca como sobrante (la Quinta se queda ese dinero, ya contado en ingresos) y el saldo a favor pasa a cero. ¿Continuar?`)) return;
+    await ajustarSaldo(c.cliente, "sobrante");
   }
   async function marcarIncobrable(cuentaId: string) {
     if (!confirm("Marcar esta cuenta como INCOBRABLE. Sale del saldo por cobrar y se registra como pérdida (egreso “Incobrables”). ¿Continuar?")) return;
@@ -3152,15 +3207,6 @@ function SeccionCuentasCobrar() {
     <div className="space-y-4">
       {error && <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419]">{error}</div>}
       {msg && <div className="rounded-lg bg-[#F1F4ED] ring-1 ring-[#C9D6BC] p-3 text-sm text-[#2F4A1F]">{msg}</div>}
-
-      <div className="flex justify-end">
-        <button type="button" onClick={() => setMostrarImport((v) => !v)} className="rounded-lg ring-1 ring-marfil text-cacao px-4 py-2 text-xs uppercase tracking-widest hover:bg-marfil-soft">
-          {mostrarImport ? "Cerrar importador" : "Importar por cliente (PDF)"}
-        </button>
-      </div>
-      {mostrarImport && (
-        <ImportarCxC onListo={(r) => { setMostrarImport(false); setMsg(r); recargar(); }} />
-      )}
 
       <div className="grid gap-3 sm:grid-cols-3">
         <ResumenCaja titulo="Por cobrar" valor={fmtMonto(eurDe(totalUsd), "EUR")} sub={`≈ ${fmtMonto(totalUsd, "USD")} · ${deudores.length} cliente${deudores.length === 1 ? "" : "s"}`} fuerte />
@@ -3283,6 +3329,9 @@ function SeccionCuentasCobrar() {
                     <span className="text-right text-cacao-mute tabular-nums hidden sm:block">{c.ultima ? fmtFecha(c.ultima) : "—"}</span>
                     <div className="flex items-center gap-2 justify-end">
                       <button type="button" onClick={() => setAbierto(abiertoAqui ? null : c.key)} className="rounded-lg ring-1 ring-marfil text-cacao px-3 py-1.5 text-[11px] uppercase tracking-widest hover:bg-marfil-soft">{abiertoAqui ? "Ocultar" : "Ver"}</button>
+                      {enFavor && eurDe(Math.abs(c.saldo_usd)) <= SOBRANTE_MAX_EUR && (
+                        <button type="button" onClick={() => marcarSobrante(c)} title="Pagó de más y no pidió vuelto: la Quinta se queda el sobrante" className="rounded-lg ring-1 ring-[#CBD9BC] text-[#2F4A1F] px-3 py-1.5 text-[11px] uppercase tracking-widest hover:bg-[#F1F4ED]">Marcar sobrante</button>
+                      )}
                       {c.saldo_usd > 0.005 && <button type="button" onClick={() => setCobrando(c)} className="rounded-lg bg-cacao text-white px-3 py-1.5 text-[11px] uppercase tracking-widest hover:bg-terracotta">Cobrar</button>}
                     </div>
                   </div>
@@ -3336,9 +3385,18 @@ function SeccionCuentasCobrar() {
                         <span className="font-medium text-cacao">Saldo: {fmtMonto(eurDe(c.saldo_usd), "EUR")} <span className="text-cacao-mute font-normal">(≈ {fmtMonto(c.saldo_usd, "USD")})</span></span>
                       </div>
                       {enFavor && (
-                        <div className="px-1">
-                          <button type="button" onClick={() => ajustarSaldo(c.cliente)} className="rounded-lg ring-1 ring-marfil text-cacao px-3 py-1.5 text-[11px] uppercase tracking-widest hover:bg-marfil-soft">Ajustar saldo a cero</button>
-                          <span className="ml-2 text-[11px] text-cacao-mute">Si pagó cuentas que luego se eliminaron: cuadra el pago sin borrarlo.</span>
+                        <div className="px-1 flex flex-wrap items-center gap-2">
+                          {eurDe(Math.abs(c.saldo_usd)) <= SOBRANTE_MAX_EUR ? (
+                            <>
+                              <button type="button" onClick={() => marcarSobrante(c)} className="rounded-lg ring-1 ring-[#CBD9BC] text-[#2F4A1F] px-3 py-1.5 text-[11px] uppercase tracking-widest hover:bg-[#F1F4ED]">Marcar sobrante</button>
+                              <span className="text-[11px] text-cacao-mute">Pagó de más y no pidió vuelto: la Quinta se queda el sobrante (ya está en ingresos); el saldo pasa a cero.</span>
+                            </>
+                          ) : (
+                            <>
+                              <button type="button" onClick={() => ajustarSaldo(c.cliente)} className="rounded-lg ring-1 ring-marfil text-cacao px-3 py-1.5 text-[11px] uppercase tracking-widest hover:bg-marfil-soft">Ajustar saldo a cero</button>
+                              <span className="text-[11px] text-cacao-mute">Si pagó cuentas que luego se eliminaron: cuadra el pago sin borrarlo.</span>
+                            </>
+                          )}
                         </div>
                       )}
 
@@ -3387,7 +3445,7 @@ function ModalCobro({ cliente, tasaGlobal, onCerrar, onListo }: { cliente: Clien
   const [moneda, setMoneda] = useState<"EUR" | "USD" | "Bs">("EUR");
   const [tasaBsStr, setTasaBsStr] = useState("");
   const [montoStr, setMontoStr] = useState(totalOpenEur.toFixed(2));
-  const [metodo, setMetodo] = useState("Efectivo");
+  const [metodo, setMetodo] = useState("Punto de Venta");
   const [fecha, setFecha] = useState(hoyISO());
   const [referencia, setReferencia] = useState("");
   const [guardando, setGuardando] = useState(false);
@@ -3566,136 +3624,6 @@ function ModalCobro({ cliente, tasaGlobal, onCerrar, onListo }: { cliente: Clien
   );
 }
 
-// ── Importador de cuentas por cobrar por cliente (PDF Estado de Cuentas) ──
-type DocCxCUI = { fecha: string | null; ref: string; monto: number; refAlt?: string };
-type ClienteCxCUI = { codigo: string; nombre: string; saldo: number; documentos: DocCxCUI[]; incluir: boolean };
-
-function ImportarCxC({ onListo }: { onListo: (msg: string) => void }) {
-  const [cargando, setCargando] = useState(false);
-  const [guardando, setGuardando] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [fecha, setFecha] = useState("");
-  const [clientes, setClientes] = useState<ClienteCxCUI[]>([]);
-  const [cortesias, setCortesias] = useState<{ fecha: string | null; ref: string; monto: number; cliente: string | null }[]>([]);
-  const [leido, setLeido] = useState(false);
-
-  function limpiar() { setClientes([]); setCortesias([]); setFecha(""); setLeido(false); }
-
-  async function subir(file: File) {
-    setError(null); setCargando(true);
-    try {
-      const b64 = await new Promise<string>((resolve, reject) => {
-        const fr = new FileReader();
-        fr.onload = () => resolve(String(fr.result));
-        fr.onerror = () => reject(new Error("no se pudo leer"));
-        fr.readAsDataURL(file);
-      });
-      const r = await fetch("/api/admin/importar-cxc", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pdf_base64: b64 }) });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error || "No se pudo leer el PDF.");
-      const rep = d.reporte as { fecha: string | null; clientes: { codigo: string; nombre: string; saldo: number; documentos: DocCxCUI[] }[]; cortesias?: { fecha: string | null; ref: string; monto: number; cliente: string | null }[] };
-      setFecha(rep.fecha ?? hoyISO());
-      setClientes(rep.clientes.map((c) => ({ ...c, incluir: true })));
-      setCortesias(rep.cortesias ?? []);
-      setLeido(true);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Error"); limpiar();
-    } finally { setCargando(false); }
-  }
-
-  const incluidos = clientes.filter((c) => c.incluir);
-  const totalDeben = incluidos.reduce((s, c) => s + (c.saldo > 0 ? c.saldo : 0), 0);
-  const totalFavor = incluidos.reduce((s, c) => s + (c.saldo < 0 ? c.saldo : 0), 0);
-  const totalDocs = incluidos.reduce((s, c) => s + c.documentos.length, 0);
-  const totalRpp = cortesias.reduce((s, c) => s + (c.monto || 0), 0);
-
-  async function guardar() {
-    if (incluidos.length === 0 && cortesias.length === 0) { setError("No hay cuentas ni cortesías que registrar."); return; }
-    setGuardando(true); setError(null);
-    try {
-      const r = await fetch("/api/admin/importar-cxc", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fecha: fecha || hoyISO(), clientes: incluidos.map((c) => ({ nombre: c.nombre, documentos: c.documentos })), cortesias }),
-      });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error || "No se pudo guardar.");
-      const partes: string[] = [];
-      if (d.creados > 0 || incluidos.length > 0) partes.push(`${d.creados} cuenta${d.creados === 1 ? "" : "s"} nueva${d.creados === 1 ? "" : "s"}`);
-      if (d.duplicadas > 0) partes.push(`${d.duplicadas} ya estaba${d.duplicadas === 1 ? "" : "n"}`);
-      if (d.cortesias > 0) partes.push(`${d.cortesias} cortesía${d.cortesias === 1 ? "" : "s"} (egreso)`);
-      onListo(`Importado: ${partes.join(", ") || "sin cambios"}.`);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Error");
-    } finally { setGuardando(false); }
-  }
-
-  return (
-    <div className="rounded-2xl bg-white ring-1 ring-marfil p-4 space-y-4">
-      {error && <div className="rounded-lg bg-[#F9EBE7] ring-1 ring-[#E8C5BC] p-3 text-sm text-[#7A2419]">{error}</div>}
-
-      {!leido ? (
-        <div className="text-center py-4">
-          <p className="font-display text-[11px] tracking-[0.3em] uppercase text-cacao-mute mb-1">Importar por cliente</p>
-          <p className="text-sm text-cacao-soft mb-4 font-serif italic">Sube el “detallado por forma de pago” (Excel .xls) filtrado a <strong>CXC y RPP</strong>, o el PDF “Estado de Cuentas Clientes”. Las CXC entran como cuentas por cobrar (por cliente) y las RPP como egresos (cortesías), con su fecha real.</p>
-          <label className="inline-block rounded-lg bg-cacao text-white px-5 py-2.5 text-xs uppercase tracking-widest hover:bg-terracotta cursor-pointer">
-            {cargando ? "Leyendo…" : "Elegir archivo (PDF o Excel)"}
-            <input type="file" accept="application/pdf,.pdf,.xls,.xlsx,application/vnd.ms-excel" className="hidden" disabled={cargando} onChange={(e) => { const f = e.target.files?.[0]; if (f) subir(f); e.target.value = ""; }} />
-          </label>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between gap-3">
-            <span className="font-display text-[10px] tracking-[0.25em] uppercase text-cacao-mute">Vista previa · {incluidos.length} cliente{incluidos.length === 1 ? "" : "s"} · {totalDocs} cuenta{totalDocs === 1 ? "" : "s"}</span>
-            <button type="button" onClick={limpiar} className="text-xs uppercase tracking-widest text-cacao-soft hover:text-cacao">Cambiar PDF</button>
-          </div>
-          <Campo label="Fecha del reporte"><input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} className="w-full max-w-[12rem] border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" /></Campo>
-
-          <div className="rounded-xl ring-1 ring-marfil overflow-hidden max-h-96 overflow-y-auto">
-            <ul className="divide-y divide-marfil">
-              {clientes.map((c, i) => (
-                <li key={`${c.codigo}-${i}`} className={`px-3 py-2 ${c.incluir ? "" : "opacity-40"}`}>
-                  <div className="grid grid-cols-[auto_1fr_auto] gap-3 items-center">
-                    <input type="checkbox" checked={c.incluir} onChange={() => setClientes((cs) => cs.map((x, j) => (j === i ? { ...x, incluir: !x.incluir } : x)))} className="accent-[#0F0F0F]" />
-                    <span className="text-cacao text-sm min-w-0 truncate">{c.nombre}
-                      {c.saldo < 0 && <span className="ml-2 inline-block rounded-full bg-[#F1F4ED] text-[#2F4A1F] text-[9px] uppercase tracking-widest px-2 py-0.5 align-middle">A favor</span>}
-                      <span className="ml-2 text-[11px] text-cacao-mute">{c.documentos.length} cuenta{c.documentos.length === 1 ? "" : "s"}</span>
-                    </span>
-                    <span className={`text-sm text-right tabular-nums ${c.saldo < 0 ? "text-[#2F4A1F]" : "text-cacao"}`}>{fmtMonto(c.saldo, "EUR")}</span>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          <div className="text-sm space-y-1">
-            <div className="grid grid-cols-[1fr_auto] gap-3">
-              <span className="font-medium text-cacao">Por cobrar (deudores)</span>
-              <span className="text-right font-medium text-cacao tabular-nums">{fmtMonto(totalDeben, "EUR")}</span>
-            </div>
-            {totalFavor < 0 && (
-              <div className="grid grid-cols-[1fr_auto] gap-3 text-[#2F4A1F]">
-                <span>A favor de clientes</span>
-                <span className="text-right tabular-nums">{fmtMonto(totalFavor, "EUR")}</span>
-              </div>
-            )}
-            {cortesias.length > 0 && (
-              <div className="grid grid-cols-[1fr_auto] gap-3 text-[#7A2419]">
-                <span>Cortesías (RPP) → egreso · {cortesias.length}</span>
-                <span className="text-right tabular-nums">{fmtMonto(totalRpp, "EUR")}</span>
-              </div>
-            )}
-            <p className="text-[11px] text-cacao-mute pt-1">Las CXC se guardan como cuentas por cobrar (por cliente, con su fecha y referencia; no se duplican al reimportar). Las cortesías (RPP) se guardan como egresos con su fecha; al reimportar reemplazan las de esas fechas. Pagos y cuentas manuales no se tocan.</p>
-          </div>
-
-          <button type="button" onClick={guardar} disabled={guardando} className="rounded-lg bg-cacao text-white px-5 py-2.5 text-xs uppercase tracking-widest hover:bg-terracotta disabled:bg-marfil disabled:text-cacao-mute">
-            {guardando ? "Guardando…" : `Importar ${totalDocs} cuenta${totalDocs === 1 ? "" : "s"}${cortesias.length ? ` + ${cortesias.length} cortesía${cortesias.length === 1 ? "" : "s"}` : ""}`}
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ── Históricos, comparación e indicadores ───────────────────────────
 type MesHist = { mes: string; ingresos: Record<string, number>; egresos: Record<string, number> };

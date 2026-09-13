@@ -13,7 +13,7 @@ const n = (v: unknown) => (v == null ? 0 : Number(v) || 0);
 const norm = (s: string | null) => (s ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 const r2 = (x: number) => Math.round(x * 100) / 100;
 
-type EgRow = { id?: string; concepto?: string | null; proveedor_nombre?: string | null; categoria_id?: string | null; fecha: string | null; monto: number | null; moneda: string | null; monto_usd: number | null; categoria_nombre: string | null; clasificacion: string | null };
+type EgRow = { id?: string; concepto?: string | null; proveedor_nombre?: string | null; categoria_id?: string | null; fecha: string | null; monto: number | null; moneda: string | null; monto_usd: number | null; categoria_nombre: string | null; clasificacion: string | null; pagada?: boolean | null };
 
 // GET ?desde&hasta → gastos operativos (admin_egreso) en € para el P&L:
 //   • fijos / variables (excluye 'Insumos' → el costo de insumos sale de Cocina
@@ -63,13 +63,22 @@ export async function GET(req: NextRequest) {
   const esInsumo = (e: EgRow) => norm(e.categoria_nombre) === "insumos";
   const esFijo = (e: EgRow) => norm(e.clasificacion) === "fija" || norm(e.clasificacion) === "fijo";
 
+  // Pide `pagada`; si la columna no existe aún (migración pendiente) reintenta
+  // sin ella (y todo se trata como pagado, comportamiento anterior).
+  const selEg = async (cols: string, d0: string, d1: string) => {
+    const con = await sb.from("admin_egreso").select(`${cols}, pagada`).gte("fecha", d0).lte("fecha", d1);
+    if (!con.error) return con;
+    return sb.from("admin_egreso").select(cols).gte("fecha", d0).lte("fecha", d1);
+  };
   const [cur, prev] = await Promise.all([
-    sb.from("admin_egreso").select("id, concepto, proveedor_nombre, categoria_id, fecha, monto, moneda, monto_usd, categoria_nombre, clasificacion").gte("fecha", desde).lte("fecha", hasta),
-    sb.from("admin_egreso").select("fecha, monto, moneda, monto_usd, categoria_nombre, clasificacion").gte("fecha", prevDesde).lte("fecha", prevHasta),
+    selEg("id, concepto, proveedor_nombre, categoria_id, fecha, monto, moneda, monto_usd, categoria_nombre, clasificacion", desde, hasta),
+    selEg("fecha, monto, moneda, monto_usd, categoria_nombre, clasificacion", prevDesde, prevHasta),
   ]);
   if (cur.error) return NextResponse.json({ error: cur.error.message }, { status: 500 });
 
-  const rows = (cur.data ?? []) as EgRow[];
+  // Caja real: solo cuentan los egresos pagados (pagada != false). Los pendientes
+  // (cuentas por pagar) no son gasto hasta que se pagan.
+  const rows = ((cur.data ?? []) as unknown as EgRow[]).filter((e) => e.pagada !== false);
   // Egresos individuales (sin insumos ni cortesías) para el detalle por rubro.
   const items = rows.filter((e) => !esCortesia(e) && !esInsumo(e)).map((e) => ({
     id: e.id, fecha: e.fecha, concepto: e.concepto ?? null, proveedor: e.proveedor_nombre ?? null,
@@ -90,8 +99,8 @@ export async function GET(req: NextRequest) {
     cell.eur += eur; cell.usd += usd; porCat.set(key, cell);
   }
   let pFijos = 0, pVariables = 0;
-  for (const e of (prev.data ?? []) as EgRow[]) {
-    if (esCortesia(e) || esInsumo(e)) continue;
+  for (const e of (prev.data ?? []) as unknown as EgRow[]) {
+    if (e.pagada === false || esCortesia(e) || esInsumo(e)) continue;
     if (esFijo(e)) pFijos += eurDe(e); else pVariables += eurDe(e);
   }
 

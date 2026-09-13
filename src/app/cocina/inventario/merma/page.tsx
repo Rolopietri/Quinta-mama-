@@ -1,8 +1,8 @@
 import { Header } from "@/components/Header";
 import Link from "next/link";
-import { ConteoTabs } from "./ConteoTabs";
+import { MermaClient } from "./MermaClient";
 
-export default function ConteoFisicoPage() {
+export default function MermaPage() {
   return (
     <>
       <Header subtitle="Cocina · Inventario" />
@@ -13,13 +13,12 @@ export default function ConteoFisicoPage() {
               Cocina · Inventario
             </p>
             <h1 className="mt-2 font-cinzel text-2xl sm:text-3xl tracking-[0.12em] uppercase text-cacao">
-              Conteo físico y mermas
+              Merma por conteo
             </h1>
             <p className="mt-3 font-serif italic text-cacao-soft max-w-2xl">
-              Cuadrá el inventario con la realidad y revisa la merma que revela
-              cada conteo. En <b>Conteo</b> pones el stock real (a mano o
-              importando el Excel); en <b>Merma</b> ves, conteo por conteo,
-              cuánto se perdió, valorado en dólares.
+              Cuánto se pierde entre lo que el sistema espera y lo que cuentas de
+              verdad, conteo por conteo, valorado en dólares. La base para
+              estandarizar tu merma y afinar cuánto comprar.
             </p>
           </div>
           <Link
@@ -29,7 +28,7 @@ export default function ConteoFisicoPage() {
             ← Insumos e Inventario
           </Link>
         </section>
-        <ConteoTabs />
+        <MermaClient />
       </main>
     </>
   );
