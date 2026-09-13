@@ -10,7 +10,6 @@ import {
   type CalendarioItemInput,
 } from "@/lib/data/calendario";
 import { listEventos } from "@/lib/data/eventos";
-import { listPersonas } from "@/lib/data/tareas-so";
 import {
   TIPOS_CALENDARIO,
   ESTADOS_CALENDARIO,
@@ -102,13 +101,9 @@ type Disp = {
   raw?: CalendarioItem;
 };
 
-const DEFAULT_PERSONAS = [
-  "Rodrigo Pietri",
-  "Óscar Pietri",
-  "Beatriz Márquez",
-  "Lucía Dickson",
-  "Luis Castellanos",
-];
+// Equipo que usa el calendario. Lista fija (definida por el equipo) para que el
+// menú de responsables muestre exactamente estos nombres.
+const PERSONAS_EQUIPO = ["Óscar", "Beatriz", "Rodrigo", "Lucía", "Inés"];
 
 type FormState = {
   tipo: TipoCalendario;
@@ -141,7 +136,6 @@ export function CalendarioClient() {
 
   const [items, setItems] = useState<CalendarioItem[]>([]);
   const [eventos, setEventos] = useState<Evento[]>([]);
-  const [personas, setPersonas] = useState<string[]>(DEFAULT_PERSONAS);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -183,14 +177,6 @@ export function CalendarioClient() {
         if (cancelled) return;
         setItems(its);
         setEventos(evs);
-        try {
-          const ps = await listPersonas();
-          if (!cancelled && ps.length > 0) {
-            setPersonas(ps.map((p) => p.nombre));
-          }
-        } catch {
-          // sin personas de la DB: usamos las por defecto
-        }
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
       } finally {
@@ -204,11 +190,11 @@ export function CalendarioClient() {
 
   // Opciones de responsable: personas del equipo + los que ya aparecen en datos
   const opcionesResponsable = useMemo(() => {
-    const set = new Set<string>(personas);
+    const set = new Set<string>(PERSONAS_EQUIPO);
     set.add("Equipo");
     for (const it of items) if (it.responsable) set.add(it.responsable);
     return Array.from(set).sort((a, b) => a.localeCompare(b, "es"));
-  }, [personas, items]);
+  }, [items]);
 
   // Índice: fecha ISO → items visibles ese día (con filtros aplicados)
   const porFecha = useMemo(() => {
