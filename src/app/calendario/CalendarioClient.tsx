@@ -28,6 +28,7 @@ import {
   ChevronIcon,
   PlusIcon,
   ClockIcon,
+  CheckIcon,
 } from "@/components/icons";
 
 // ── Helpers de fecha (sin librerías, en hora local) ──────────────────
@@ -85,6 +86,16 @@ function fechaLarga(iso: string): string {
   return `${WEEKDAYS[(d.getDay() + 6) % 7]} ${d.getDate()} de ${MESES[d.getMonth()]}`;
 }
 
+/** Separa un texto de responsables ("Ana, Beto") en lista de nombres. */
+function splitResp(s?: string | null): string[] {
+  return s
+    ? s
+        .split(",")
+        .map((x) => x.trim())
+        .filter(Boolean)
+    : [];
+}
+
 // Un item mostrable en el calendario: propio (editable) o un evento del módulo
 // Eventos (solo lectura, se abre en su ficha).
 type Disp = {
@@ -111,7 +122,7 @@ type FormState = {
   fecha: string;
   hora: string;
   fechaFin: string;
-  responsable: string;
+  responsables: string[];
   area: string;
   estado: EstadoCalendario;
   notas: string;
@@ -124,7 +135,7 @@ function emptyForm(fecha: string): FormState {
     fecha,
     hora: "",
     fechaFin: "",
-    responsable: "",
+    responsables: [],
     area: "",
     estado: "pendiente",
     notas: "",
@@ -206,7 +217,7 @@ export function CalendarioClient() {
   const opcionesResponsable = useMemo(() => {
     const set = new Set<string>(PERSONAS_EQUIPO);
     set.add("Equipo");
-    for (const it of items) if (it.responsable) set.add(it.responsable);
+    for (const it of items) for (const n of splitResp(it.responsable)) set.add(n);
     return Array.from(set).sort((a, b) => a.localeCompare(b, "es"));
   }, [items]);
 
@@ -221,7 +232,8 @@ export function CalendarioClient() {
 
     for (const it of items) {
       if (!tiposOn.has(it.tipo)) continue;
-      if (filtroPersona && it.responsable !== filtroPersona) continue;
+      if (filtroPersona && !splitResp(it.responsable).includes(filtroPersona))
+        continue;
       if (filtroArea && it.area !== filtroArea) continue;
       for (const f of rangoFechas(it.fecha, it.fechaFin)) {
         add(f, {
@@ -318,7 +330,7 @@ export function CalendarioClient() {
       fecha: it.fecha,
       hora: it.hora ?? "",
       fechaFin: it.fechaFin ?? "",
-      responsable: it.responsable ?? "",
+      responsables: splitResp(it.responsable),
       area: it.area ?? "",
       estado: it.estado,
       notas: it.notas ?? "",
@@ -347,7 +359,7 @@ export function CalendarioClient() {
       fecha: form.fecha,
       fechaFin: form.fechaFin || null,
       hora: form.hora || null,
-      responsable: form.responsable || null,
+      responsable: form.responsables.length ? form.responsables.join(", ") : null,
       area: form.area || null,
       estado: form.estado,
       notas: form.notas || null,
@@ -397,7 +409,9 @@ export function CalendarioClient() {
   /** Texto del tooltip: responsable para items; para eventos, "Evento". */
   function tipSub(d: Disp): string {
     if (d.source === "evento") return "Evento";
-    return `Responsable: ${d.responsable ?? "sin asignar"}`;
+    const r = splitResp(d.responsable);
+    if (r.length === 0) return "Sin responsable asignado";
+    return `${r.length > 1 ? "Responsables" : "Responsable"}: ${r.join(", ")}`;
   }
 
   // ── Render ───────────────────────────────────────────────────────
@@ -800,40 +814,58 @@ export function CalendarioClient() {
                 />
               </label>
 
-              <div className="grid grid-cols-2 gap-3">
-                <label className="block">
-                  <span className="text-xs text-cacao-soft">Responsable</span>
-                  <select
-                    value={form.responsable}
-                    onChange={(e) =>
-                      setForm((f) => ({ ...f, responsable: e.target.value }))
-                    }
-                    className="mt-1 w-full rounded-lg ring-1 ring-marfil bg-white px-3 py-2 text-sm text-cacao focus:outline-none focus:ring-terracotta"
-                  >
-                    <option value="">— Nadie —</option>
-                    {opcionesResponsable.map((p) => (
-                      <option key={p} value={p}>
+              <div className="block">
+                <span className="text-xs text-cacao-soft">
+                  Responsables{" "}
+                  <span className="text-cacao-mute">
+                    (toca uno o varios)
+                  </span>
+                </span>
+                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  {opcionesResponsable.map((p) => {
+                    const on = form.responsables.includes(p);
+                    return (
+                      <button
+                        key={p}
+                        type="button"
+                        onClick={() =>
+                          setForm((f) => ({
+                            ...f,
+                            responsables: on
+                              ? f.responsables.filter((x) => x !== p)
+                              : [...f.responsables, p],
+                          }))
+                        }
+                        aria-pressed={on}
+                        className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs ring-1 transition-colors ${
+                          on
+                            ? "bg-cacao text-white ring-cacao"
+                            : "bg-white text-cacao-soft ring-marfil hover:bg-marfil-soft"
+                        }`}
+                      >
+                        {on && <CheckIcon className="size-3.5" />}
                         {p}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="block">
-                  <span className="text-xs text-cacao-soft">Área</span>
-                  <select
-                    value={form.area}
-                    onChange={(e) => setForm((f) => ({ ...f, area: e.target.value }))}
-                    className="mt-1 w-full rounded-lg ring-1 ring-marfil bg-white px-3 py-2 text-sm text-cacao focus:outline-none focus:ring-terracotta"
-                  >
-                    <option value="">— Sin área —</option>
-                    {AREAS.map((a) => (
-                      <option key={a} value={a}>
-                        {a}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
+
+              <label className="block">
+                <span className="text-xs text-cacao-soft">Área</span>
+                <select
+                  value={form.area}
+                  onChange={(e) => setForm((f) => ({ ...f, area: e.target.value }))}
+                  className="mt-1 w-full rounded-lg ring-1 ring-marfil bg-white px-3 py-2 text-sm text-cacao focus:outline-none focus:ring-terracotta"
+                >
+                  <option value="">— Sin área —</option>
+                  {AREAS.map((a) => (
+                    <option key={a} value={a}>
+                      {a}
+                    </option>
+                  ))}
+                </select>
+              </label>
 
               <label className="block">
                 <span className="text-xs text-cacao-soft">Estado</span>
