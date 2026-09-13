@@ -1,6 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { Header } from "@/components/Header";
+import { CalendarioClient } from "./calendario/CalendarioClient";
 
 const cards: {
   href: string;
@@ -96,6 +97,27 @@ export default function Home() {
           </p>
 
           <hr className="mt-12 mx-auto w-16 border-0 border-t border-marfil" />
+        </section>
+
+        {/* Calendario */}
+        <section className="mb-16 sm:mb-20">
+          <div className="flex items-baseline justify-between mb-4">
+            <div>
+              <span className="font-display text-[10px] tracking-[0.35em] text-cacao-soft">
+                AGENDA
+              </span>
+              <h2 className="mt-1 text-2xl font-medium tracking-tight text-cacao">
+                Calendario
+              </h2>
+            </div>
+            <Link
+              href="/calendario"
+              className="text-sm text-cacao-soft hover:text-terracotta transition-colors whitespace-nowrap"
+            >
+              Pantalla completa →
+            </Link>
+          </div>
+          <CalendarioClient />
         </section>
 
         {/* Cards */}

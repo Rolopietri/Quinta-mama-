@@ -124,6 +124,15 @@ export function ChevronIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+/** Signo "+" para acciones de agregar. */
+export function PlusIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Svg {...props}>
+      <path d="M12 5v14M5 12h14" />
+    </Svg>
+  );
+}
+
 export function WifiIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <Svg {...props}>
