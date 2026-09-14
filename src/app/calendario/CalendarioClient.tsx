@@ -29,6 +29,8 @@ import {
   PlusIcon,
   ClockIcon,
   CheckIcon,
+  PencilIcon,
+  TrashIcon,
 } from "@/components/icons";
 
 // ── Helpers de fecha (sin librerías, en hora local) ──────────────────
@@ -732,57 +734,86 @@ export function CalendarioClient() {
               const estado = di.estado ? estadoCalendarioMeta(di.estado) : null;
               return (
                 <li key={di.key}>
-                  <button
-                    type="button"
-                    onClick={() => onDispClick(di)}
-                    className="flex w-full items-start gap-3 rounded-xl ring-1 ring-marfil bg-white px-3 py-2.5 text-left hover:bg-marfil-soft transition-colors"
+                  <div
+                    className={`flex items-start gap-2 rounded-xl ring-1 ring-marfil bg-white px-3 py-2.5 transition-colors ${
+                      di.source === "gcal" ? "" : "hover:bg-marfil-soft"
+                    }`}
                   >
-                    <span className={`mt-1 size-2.5 shrink-0 rounded-full ${meta.dot}`} />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <span
-                          className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] ring-1 ${meta.color}`}
-                        >
-                          {meta.label}
-                        </span>
-                        {di.hora && (
-                          <span className="inline-flex items-center gap-1 text-xs text-cacao-soft">
-                            <ClockIcon className="size-3.5" />
-                            {di.hora}
-                          </span>
-                        )}
-                        {di.source === "evento" && (
-                          <span className="text-[10px] text-cacao-mute">
-                            (Eventos ↗)
-                          </span>
-                        )}
-                        {di.source === "gcal" && (
-                          <span className="text-[10px] text-cacao-mute">
-                            ({di.gcalCal || "Google"})
-                          </span>
-                        )}
-                      </div>
-                      <p
-                        className={`mt-1 text-sm text-cacao ${
-                          di.estado === "completado" ? "line-through opacity-60" : ""
-                        }`}
-                      >
-                        {di.titulo}
-                      </p>
-                      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-cacao-soft">
-                        {di.responsable && <span>{di.responsable}</span>}
-                        {di.area && <span>· {di.area}</span>}
-                        {estado && di.source === "item" && (
+                    <button
+                      type="button"
+                      onClick={() => onDispClick(di)}
+                      className="flex min-w-0 flex-1 items-start gap-3 text-left"
+                    >
+                      <span className={`mt-1 size-2.5 shrink-0 rounded-full ${meta.dot}`} />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
                           <span
-                            className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 ring-1 ${estado.color}`}
+                            className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] ring-1 ${meta.color}`}
                           >
-                            <span className={`size-1.5 rounded-full ${estado.dot}`} />
-                            {estado.label}
+                            {meta.label}
                           </span>
-                        )}
+                          {di.hora && (
+                            <span className="inline-flex items-center gap-1 text-xs text-cacao-soft">
+                              <ClockIcon className="size-3.5" />
+                              {di.hora}
+                            </span>
+                          )}
+                          {di.source === "evento" && (
+                            <span className="text-[10px] text-cacao-mute">
+                              (Eventos ↗)
+                            </span>
+                          )}
+                          {di.source === "gcal" && (
+                            <span className="text-[10px] text-cacao-mute">
+                              ({di.gcalCal || "Google"})
+                            </span>
+                          )}
+                        </div>
+                        <p
+                          className={`mt-1 text-sm text-cacao ${
+                            di.estado === "completado" ? "line-through opacity-60" : ""
+                          }`}
+                        >
+                          {di.titulo}
+                        </p>
+                        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-cacao-soft">
+                          {di.responsable && <span>{di.responsable}</span>}
+                          {di.area && <span>· {di.area}</span>}
+                          {estado && di.source === "item" && (
+                            <span
+                              className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 ring-1 ${estado.color}`}
+                            >
+                              <span className={`size-1.5 rounded-full ${estado.dot}`} />
+                              {estado.label}
+                            </span>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  </button>
+                    </button>
+
+                    {di.source === "item" && di.raw && (
+                      <div className="flex shrink-0 items-center gap-0.5">
+                        <button
+                          type="button"
+                          onClick={() => di.raw && openEdit(di.raw)}
+                          aria-label="Editar"
+                          title="Editar"
+                          className="rounded-lg p-1.5 text-cacao-mute hover:text-cacao hover:bg-marfil-soft"
+                        >
+                          <PencilIcon className="size-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDel(di.id)}
+                          aria-label="Eliminar"
+                          title="Eliminar"
+                          className="rounded-lg p-1.5 text-cacao-mute hover:text-terracotta hover:bg-marfil-soft"
+                        >
+                          <TrashIcon className="size-4" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </li>
               );
             })}
