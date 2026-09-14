@@ -100,7 +100,7 @@ function splitResp(s?: string | null): string[] {
 // Eventos (solo lectura, se abre en su ficha).
 type Disp = {
   key: string;
-  source: "item" | "evento";
+  source: "item" | "evento" | "gcal";
   id: string;
   tipo: TipoCalendario;
   titulo: string;
@@ -110,6 +110,22 @@ type Disp = {
   area?: string;
   fecha: string;
   raw?: CalendarioItem;
+};
+
+// Eventos que llegan del Google Calendar (vía /api/calendario/google).
+type GCalEvent = {
+  id: string;
+  titulo: string;
+  fecha: string;
+  fechaFin?: string;
+  hora?: string;
+};
+
+// Estilo propio (violeta) para distinguir los eventos de Google.
+const GCAL_META = {
+  label: "Google Calendar",
+  color: "bg-violet-50 text-violet-800 ring-violet-200",
+  dot: "bg-violet-500",
 };
 
 // Equipo que usa el calendario. Lista fija (definida por el equipo) para que el
@@ -147,6 +163,7 @@ export function CalendarioClient() {
 
   const [items, setItems] = useState<CalendarioItem[]>([]);
   const [eventos, setEventos] = useState<Evento[]>([]);
+  const [gcal, setGcal] = useState<GCalEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -161,6 +178,7 @@ export function CalendarioClient() {
   const [filtroPersona, setFiltroPersona] = useState("");
   const [filtroArea, setFiltroArea] = useState("");
   const [verEventos, setVerEventos] = useState(true);
+  const [verGoogle, setVerGoogle] = useState(true);
 
   // Modal / borrado
   const [modalOpen, setModalOpen] = useState(false);
@@ -207,6 +225,17 @@ export function CalendarioClient() {
         setError(e instanceof Error ? e.message : String(e));
       }
       setLoading(false);
+
+      // Google Calendar (aparte, no bloquea; si no está configurado se ignora).
+      try {
+        const r = await fetch("/api/calendario/google");
+        if (r.ok) {
+          const j = (await r.json()) as { events?: GCalEvent[] };
+          if (!cancelled && Array.isArray(j.events)) setGcal(j.events);
+        }
+      } catch {
+        // feed no disponible: se ignora
+      }
     })();
     return () => {
       cancelled = true;
@@ -271,6 +300,23 @@ export function CalendarioClient() {
       }
     }
 
+    // Google Calendar (solo lectura). Se oculta con filtro de persona/área.
+    if (verGoogle && !filtroPersona && !filtroArea) {
+      for (const g of gcal) {
+        for (const f of rangoFechas(g.fecha, g.fechaFin)) {
+          add(f, {
+            key: `g-${g.id}-${f}`,
+            source: "gcal",
+            id: g.id,
+            tipo: "reunion",
+            titulo: g.titulo,
+            hora: g.hora,
+            fecha: f,
+          });
+        }
+      }
+    }
+
     // Orden dentro del día: por hora (los sin hora al final), luego título
     for (const arr of map.values()) {
       arr.sort((a, b) => {
@@ -281,7 +327,7 @@ export function CalendarioClient() {
       });
     }
     return map;
-  }, [items, eventos, tiposOn, filtroPersona, filtroArea, verEventos]);
+  }, [items, eventos, gcal, tiposOn, filtroPersona, filtroArea, verEventos, verGoogle]);
 
   const weeks = useMemo(
     () => (cursor ? buildMonth(cursor.y, cursor.m) : []),
@@ -408,6 +454,7 @@ export function CalendarioClient() {
 
   /** Texto del tooltip: responsable para items; para eventos, "Evento". */
   function tipSub(d: Disp): string {
+    if (d.source === "gcal") return "Google Calendar";
     if (d.source === "evento") return "Evento";
     const r = splitResp(d.responsable);
     if (r.length === 0) return "Sin responsable asignado";
@@ -527,6 +574,18 @@ export function CalendarioClient() {
             />
             Mostrar eventos
           </label>
+          <label className="inline-flex items-center gap-1.5 text-xs text-cacao-soft cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={verGoogle}
+              onChange={(e) => setVerGoogle(e.target.checked)}
+              className="accent-violet-500"
+            />
+            <span className="inline-flex items-center gap-1">
+              <span className="size-2 rounded-full bg-violet-500" />
+              Google Calendar
+            </span>
+          </label>
         </div>
       </div>
 
@@ -589,7 +648,8 @@ export function CalendarioClient() {
 
                 <div className="mt-0.5 space-y-0.5">
                   {visibles.map((di) => {
-                    const meta = tipoCalendarioMeta(di.tipo);
+                    const meta =
+                      di.source === "gcal" ? GCAL_META : tipoCalendarioMeta(di.tipo);
                     const done = di.estado === "completado";
                     return (
                       <button
@@ -664,7 +724,8 @@ export function CalendarioClient() {
         ) : (
           <ul className="space-y-2">
             {selDisp.map((di) => {
-              const meta = tipoCalendarioMeta(di.tipo);
+              const meta =
+                di.source === "gcal" ? GCAL_META : tipoCalendarioMeta(di.tipo);
               const estado = di.estado ? estadoCalendarioMeta(di.estado) : null;
               return (
                 <li key={di.key}>
@@ -690,6 +751,11 @@ export function CalendarioClient() {
                         {di.source === "evento" && (
                           <span className="text-[10px] text-cacao-mute">
                             (Eventos ↗)
+                          </span>
+                        )}
+                        {di.source === "gcal" && (
+                          <span className="text-[10px] text-cacao-mute">
+                            (Google)
                           </span>
                         )}
                       </div>
