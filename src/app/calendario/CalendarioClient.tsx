@@ -110,6 +110,7 @@ type Disp = {
   area?: string;
   fecha: string;
   raw?: CalendarioItem;
+  gcalCal?: string; // nombre del calendario de Google de origen
 };
 
 // Eventos que llegan del Google Calendar (vía /api/calendario/google).
@@ -119,6 +120,7 @@ type GCalEvent = {
   fecha: string;
   fechaFin?: string;
   hora?: string;
+  cal?: string;
 };
 
 // Estilo propio (violeta) para distinguir los eventos de Google.
@@ -312,6 +314,7 @@ export function CalendarioClient() {
             titulo: g.titulo,
             hora: g.hora,
             fecha: f,
+            gcalCal: g.cal,
           });
         }
       }
@@ -454,7 +457,7 @@ export function CalendarioClient() {
 
   /** Texto del tooltip: responsable para items; para eventos, "Evento". */
   function tipSub(d: Disp): string {
-    if (d.source === "gcal") return "Google Calendar";
+    if (d.source === "gcal") return d.gcalCal || "Google Calendar";
     if (d.source === "evento") return "Evento";
     const r = splitResp(d.responsable);
     if (r.length === 0) return "Sin responsable asignado";
@@ -755,7 +758,7 @@ export function CalendarioClient() {
                         )}
                         {di.source === "gcal" && (
                           <span className="text-[10px] text-cacao-mute">
-                            (Google)
+                            ({di.gcalCal || "Google"})
                           </span>
                         )}
                       </div>
