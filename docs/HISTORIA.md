@@ -412,6 +412,23 @@ Decisiones:
 - **Pendiente de operación**: aplicar `supabase/calendario.sql` una vez en el
   SQL Editor de Supabase para crear la tabla en producción.
 
+### Integración con Google Calendar (read-only)
+
+El calendario del panel también refleja el Google Calendar de `info@quintamama.com`
+(one-way, Google → panel):
+
+- `src/lib/google-calendar.ts` parsea el feed **iCal secreto** con `node-ical`,
+  expande recurrentes (RRULE), respeta EXDATE/overrides y presenta fechas/horas
+  en `America/Caracas`.
+- Ruta `src/app/api/calendario/google/route.ts` (runtime node, caché 10 min):
+  lee `GOOGLE_CALENDAR_ICS_URL` (env, **solo Vercel** — es secreta), descarga el
+  `.ics` y devuelve los eventos de −3 a +12 meses. Si la env falta o el feed
+  falla, devuelve `[]` (no rompe nada).
+- En `CalendarioClient` los eventos de Google se superponen en **violeta**
+  (solo lectura), con toggle "Google Calendar".
+- **Pendiente de operación**: en Google Calendar copiar "Dirección secreta en
+  formato iCal" y ponerla en Vercel como `GOOGLE_CALENDAR_ICS_URL`.
+
 ## Cómo me hablo conmigo mismo en futuras sesiones
 
 Si abres una conversación nueva con Claude (o Claude Code) sobre este proyecto:
