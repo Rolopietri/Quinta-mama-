@@ -48,9 +48,26 @@ type PagoRow = {
 
 // Trae cuentas ABIERTAS (cobrada=false) y todos los pagos, agrupados por cliente.
 async function cargarClientes(sb: ReturnType<typeof createServiceClient>) {
-  const [{ data: cuentasD }, { data: pagosD }, { data: aliasD }] = await Promise.all([
-    sb!.from("admin_cuenta_cobrar").select("*").eq("cobrada", false).order("fecha", { ascending: true }),
-    sb!.from("admin_cxc_pago").select("*").order("fecha", { ascending: true }),
+  // Pagina para NO cortar en el tope de 1000 filas de Supabase: con muchas CXC
+  // abiertas (meses acumulados), sin paginar solo llegaban las 1000 más viejas y
+  // las nuevas (p. ej. septiembre) no se reflejaban.
+  const cobrarPaginado = async <T,>(tabla: string, soloAbiertas: boolean): Promise<T[]> => {
+    const PAGE = 1000;
+    const out: T[] = [];
+    for (let from = 0; ; from += PAGE) {
+      let q = sb!.from(tabla).select("*");
+      if (soloAbiertas) q = q.eq("cobrada", false);
+      const { data, error } = await q.order("fecha", { ascending: true }).range(from, from + PAGE - 1);
+      if (error) break;
+      const rows = (data as T[]) ?? [];
+      out.push(...rows);
+      if (rows.length < PAGE) break;
+    }
+    return out;
+  };
+  const [cuentasD, pagosD, { data: aliasD }] = await Promise.all([
+    cobrarPaginado<CuentaRow>("admin_cuenta_cobrar", true),
+    cobrarPaginado<PagoRow>("admin_cxc_pago", false),
     sb!.from("admin_cliente_alias").select("alias_key, canonico"),
   ]);
   // Excluye las marcadas incobrables (son pérdida, ya no cuentan como por cobrar).
