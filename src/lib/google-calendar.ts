@@ -30,7 +30,14 @@ export type GCalEvent = {
   fecha: string; // YYYY-MM-DD
   fechaFin?: string; // YYYY-MM-DD (rango, opcional)
   hora?: string; // HH:MM (24h); ausente si es de día completo
+  cal?: string; // nombre del calendario de origen (ej. "MASAJES QTA")
 };
+
+/** Extrae el nombre del calendario (X-WR-CALNAME) del texto .ics, si viene. */
+export function calNameFromIcs(text: string): string | undefined {
+  const m = text.match(/^X-WR-CALNAME:(.*)$/m);
+  return m ? m[1].trim() : undefined;
+}
 
 const TZ = "America/Caracas";
 const ymdF = new Intl.DateTimeFormat("en-CA", {
@@ -59,6 +66,7 @@ function makeEvent(
   start: Date,
   end: Date | undefined,
   allDay: boolean,
+  cal: string | undefined,
 ): GCalEvent {
   const titulo = (summary || "(sin título)").trim();
   if (allDay) {
@@ -70,7 +78,7 @@ function makeEvent(
       const f = ymdUtc(last);
       if (f > fecha) fechaFin = f;
     }
-    return { id: `${uid}-${fecha}`, titulo, fecha, fechaFin };
+    return { id: `${uid}-${fecha}`, titulo, fecha, fechaFin, cal };
   }
   const fecha = ymdTz(start);
   let fechaFin: string | undefined;
@@ -78,7 +86,14 @@ function makeEvent(
     const f = ymdTz(end);
     if (f > fecha) fechaFin = f;
   }
-  return { id: `${uid}-${start.toISOString()}`, titulo, fecha, fechaFin, hora: hmTz(start) };
+  return {
+    id: `${uid}-${start.toISOString()}`,
+    titulo,
+    fecha,
+    fechaFin,
+    hora: hmTz(start),
+    cal,
+  };
 }
 
 /**
@@ -89,6 +104,7 @@ export function parseIcsToEvents(
   text: string,
   rangeStart: string,
   rangeEnd: string,
+  cal?: string,
 ): GCalEvent[] {
   let data: Record<string, RawEvent>;
   try {
@@ -129,13 +145,13 @@ export function parseIcsToEvents(
           summary = ov.summary ?? summary;
           ad = ov.datetype === "date";
         }
-        out.push(makeEvent(uid, summary, start, end, ad));
+        out.push(makeEvent(uid, summary, start, end, ad, cal));
         if (out.length >= 2000) return out;
       }
     } else {
       const en = ev.end || ev.start;
       if (ev.start <= re && en >= rs) {
-        out.push(makeEvent(uid, ev.summary, ev.start, ev.end, allDay));
+        out.push(makeEvent(uid, ev.summary, ev.start, ev.end, allDay, cal));
         if (out.length >= 2000) return out;
       }
     }
