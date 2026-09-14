@@ -125,11 +125,12 @@ type GCalEvent = {
   cal?: string;
 };
 
-// Estilo propio (violeta) para distinguir los eventos de Google.
+// Estilo propio (fucsia) para distinguir los eventos de Google del azul de
+// las reuniones.
 const GCAL_META = {
   label: "Google Calendar",
-  color: "bg-violet-50 text-violet-800 ring-violet-200",
-  dot: "bg-violet-500",
+  color: "bg-fuchsia-50 text-fuchsia-800 ring-fuchsia-200",
+  dot: "bg-fuchsia-500",
 };
 
 // Equipo que usa el calendario. Lista fija (definida por el equipo) para que el
@@ -584,10 +585,10 @@ export function CalendarioClient() {
               type="checkbox"
               checked={verGoogle}
               onChange={(e) => setVerGoogle(e.target.checked)}
-              className="accent-violet-500"
+              className="accent-fuchsia-500"
             />
             <span className="inline-flex items-center gap-1">
-              <span className="size-2 rounded-full bg-violet-500" />
+              <span className="size-2 rounded-full bg-fuchsia-500" />
               Google Calendar
             </span>
           </label>
