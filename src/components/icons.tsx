@@ -133,6 +133,16 @@ export function PlusIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+/** Lápiz para editar. */
+export function PencilIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Svg {...props}>
+      <path d="M4 20h4L18.5 9.5a2 2 0 0 0-2.8-2.8L5 17.2V20Z" />
+      <path d="M13.5 6.5l4 4" />
+    </Svg>
+  );
+}
+
 export function WifiIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <Svg {...props}>
