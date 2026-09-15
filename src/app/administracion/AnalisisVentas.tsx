@@ -597,10 +597,15 @@ export function AnalisisVentas() {
   // promedio con los pocos-pero-grandes alquileres. Se usa TODO el período
   // (no depende de los filtros de categoría/producto), igual que los tickets.
   const ticketCafeteria = useMemo(() => {
-    const consumo = enriquecidas.reduce((s, e) => s + (e.grpKey === "cafeteria" ? e.monto : 0), 0);
+    const consumoNeto = enriquecidas.reduce((s, e) => s + (e.grpKey === "cafeteria" ? e.monto : 0), 0);
     const lineasAlquiler = enriquecidas.reduce((s, e) => s + (e.grpKey !== "cafeteria" ? 1 : 0), 0);
     const ticketsTotal = conc?.tickets ?? 0;
     const ticketsCaf = Math.max(0, ticketsTotal - lineasAlquiler);
+    // Se muestra con IVA (lo que paga el cliente): se sube el neto a bruto con la
+    // proporción REAL de IVA del período (IVA/neto de Setux), que respeta los
+    // métodos sin IVA (Zelle/Dólar). Si no hay datos, se asume 16%.
+    const factorIva = conc && conc.setuxNeto > 0 ? (conc.setuxNeto + conc.ivaSetux) / conc.setuxNeto : 1.16;
+    const consumo = consumoNeto * factorIva;
     return { consumo, tickets: ticketsCaf, promedio: ticketsCaf > 0 ? consumo / ticketsCaf : null };
   }, [enriquecidas, conc]);
 
@@ -1022,7 +1027,7 @@ export function AnalisisVentas() {
             <StatCard
               titulo="Ticket prom. cafetería"
               valor={ticketCafeteria.promedio != null ? `${ticketCafeteria.promedio.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €` : "—"}
-              sub={ticketCafeteria.tickets > 0 ? `${fUnid(ticketCafeteria.tickets)} tickets · solo consumo (sin alquileres)` : "faltan tickets del período (importa el reporte por factura)"}
+              sub={ticketCafeteria.tickets > 0 ? `${fUnid(ticketCafeteria.tickets)} tickets · con IVA` : "faltan tickets del período (importa el reporte por factura)"}
             />
             <StatCard
               titulo="Productos distintos"
