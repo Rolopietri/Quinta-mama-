@@ -195,7 +195,7 @@ export function AnalisisVentas() {
   };
   const [error, setError] = useState<string | null>(null);
   // Conciliación con Administración (componentes del rango, en euros).
-  const [conc, setConc] = useState<{ setuxNeto: number; ivaSetux: number; cxc: number; rpp: number; cxcNeto: number; rppNeto: number; cobrosEur: number; otrosEur: number } | null>(null);
+  const [conc, setConc] = useState<{ setuxNeto: number; ivaSetux: number; cxc: number; rpp: number; cxcNeto: number; rppNeto: number; cobrosEur: number; otrosEur: number; tickets: number } | null>(null);
   // Panel de clasificación de productos (asigna la categoría desde Admin).
   const [mostrarClasif, setMostrarClasif] = useState(false);
   const [mostrarDetalle, setMostrarDetalle] = useState(false);
@@ -589,6 +589,20 @@ export function AnalisisVentas() {
     });
     return Array.from(m.values()).sort((a, b) => b.monto - a.monto);
   }, [filtradas]);
+
+  // Ticket promedio de CAFETERÍA (realista): consumo de cafetería (sin
+  // alquileres) ÷ tickets de cafetería. Los tickets totales del período vienen
+  // del reporte por factura; se les restan las transacciones de alquiler (una
+  // por cada línea de alquiler, que es como se factura) para no diluir el
+  // promedio con los pocos-pero-grandes alquileres. Se usa TODO el período
+  // (no depende de los filtros de categoría/producto), igual que los tickets.
+  const ticketCafeteria = useMemo(() => {
+    const consumo = enriquecidas.reduce((s, e) => s + (e.grpKey === "cafeteria" ? e.monto : 0), 0);
+    const lineasAlquiler = enriquecidas.reduce((s, e) => s + (e.grpKey !== "cafeteria" ? 1 : 0), 0);
+    const ticketsTotal = conc?.tickets ?? 0;
+    const ticketsCaf = Math.max(0, ticketsTotal - lineasAlquiler);
+    return { consumo, tickets: ticketsCaf, promedio: ticketsCaf > 0 ? consumo / ticketsCaf : null };
+  }, [enriquecidas, conc]);
 
   // Evolución diaria: todos los días del rango, con 0 si no hubo ventas.
   const porDia = useMemo(() => {
@@ -1005,6 +1019,11 @@ export function AnalisisVentas() {
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
             <StatCard titulo="Ventas totales" valor={fUSD(totalMonto)} />
             <StatCard titulo="Unidades vendidas" valor={fUnid(totalUnidades)} />
+            <StatCard
+              titulo="Ticket prom. cafetería"
+              valor={ticketCafeteria.promedio != null ? `${ticketCafeteria.promedio.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €` : "—"}
+              sub={ticketCafeteria.tickets > 0 ? `${fUnid(ticketCafeteria.tickets)} tickets · solo consumo (sin alquileres)` : "faltan tickets del período (importa el reporte por factura)"}
+            />
             <StatCard
               titulo="Productos distintos"
               valor={fUnid(porProducto.length)}
