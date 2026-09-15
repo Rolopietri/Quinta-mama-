@@ -1280,6 +1280,7 @@ function EgresosMes() {
   const [msg, setMsg] = useState<string | null>(null);
   const [modo, setModo] = useState<"lista" | "form" | "porpagar">("lista");
   const [editando, setEditando] = useState<Egreso | null>(null);
+  const [diasAbiertos, setDiasAbiertos] = useState<Record<string, boolean>>({});
   const [reclasificando, setReclasificando] = useState<string | null>(null);
   const [mostrarClasif, setMostrarClasif] = useState(false);
   const [cuentaPagar, setCuentaPagar] = useState<CuentaPagar | null>(null);
@@ -1344,6 +1345,30 @@ function EgresosMes() {
   const egresosAll: Egreso[] = [...egresosPagados, ...comprasEgreso]
     .sort((a2, b2) => (b2.fecha ?? "").localeCompare(a2.fecha ?? ""));
   const esCocina = (e: Egreso) => e.id.startsWith("compra:");
+
+  // Egresos agrupados por FECHA (acordeón, como en Ingresos): el encabezado
+  // lleva la fecha y el total del día (por moneda); al abrirlo salen los
+  // egresos que componen ese total.
+  const egresosPorFecha = (() => {
+    const ORDEN = ["EUR", "USD", "Bs"];
+    const m = new Map<string, Egreso[]>();
+    for (const e of egresosAll) {
+      const k = e.fecha ?? "";
+      (m.get(k) ?? m.set(k, []).get(k)!).push(e);
+    }
+    return [...m.entries()]
+      .sort((a2, b2) => b2[0].localeCompare(a2[0])) // más reciente primero
+      .map(([fecha, items]) => {
+        const totales: Record<string, number> = {};
+        for (const e of items) {
+          const k = e.moneda || "Bs";
+          totales[k] = (totales[k] ?? 0) + (e.monto ?? 0);
+        }
+        const monedas = ORDEN.filter((k) => (totales[k] ?? 0) > 0.005)
+          .concat(Object.keys(totales).filter((k) => !ORDEN.includes(k) && (totales[k] ?? 0) > 0.005));
+        return { fecha, items, totales, monedas };
+      });
+  })();
   const nombreInsumo = (id: string) => insumos.find((i) => i.id === id)?.nombre ?? "insumo";
   const nombreProvCocina = (id?: string) => (id ? provCocina.find((p) => p.id === id)?.nombre : null) ?? null;
 
@@ -1547,45 +1572,67 @@ function EgresosMes() {
         );
       })()}
 
-      <section className="rounded-2xl bg-white ring-1 ring-marfil overflow-hidden">
+      <section className="rounded-2xl bg-white ring-1 ring-marfil overflow-hidden divide-y divide-marfil">
         {cargando ? (
           <p className="p-5 text-cacao-soft italic font-serif">Cargando…</p>
         ) : egresosAll.length === 0 ? (
           <p className="p-8 text-center text-cacao-soft italic font-serif">No hay egresos en {nombreMes(mes)}.</p>
         ) : (
-          <ul className="divide-y divide-marfil">
-            {egresosAll.map((e) => {
-              const cocina = esCocina(e);
-              return (
-              <li key={e.id} className="flex items-start gap-3 p-3.5">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-baseline justify-between gap-3">
-                    <span className="text-cacao font-medium truncate">{e.proveedor_nombre || e.concepto || "(egreso)"}{cocina && <span className="ml-2 align-middle inline-block rounded-full bg-marfil-soft text-cacao-mute text-[9px] uppercase tracking-widest px-2 py-0.5">Cocina</span>}</span>
-                    <span className="text-cacao whitespace-nowrap">{e.monto != null ? fmtMonto(e.monto, e.moneda || "Bs") : "—"}</span>
-                  </div>
-                  <div className="text-[11px] text-cacao-mute mt-1 flex flex-wrap gap-x-2">
-                    <span>{fmtFecha(e.fecha)}</span>
-                    {e.categoria_nombre && <span>· {e.categoria_nombre}</span>}
-                    {e.clasificacion && <span>· {e.clasificacion}</span>}
-                    {e.monto_usd != null && e.moneda !== "USD" && <span>· ≈ {fmtMonto(e.monto_usd, "USD")}</span>}
-                    {e.solicitud_linea_id && <span>· de solicitud</span>}
-                  </div>
-                  {e.concepto && e.proveedor_nombre && <div className="text-xs text-cacao-soft mt-0.5">{e.concepto}</div>}
-                </div>
-                <div className="flex gap-2 shrink-0">
-                  {cocina ? (
-                    <span className="text-cacao-mute text-[10px] uppercase tracking-widest self-center" title="Se gestiona en Cocina → Compras">Cocina ↗</span>
-                  ) : (
-                    <>
-                      <button type="button" onClick={() => { setEditando(e); setModo("form"); }} className="text-cacao-soft hover:text-cacao text-sm" aria-label="Editar">✎</button>
-                      <button type="button" onClick={() => borrar(e.id)} className="text-cacao-soft hover:text-terracotta text-sm" aria-label="Eliminar">✕</button>
-                    </>
-                  )}
-                </div>
-              </li>
-              );
-            })}
-          </ul>
+          egresosPorFecha.map((g, idx) => {
+            const abierto = diasAbiertos[g.fecha] ?? idx === 0;
+            return (
+              <div key={g.fecha}>
+                <button
+                  type="button"
+                  onClick={() => setDiasAbiertos((s) => ({ ...s, [g.fecha]: !abierto }))}
+                  aria-expanded={abierto}
+                  className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-marfil-soft transition-colors"
+                >
+                  <ChevronIcon className={`size-4 text-cacao-mute transition-transform ${abierto ? "rotate-90" : ""}`} />
+                  <CalendarIcon className="size-4 text-cacao-mute" />
+                  <span className="font-medium text-cacao">{fmtFecha(g.fecha)}</span>
+                  <span className="text-xs text-cacao-mute">{g.items.length} {g.items.length === 1 ? "egreso" : "egresos"}</span>
+                  <span className="ml-auto text-sm text-cacao font-medium text-right">
+                    {g.monedas.length ? g.monedas.map((k) => fmtMonto(g.totales[k], k)).join(" · ") : "—"}
+                  </span>
+                </button>
+                {abierto && (
+                  <ul className="divide-y divide-marfil border-t border-marfil">
+                    {g.items.map((e) => {
+                      const cocina = esCocina(e);
+                      return (
+                      <li key={e.id} className="flex items-start gap-3 p-3.5 pl-11">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-baseline justify-between gap-3">
+                            <span className="text-cacao font-medium truncate">{e.proveedor_nombre || e.concepto || "(egreso)"}{cocina && <span className="ml-2 align-middle inline-block rounded-full bg-marfil-soft text-cacao-mute text-[9px] uppercase tracking-widest px-2 py-0.5">Cocina</span>}</span>
+                            <span className="text-cacao whitespace-nowrap">{e.monto != null ? fmtMonto(e.monto, e.moneda || "Bs") : "—"}</span>
+                          </div>
+                          <div className="text-[11px] text-cacao-mute mt-1 flex flex-wrap gap-x-2">
+                            {e.categoria_nombre && <span>{e.categoria_nombre}</span>}
+                            {e.clasificacion && <span>· {e.clasificacion}</span>}
+                            {e.monto_usd != null && e.moneda !== "USD" && <span>· ≈ {fmtMonto(e.monto_usd, "USD")}</span>}
+                            {e.solicitud_linea_id && <span>· de solicitud</span>}
+                          </div>
+                          {e.concepto && e.proveedor_nombre && <div className="text-xs text-cacao-soft mt-0.5">{e.concepto}</div>}
+                        </div>
+                        <div className="flex gap-2 shrink-0">
+                          {cocina ? (
+                            <span className="text-cacao-mute text-[10px] uppercase tracking-widest self-center" title="Se gestiona en Cocina → Compras">Cocina ↗</span>
+                          ) : (
+                            <>
+                              <button type="button" onClick={() => { setEditando(e); setModo("form"); }} className="text-cacao-soft hover:text-cacao text-sm" aria-label="Editar">✎</button>
+                              <button type="button" onClick={() => borrar(e.id)} className="text-cacao-soft hover:text-terracotta text-sm" aria-label="Eliminar">✕</button>
+                            </>
+                          )}
+                        </div>
+                      </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+            );
+          })
         )}
       </section>
     </div>
