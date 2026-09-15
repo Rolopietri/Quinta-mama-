@@ -106,7 +106,7 @@ function categoriaDeVenta(
   catPorInsumo: Map<string, string>,
   catPorNombre: Map<string, string>,
   rubroMap: Map<string, string>,
-): { key: string; label: string } {
+): { key: string; label: string; underKey: string; underLabel: string } {
   let label: string | null = null;
   if (v.recetaId) {
     const cat = catPorReceta.get(v.recetaId);
@@ -129,9 +129,22 @@ function categoriaDeVenta(
   // Rollup administrativo: si la categoría tiene un "rubro" definido, se agrupa
   // bajo ese rubro (p. ej. Smoothies + Bebidas naturales → un solo rubro). En
   // Recetas/Cocina la categoría sigue usándose tal cual; esto es solo la vista.
-  const rubro = rubroMap.get(normCat(canon)) ?? canon;
-  return { key: normCat(rubro), label: rubro };
+  // Además, las dos categorías en consignación se agrupan (fijo) bajo
+  // "Consignación", pudiéndose abrir cada una por separado en el drill.
+  const rubro = rubroMap.get(normCat(canon)) ?? SUBRUBRO_FIJO[normCat(canon)] ?? canon;
+  // Se devuelve TAMBIÉN la categoría subyacente (antes del rollup) para el
+  // tercer nivel del drill: rubro → categoría real → ítems.
+  return { key: normCat(rubro), label: rubro, underKey: normCat(canon), underLabel: canon };
 }
+
+// Sub-rubros fijos (sin depender de la config de la BD): agrupan varias
+// categorías bajo un nombre en el análisis, pero cada una sigue siendo abrible
+// por separado. Las dos consignaciones se juntan como "Consignación".
+const SUBRUBRO_FIJO: Record<string, string> = {
+  "bar of mix (consignacion)": "Consignación",
+  "cocina clandestina (consignacion)": "Consignación",
+  consignacion: "Consignación",
+};
 
 // Grupo de NIVEL SUPERIOR para el gráfico principal de Administración: las 3
 // categorías de alquiler se muestran solas y todo lo demás (café, bebidas,
@@ -168,13 +181,17 @@ export function AnalisisVentas() {
   // grupo (solo aplica a Cafetería, que agrupa varias categorías).
   const [catDrill, setCatDrill] = useState<{ key: string; label: string } | null>(null);
   const [subDrill, setSubDrill] = useState<{ key: string; label: string } | null>(null);
-  const abrirGrupo = (key: string, label: string) => { setCatDrill({ key, label }); setSubDrill(null); };
+  // Tercer nivel: categoría REAL dentro de una sub-categoría que agrupa varias
+  // (p. ej. Consignación → Bar of Mix / Cocina Clandestina).
+  const [underDrill, setUnderDrill] = useState<{ key: string; label: string } | null>(null);
+  const abrirGrupo = (key: string, label: string) => { setCatDrill({ key, label }); setSubDrill(null); setUnderDrill(null); };
   // Abre el drill directo en una categoría concreta: entra por su grupo y, si es
   // de Cafetería, la deja seleccionada como sub-categoría (para ver sus ítems).
   const abrirCategoria = (catKey: string, catLabel: string) => {
     const grp = grupoDeCategoria(catLabel);
     setCatDrill({ key: grp.key, label: grp.label });
     setSubDrill(grp.key === "cafeteria" ? { key: catKey, label: catLabel } : null);
+    setUnderDrill(null);
   };
   const [error, setError] = useState<string | null>(null);
   // Conciliación con Administración (componentes del rango, en euros).
@@ -344,6 +361,8 @@ export function AnalisisVentas() {
           producto: v.recetaNombre.trim() || "—",
           catKey: cat.key,
           catLabel: cat.label,
+          underKey: cat.underKey,
+          underLabel: cat.underLabel,
           grpKey: grp.key,
           grpLabel: grp.label,
           unidades,
@@ -397,12 +416,12 @@ export function AnalisisVentas() {
   const porProducto = useMemo(() => {
     const m = new Map<
       string,
-      { producto: string; catKey: string; catLabel: string; grpKey: string; grpLabel: string; unidades: number; monto: number; costo: number; costeado: boolean }
+      { producto: string; catKey: string; catLabel: string; underKey: string; underLabel: string; grpKey: string; grpLabel: string; unidades: number; monto: number; costo: number; costeado: boolean }
     >();
     filtradas.forEach((e) => {
       const cur =
         m.get(e.producto) ??
-        { producto: e.producto, catKey: e.catKey, catLabel: e.catLabel, grpKey: e.grpKey, grpLabel: e.grpLabel, unidades: 0, monto: 0, costo: 0, costeado: true };
+        { producto: e.producto, catKey: e.catKey, catLabel: e.catLabel, underKey: e.underKey, underLabel: e.underLabel, grpKey: e.grpKey, grpLabel: e.grpLabel, unidades: 0, monto: 0, costo: 0, costeado: true };
       cur.unidades += e.unidades;
       cur.monto += e.monto;
       if (e.costo == null) cur.costeado = false; else cur.costo += e.costo;
@@ -527,17 +546,32 @@ export function AnalisisVentas() {
     return Array.from(m.values()).sort((a, b) => b.monto - a.monto);
   }, [catDrill, porProducto]);
 
-  // Ítems del nivel abierto (nivel 2): si hay una sub-categoría seleccionada,
-  // sus ítems; si no, los ítems de todo el grupo.
+  // Categorías REALES dentro de la sub-categoría abierta (nivel 2 → 3). Solo
+  // tiene sentido cuando la sub-categoría agrupa varias (Consignación, o el
+  // rubro Smoothies+Bebidas); si es una sola, se salta directo a los ítems.
+  const unders = useMemo(() => {
+    if (!subDrill) return [] as { key: string; label: string; unidades: number; monto: number }[];
+    const m = new Map<string, { key: string; label: string; unidades: number; monto: number }>();
+    porProducto.filter((p) => p.catKey === subDrill.key).forEach((p) => {
+      const cur = m.get(p.underKey) ?? { key: p.underKey, label: p.underLabel, unidades: 0, monto: 0 };
+      cur.unidades += p.unidades; cur.monto += p.monto; m.set(p.underKey, cur);
+    });
+    return Array.from(m.values()).sort((a, b) => b.monto - a.monto);
+  }, [subDrill, porProducto]);
+
+  // Ítems del nivel más profundo abierto: categoría real (underDrill) →
+  // sub-categoría (subDrill) → grupo (catDrill).
   const drill = useMemo(() => {
     if (!catDrill) return null;
     const items = porProducto.filter((p) =>
-      subDrill ? p.catKey === subDrill.key : p.grpKey === catDrill.key,
+      underDrill ? p.underKey === underDrill.key
+        : subDrill ? p.catKey === subDrill.key
+        : p.grpKey === catDrill.key,
     );
     const total = items.reduce((s, p) => s + p.monto, 0);
     const totalU = items.reduce((s, p) => s + p.unidades, 0);
     return { items: [...items].sort((a, b) => b.monto - a.monto), total, totalU };
-  }, [catDrill, subDrill, porProducto]);
+  }, [catDrill, subDrill, underDrill, porProducto]);
 
   // Gráfico principal: los 4 grupos de nivel superior (3 alquileres + Cafetería).
   const porGrupo = useMemo(() => {
@@ -1122,10 +1156,10 @@ export function AnalisisVentas() {
           {catDrill && (
             <section className="rounded-2xl bg-white ring-1 ring-terracotta/40 p-4">
               <div className="flex items-center justify-between gap-2 mb-1">
-                <h3 className="font-cinzel text-base text-cacao">Desglose: {catDrill.label}{subDrill ? <span className="text-cacao-soft"> › {subDrill.label}</span> : null}</h3>
+                <h3 className="font-cinzel text-base text-cacao">Desglose: {catDrill.label}{subDrill ? <span className="text-cacao-soft"> › {subDrill.label}</span> : null}{underDrill ? <span className="text-cacao-soft"> › {underDrill.label}</span> : null}</h3>
                 <div className="flex items-center gap-3">
-                  {subDrill && <button type="button" onClick={() => setSubDrill(null)} className="text-xs uppercase tracking-widest text-cacao-soft hover:text-cacao">‹ Volver</button>}
-                  <button type="button" onClick={() => { setCatDrill(null); setSubDrill(null); }} className="text-xs uppercase tracking-widest text-cacao-soft hover:text-terracotta">✕ Cerrar</button>
+                  {(subDrill || underDrill) && <button type="button" onClick={() => { if (underDrill) setUnderDrill(null); else setSubDrill(null); }} className="text-xs uppercase tracking-widest text-cacao-soft hover:text-cacao">‹ Volver</button>}
+                  <button type="button" onClick={() => { setCatDrill(null); setSubDrill(null); setUnderDrill(null); }} className="text-xs uppercase tracking-widest text-cacao-soft hover:text-terracotta">✕ Cerrar</button>
                 </div>
               </div>
 
@@ -1170,8 +1204,50 @@ export function AnalisisVentas() {
                     </div>
                   </>
                 );
+              })() : subDrill && unders.length > 1 && !underDrill ? (() => {
+                // Nivel intermedio: las categorías REALES dentro de la sub-categoría
+                // (p. ej. Consignación → Bar of Mix / Cocina Clandestina).
+                const gTotal = unders.reduce((s, c) => s + c.monto, 0);
+                const gU = unders.reduce((s, c) => s + c.unidades, 0);
+                return (
+                  <>
+                    <p className="text-[11px] text-cacao-mute mb-3">{fUnid(gU)} unid · {fUSD(gTotal)} · {unders.length} categorías. Toca una para ver sus ítems.</p>
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                      <Dona
+                        segmentos={unders.map((c, i) => ({ key: c.key, label: c.label, value: c.monto, color: colorPorIndice(i) }))}
+                        format={fUSD}
+                        sinLeyenda
+                        onSelect={(k) => { const c = unders.find((x) => x.key === k); if (c) setUnderDrill({ key: c.key, label: c.label }); }}
+                      />
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="text-cacao-mute uppercase tracking-widest text-left">
+                              <th className="py-1 font-normal">Categoría</th>
+                              <th className="py-1 font-normal text-right">Unid.</th>
+                              <th className="py-1 font-normal text-right">% unid.</th>
+                              <th className="py-1 font-normal text-right">Monto</th>
+                              <th className="py-1 font-normal text-right">% monto</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {unders.map((c) => (
+                              <tr key={c.key} onClick={() => setUnderDrill({ key: c.key, label: c.label })} className="border-t border-marfil cursor-pointer hover:bg-marfil-soft">
+                                <td className="py-1 text-cacao"><span className="inline-flex items-center gap-1">{c.label}<span className="text-cacao-mute">›</span></span></td>
+                                <td className="py-1 text-right tabular-nums text-cacao-soft">{fUnid(c.unidades)}</td>
+                                <td className="py-1 text-right tabular-nums text-cacao-soft">{fPct(gU > 0 ? (c.unidades / gU) * 100 : 0)}</td>
+                                <td className="py-1 text-right tabular-nums text-cacao">{fUSD(c.monto)}</td>
+                                <td className="py-1 text-right tabular-nums text-cacao-soft">{fPct(gTotal > 0 ? (c.monto / gTotal) * 100 : 0)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </>
+                );
               })() : (
-                // Nivel 2: ítems (de la sub-categoría, o del grupo si es una sola categoría).
+                // Nivel final: ítems (de la categoría real, de la sub-categoría, o del grupo).
                 <>
                   <p className="text-[11px] text-cacao-mute mb-3">{drill ? `${fUnid(drill.totalU)} unid · ${fUSD(drill.total)} · ${drill.items.length} ítems. El % es dentro de esta categoría.` : ""}</p>
                   {!drill || drill.items.length === 0 ? (
