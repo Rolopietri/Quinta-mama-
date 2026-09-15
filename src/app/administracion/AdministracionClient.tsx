@@ -10,6 +10,7 @@ import { totalesVentasPorMes } from "@/lib/data/ventas";
 import { listTasasBcvRango, listComprasRango, listComprasEgresoMes, listComprasPendientes, listProveedores, listInsumos, marcarCompraPagada, marcarFacturaPagada, getTasaBcvPorFecha } from "@/lib/data/cocina";
 import type { TasaBcv, Compra, Proveedor as ProveedorCocina, Insumo } from "@/lib/types";
 import { AnalisisAdministrativo } from "./AnalisisAdministrativo";
+import { ChevronIcon, CalendarIcon } from "@/components/icons";
 
 type Seccion = "proveedores" | "solicitudes" | "ingresos" | "analisis-ventas" | "cobrar" | "egresos" | "estado" | "historico";
 const SECCIONES: { id: Seccion; label: string; grupo?: string }[] = [
@@ -2221,6 +2222,7 @@ function IngresosMes() {
   const [msg, setMsg] = useState<string | null>(null);
   const [modo, setModo] = useState<"lista" | "form">("lista");
   const [editando, setEditando] = useState<Ingreso | null>(null);
+  const [diasAbiertos, setDiasAbiertos] = useState<Record<string, boolean>>({});
   const [ventasMes, setVentasMes] = useState<Record<string, number>>({});
   const [tasaInput, setTasaInput] = useState("1.17");
   const [guardandoTasa, setGuardandoTasa] = useState(false);
@@ -2386,6 +2388,29 @@ function IngresosMes() {
     (a, b) => Object.values(b[1]).reduce((s, v) => s + v, 0) - Object.values(a[1]).reduce((s, v) => s + v, 0),
   );
 
+  // Ingresos agrupados por FECHA (acordeón, como en Cocina): el encabezado
+  // lleva la fecha y el total del día (por moneda); al abrirlo salen los
+  // métodos de pago que componen ese total.
+  const ingresosPorFecha = (() => {
+    const m = new Map<string, Ingreso[]>();
+    for (const e of ingresos) {
+      const k = e.fecha ?? "";
+      (m.get(k) ?? m.set(k, []).get(k)!).push(e);
+    }
+    return [...m.entries()]
+      .sort((a, b) => b[0].localeCompare(a[0])) // más reciente primero
+      .map(([fecha, items]) => {
+        const totales: Record<string, number> = {};
+        for (const e of items) {
+          const k = e.moneda || "EUR";
+          totales[k] = (totales[k] ?? 0) + (e.monto ?? 0);
+        }
+        const monedas = ORDEN_MONEDA.filter((k) => (totales[k] ?? 0) > 0.005)
+          .concat(Object.keys(totales).filter((k) => !ORDEN_MONEDA.includes(k) && (totales[k] ?? 0) > 0.005));
+        return { fecha, items, totales, monedas };
+      });
+  })();
+
   async function borrar(id: string) {
     try {
       await fetch(`/api/admin/ingresos?id=${id}`, { method: "DELETE" });
@@ -2504,35 +2529,57 @@ function IngresosMes() {
         </div>
       </div>
 
-      <section className="rounded-2xl bg-white ring-1 ring-marfil overflow-hidden">
+      <section className="rounded-2xl bg-white ring-1 ring-marfil overflow-hidden divide-y divide-marfil">
         {cargando ? (
           <p className="p-5 text-cacao-soft italic font-serif">Cargando…</p>
         ) : ingresos.length === 0 ? (
           <p className="p-8 text-center text-cacao-soft italic font-serif">No hay ingresos en {nombreMes(mes)}.</p>
         ) : (
-          <ul className="divide-y divide-marfil">
-            {ingresos.map((e) => (
-              <li key={e.id} className="flex items-start gap-3 p-3.5">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-baseline justify-between gap-3">
-                    <span className="text-cacao font-medium truncate">{e.pagador || e.concepto || e.categoria_nombre || "(ingreso)"}</span>
-                    <span className="text-cacao whitespace-nowrap">{e.monto != null ? fmtMonto(e.monto, e.moneda || "Bs") : "—"}</span>
-                  </div>
-                  <div className="text-[11px] text-cacao-mute mt-1 flex flex-wrap gap-x-2">
-                    <span>{fmtFecha(e.fecha)}</span>
-                    {e.categoria_nombre && <span>· {e.categoria_nombre}</span>}
-                    {e.metodo && <span>· {e.metodo}</span>}
-                    {e.monto_usd != null && e.moneda !== "USD" && <span>· ≈ {fmtMonto(e.monto_usd, "USD")}</span>}
-                  </div>
-                  {e.concepto && e.pagador && <div className="text-xs text-cacao-soft mt-0.5">{e.concepto}</div>}
-                </div>
-                <div className="flex gap-2 shrink-0">
-                  <button type="button" onClick={() => { setEditando(e); setModo("form"); }} className="text-cacao-soft hover:text-cacao text-sm" aria-label="Editar">✎</button>
-                  <button type="button" onClick={() => borrar(e.id)} className="text-cacao-soft hover:text-terracotta text-sm" aria-label="Eliminar">✕</button>
-                </div>
-              </li>
-            ))}
-          </ul>
+          ingresosPorFecha.map((g, idx) => {
+            const abierto = diasAbiertos[g.fecha] ?? idx === 0;
+            return (
+              <div key={g.fecha}>
+                <button
+                  type="button"
+                  onClick={() => setDiasAbiertos((s) => ({ ...s, [g.fecha]: !abierto }))}
+                  aria-expanded={abierto}
+                  className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-marfil-soft transition-colors"
+                >
+                  <ChevronIcon className={`size-4 text-cacao-mute transition-transform ${abierto ? "rotate-90" : ""}`} />
+                  <CalendarIcon className="size-4 text-cacao-mute" />
+                  <span className="font-medium text-cacao">{fmtFecha(g.fecha)}</span>
+                  <span className="text-xs text-cacao-mute">{g.items.length} {g.items.length === 1 ? "ingreso" : "ingresos"}</span>
+                  <span className="ml-auto text-sm text-cacao font-medium text-right">
+                    {g.monedas.length ? g.monedas.map((k) => fmtMonto(g.totales[k], k)).join(" · ") : "—"}
+                  </span>
+                </button>
+                {abierto && (
+                  <ul className="divide-y divide-marfil border-t border-marfil">
+                    {g.items.map((e) => (
+                      <li key={e.id} className="flex items-start gap-3 p-3.5 pl-11">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-baseline justify-between gap-3">
+                            <span className="text-cacao font-medium truncate">{e.metodo || e.pagador || e.concepto || e.categoria_nombre || "(ingreso)"}</span>
+                            <span className="text-cacao whitespace-nowrap">{e.monto != null ? fmtMonto(e.monto, e.moneda || "Bs") : "—"}</span>
+                          </div>
+                          <div className="text-[11px] text-cacao-mute mt-1 flex flex-wrap gap-x-2">
+                            {e.categoria_nombre && <span>{e.categoria_nombre}</span>}
+                            {e.pagador && <span>· {e.pagador}</span>}
+                            {e.monto_usd != null && e.moneda !== "USD" && <span>· ≈ {fmtMonto(e.monto_usd, "USD")}</span>}
+                          </div>
+                          {e.concepto && e.pagador && <div className="text-xs text-cacao-soft mt-0.5">{e.concepto}</div>}
+                        </div>
+                        <div className="flex gap-2 shrink-0">
+                          <button type="button" onClick={() => { setEditando(e); setModo("form"); }} className="text-cacao-soft hover:text-cacao text-sm" aria-label="Editar">✎</button>
+                          <button type="button" onClick={() => borrar(e.id)} className="text-cacao-soft hover:text-terracotta text-sm" aria-label="Eliminar">✕</button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            );
+          })
         )}
       </section>
     </div>
@@ -3318,9 +3365,12 @@ function SeccionCuentasCobrar() {
               return (
                 <li key={c.key} className="text-sm">
                   <div className="grid grid-cols-[1fr_auto_auto_auto] gap-3 px-4 py-3 items-center">
-                    <button type="button" onClick={() => setAbierto(abiertoAqui ? null : c.key)} className="text-left min-w-0">
-                      <span className="text-cacao font-medium truncate block">{c.cliente}</span>
-                      <span className="text-[11px] text-cacao-mute">{c.cuentas.length} cuenta{c.cuentas.length === 1 ? "" : "s"}{c.pagos.length > 0 ? ` · ${c.pagos.length} pago${c.pagos.length === 1 ? "" : "s"}` : ""}</span>
+                    <button type="button" onClick={() => setAbierto(abiertoAqui ? null : c.key)} className="text-left min-w-0 flex items-center gap-2">
+                      <ChevronIcon className={`size-4 shrink-0 text-cacao-mute transition-transform ${abiertoAqui ? "rotate-90" : ""}`} />
+                      <span className="min-w-0">
+                        <span className="text-cacao font-medium truncate block">{c.cliente}</span>
+                        <span className="text-[11px] text-cacao-mute">{c.cuentas.length} cuenta{c.cuentas.length === 1 ? "" : "s"}{c.pagos.length > 0 ? ` · ${c.pagos.length} pago${c.pagos.length === 1 ? "" : "s"}` : ""}</span>
+                      </span>
                     </button>
                     <span className={`text-right tabular-nums font-medium ${enFavor ? "text-[#2F4A1F]" : "text-cacao"}`}>
                       {fmtMonto(eurDe(Math.abs(c.saldo_usd)), "EUR")}{enFavor ? " a favor" : ""}
