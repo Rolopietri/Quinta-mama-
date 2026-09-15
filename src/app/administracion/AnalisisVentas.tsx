@@ -133,6 +133,19 @@ function categoriaDeVenta(
   return { key: normCat(rubro), label: rubro };
 }
 
+// Grupo de NIVEL SUPERIOR para el gráfico principal de Administración: las 3
+// categorías de alquiler se muestran solas y todo lo demás (café, bebidas,
+// cocina, consignaciones…) se engloba en "Cafetería". Al abrir Cafetería
+// salen sus categorías, y de ahí el detalle por ítem.
+const GRUPOS_ALQUILER = new Set(
+  ["Alquileres fijos", "Eventos & Alquileres por bloque", "Pádel"].map(normCat),
+);
+function grupoDeCategoria(catLabel: string): { key: string; label: string } {
+  const n = normCat(catLabel);
+  if (GRUPOS_ALQUILER.has(n)) return { key: n, label: catLabel };
+  return { key: "cafeteria", label: "Cafetería" };
+}
+
 type OrdenTabla = "monto" | "unidades" | "pct";
 
 export function AnalisisVentas() {
@@ -150,8 +163,19 @@ export function AnalisisVentas() {
   const [recetas, setRecetas] = useState<Receta[]>([]);
   const [insumos, setInsumos] = useState<Insumo[]>([]);
   const [loading, setLoading] = useState(true);
-  // Categoría "abierta" para ver el desglose de sus ítems (drill-down).
+  // Drill-down de dos niveles: `catDrill` = grupo abierto del gráfico principal
+  // (Cafetería o un alquiler); `subDrill` = categoría abierta DENTRO de ese
+  // grupo (solo aplica a Cafetería, que agrupa varias categorías).
   const [catDrill, setCatDrill] = useState<{ key: string; label: string } | null>(null);
+  const [subDrill, setSubDrill] = useState<{ key: string; label: string } | null>(null);
+  const abrirGrupo = (key: string, label: string) => { setCatDrill({ key, label }); setSubDrill(null); };
+  // Abre el drill directo en una categoría concreta: entra por su grupo y, si es
+  // de Cafetería, la deja seleccionada como sub-categoría (para ver sus ítems).
+  const abrirCategoria = (catKey: string, catLabel: string) => {
+    const grp = grupoDeCategoria(catLabel);
+    setCatDrill({ key: grp.key, label: grp.label });
+    setSubDrill(grp.key === "cafeteria" ? { key: catKey, label: catLabel } : null);
+  };
   const [error, setError] = useState<string | null>(null);
   // Conciliación con Administración (componentes del rango, en euros).
   const [conc, setConc] = useState<{ setuxNeto: number; ivaSetux: number; cxc: number; rpp: number; cxcNeto: number; rppNeto: number; cobrosEur: number; otrosEur: number } | null>(null);
@@ -305,6 +329,7 @@ export function AnalisisVentas() {
     () =>
       ventas.map((v) => {
         const cat = categoriaDeVenta(v, catPorReceta, catPorInsumo, catNombre, rubroMap);
+        const grp = grupoDeCategoria(cat.label);
         const unidades = v.cantidad || 0;
         let costo: number | null = null;
         if (v.recetaId) {
@@ -319,6 +344,8 @@ export function AnalisisVentas() {
           producto: v.recetaNombre.trim() || "—",
           catKey: cat.key,
           catLabel: cat.label,
+          grpKey: grp.key,
+          grpLabel: grp.label,
           unidades,
           monto: v.totalUsd ?? 0,
           costo,
@@ -370,12 +397,12 @@ export function AnalisisVentas() {
   const porProducto = useMemo(() => {
     const m = new Map<
       string,
-      { producto: string; catKey: string; catLabel: string; unidades: number; monto: number; costo: number; costeado: boolean }
+      { producto: string; catKey: string; catLabel: string; grpKey: string; grpLabel: string; unidades: number; monto: number; costo: number; costeado: boolean }
     >();
     filtradas.forEach((e) => {
       const cur =
         m.get(e.producto) ??
-        { producto: e.producto, catKey: e.catKey, catLabel: e.catLabel, unidades: 0, monto: 0, costo: 0, costeado: true };
+        { producto: e.producto, catKey: e.catKey, catLabel: e.catLabel, grpKey: e.grpKey, grpLabel: e.grpLabel, unidades: 0, monto: 0, costo: 0, costeado: true };
       cur.unidades += e.unidades;
       cur.monto += e.monto;
       if (e.costo == null) cur.costeado = false; else cur.costo += e.costo;
@@ -488,27 +515,43 @@ export function AnalisisVentas() {
     return Array.from(m.values()).sort((a, b) => b.monto - a.monto);
   }, [porProducto, catExcluidas]);
 
-  // Drill-down: ítems de la categoría abierta, con % dentro de la categoría.
+  // Sub-categorías del grupo abierto (nivel 1 del drill). Solo tiene sentido en
+  // Cafetería, que agrupa varias categorías; un alquiler es una sola categoría.
+  const subcats = useMemo(() => {
+    if (!catDrill) return [] as { key: string; label: string; unidades: number; monto: number }[];
+    const m = new Map<string, { key: string; label: string; unidades: number; monto: number }>();
+    porProducto.filter((p) => p.grpKey === catDrill.key).forEach((p) => {
+      const cur = m.get(p.catKey) ?? { key: p.catKey, label: p.catLabel, unidades: 0, monto: 0 };
+      cur.unidades += p.unidades; cur.monto += p.monto; m.set(p.catKey, cur);
+    });
+    return Array.from(m.values()).sort((a, b) => b.monto - a.monto);
+  }, [catDrill, porProducto]);
+
+  // Ítems del nivel abierto (nivel 2): si hay una sub-categoría seleccionada,
+  // sus ítems; si no, los ítems de todo el grupo.
   const drill = useMemo(() => {
     if (!catDrill) return null;
-    const items = porProducto.filter((p) => p.catKey === catDrill.key);
+    const items = porProducto.filter((p) =>
+      subDrill ? p.catKey === subDrill.key : p.grpKey === catDrill.key,
+    );
     const total = items.reduce((s, p) => s + p.monto, 0);
     const totalU = items.reduce((s, p) => s + p.unidades, 0);
     return { items: [...items].sort((a, b) => b.monto - a.monto), total, totalU };
-  }, [catDrill, porProducto]);
+  }, [catDrill, subDrill, porProducto]);
 
-  const porCategoria = useMemo(() => {
+  // Gráfico principal: los 4 grupos de nivel superior (3 alquileres + Cafetería).
+  const porGrupo = useMemo(() => {
     const m = new Map<
       string,
       { key: string; label: string; unidades: number; monto: number }
     >();
     filtradas.forEach((e) => {
       const cur =
-        m.get(e.catKey) ??
-        { key: e.catKey, label: e.catLabel, unidades: 0, monto: 0 };
+        m.get(e.grpKey) ??
+        { key: e.grpKey, label: e.grpLabel, unidades: 0, monto: 0 };
       cur.unidades += e.unidades;
       cur.monto += e.monto;
-      m.set(e.catKey, cur);
+      m.set(e.grpKey, cur);
     });
     return Array.from(m.values()).sort((a, b) => b.monto - a.monto);
   }, [filtradas]);
@@ -1039,19 +1082,19 @@ export function AnalisisVentas() {
           {/* ── Categorías ──────────────────────────────────────── */}
           <div className="grid grid-cols-1 gap-4">
             <PanelCard titulo="Ventas por categoría">
-              <p className="text-[11px] text-cacao-mute mb-3">Toca una categoría (en el gráfico o en la lista) para ver su desglose.</p>
+              <p className="text-[11px] text-cacao-mute mb-3">Alquileres y Cafetería. Toca un grupo (en el gráfico o en la lista) para abrirlo; Cafetería se despliega en sus categorías, y de ahí al detalle por ítem.</p>
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
                 <Dona
-                  segmentos={porCategoria.map((c, i) => ({ key: c.key, label: c.label, value: c.monto, color: colorPorIndice(i) }))}
+                  segmentos={porGrupo.map((c, i) => ({ key: c.key, label: c.label, value: c.monto, color: colorPorIndice(i) }))}
                   format={fUSD}
                   sinLeyenda
-                  onSelect={(k) => { const c = porCategoria.find((x) => x.key === k); if (c) setCatDrill({ key: c.key, label: c.label }); }}
+                  onSelect={(k) => { const c = porGrupo.find((x) => x.key === k); if (c) abrirGrupo(c.key, c.label); }}
                 />
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs">
                     <thead>
                       <tr className="text-cacao-mute uppercase tracking-widest text-left">
-                        <th className="py-1 font-normal">Categoría</th>
+                        <th className="py-1 font-normal">Grupo</th>
                         <th className="py-1 font-normal text-right">Unid.</th>
                         <th className="py-1 font-normal text-right">% unid.</th>
                         <th className="py-1 font-normal text-right">Monto</th>
@@ -1059,8 +1102,8 @@ export function AnalisisVentas() {
                       </tr>
                     </thead>
                     <tbody>
-                      {porCategoria.map((c) => (
-                        <tr key={c.key} onClick={() => setCatDrill({ key: c.key, label: c.label })} className={`border-t border-marfil cursor-pointer hover:bg-marfil-soft ${catDrill?.key === c.key ? "bg-marfil-soft" : ""}`}>
+                      {porGrupo.map((c) => (
+                        <tr key={c.key} onClick={() => abrirGrupo(c.key, c.label)} className={`border-t border-marfil cursor-pointer hover:bg-marfil-soft ${catDrill?.key === c.key ? "bg-marfil-soft" : ""}`}>
                           <td className="py-1 text-cacao"><span className="inline-flex items-center gap-1">{c.label}<span className="text-cacao-mute">›</span></span></td>
                           <td className="py-1 text-right tabular-nums text-cacao-soft">{fUnid(c.unidades)}</td>
                           <td className="py-1 text-right tabular-nums text-cacao-soft">{fPct(totalUnidades > 0 ? (c.unidades / totalUnidades) * 100 : 0)}</td>
@@ -1075,48 +1118,98 @@ export function AnalisisVentas() {
             </PanelCard>
           </div>
 
-          {/* ── Desglose de la categoría seleccionada (drill-down) ── */}
-          {catDrill && drill && (
+          {/* ── Desglose del grupo seleccionado (drill de 2 niveles) ── */}
+          {catDrill && (
             <section className="rounded-2xl bg-white ring-1 ring-terracotta/40 p-4">
               <div className="flex items-center justify-between gap-2 mb-1">
-                <h3 className="font-cinzel text-base text-cacao">Desglose: {catDrill.label}</h3>
-                <button type="button" onClick={() => setCatDrill(null)} className="text-xs uppercase tracking-widest text-cacao-soft hover:text-terracotta">✕ Cerrar</button>
-              </div>
-              <p className="text-[11px] text-cacao-mute mb-3">{fUnid(drill.totalU)} unid · {fUSD(drill.total)} · {drill.items.length} ítems. El % es dentro de esta categoría.</p>
-              {drill.items.length === 0 ? (
-                <p className="text-sm text-cacao-soft italic">Sin ítems en esta categoría en el período.</p>
-              ) : (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                  <Dona
-                    segmentos={drill.items.map((p, i) => ({ key: p.producto, label: p.producto, value: p.monto, color: colorPorIndice(i) }))}
-                    format={fUSD}
-                    sinLeyenda
-                  />
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-xs">
-                      <thead>
-                        <tr className="text-cacao-mute uppercase tracking-widest text-left">
-                          <th className="py-1 font-normal">Ítem</th>
-                          <th className="py-1 font-normal text-right">Unid.</th>
-                          <th className="py-1 font-normal text-right">% unid.</th>
-                          <th className="py-1 font-normal text-right">Monto</th>
-                          <th className="py-1 font-normal text-right">% monto</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {drill.items.map((p) => (
-                          <tr key={p.producto} className="border-t border-marfil">
-                            <td className="py-1 text-cacao">{p.producto}</td>
-                            <td className="py-1 text-right tabular-nums text-cacao-soft">{fUnid(p.unidades)}</td>
-                            <td className="py-1 text-right tabular-nums text-cacao-soft">{fPct(drill.totalU > 0 ? (p.unidades / drill.totalU) * 100 : 0)}</td>
-                            <td className="py-1 text-right tabular-nums text-cacao">{fUSD(p.monto)}</td>
-                            <td className="py-1 text-right tabular-nums text-cacao-soft">{fPct(drill.total > 0 ? (p.monto / drill.total) * 100 : 0)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                <h3 className="font-cinzel text-base text-cacao">Desglose: {catDrill.label}{subDrill ? <span className="text-cacao-soft"> › {subDrill.label}</span> : null}</h3>
+                <div className="flex items-center gap-3">
+                  {subDrill && <button type="button" onClick={() => setSubDrill(null)} className="text-xs uppercase tracking-widest text-cacao-soft hover:text-cacao">‹ Volver</button>}
+                  <button type="button" onClick={() => { setCatDrill(null); setSubDrill(null); }} className="text-xs uppercase tracking-widest text-cacao-soft hover:text-terracotta">✕ Cerrar</button>
                 </div>
+              </div>
+
+              {subcats.length > 1 && !subDrill ? (() => {
+                // Nivel 1: las categorías dentro del grupo (Cafetería).
+                const gTotal = subcats.reduce((s, c) => s + c.monto, 0);
+                const gU = subcats.reduce((s, c) => s + c.unidades, 0);
+                return (
+                  <>
+                    <p className="text-[11px] text-cacao-mute mb-3">{fUnid(gU)} unid · {fUSD(gTotal)} · {subcats.length} categorías. Toca una categoría para ver sus ítems.</p>
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                      <Dona
+                        segmentos={subcats.map((c, i) => ({ key: c.key, label: c.label, value: c.monto, color: colorPorIndice(i) }))}
+                        format={fUSD}
+                        sinLeyenda
+                        onSelect={(k) => { const c = subcats.find((x) => x.key === k); if (c) setSubDrill({ key: c.key, label: c.label }); }}
+                      />
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="text-cacao-mute uppercase tracking-widest text-left">
+                              <th className="py-1 font-normal">Categoría</th>
+                              <th className="py-1 font-normal text-right">Unid.</th>
+                              <th className="py-1 font-normal text-right">% unid.</th>
+                              <th className="py-1 font-normal text-right">Monto</th>
+                              <th className="py-1 font-normal text-right">% monto</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {subcats.map((c) => (
+                              <tr key={c.key} onClick={() => setSubDrill({ key: c.key, label: c.label })} className="border-t border-marfil cursor-pointer hover:bg-marfil-soft">
+                                <td className="py-1 text-cacao"><span className="inline-flex items-center gap-1">{c.label}<span className="text-cacao-mute">›</span></span></td>
+                                <td className="py-1 text-right tabular-nums text-cacao-soft">{fUnid(c.unidades)}</td>
+                                <td className="py-1 text-right tabular-nums text-cacao-soft">{fPct(gU > 0 ? (c.unidades / gU) * 100 : 0)}</td>
+                                <td className="py-1 text-right tabular-nums text-cacao">{fUSD(c.monto)}</td>
+                                <td className="py-1 text-right tabular-nums text-cacao-soft">{fPct(gTotal > 0 ? (c.monto / gTotal) * 100 : 0)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </>
+                );
+              })() : (
+                // Nivel 2: ítems (de la sub-categoría, o del grupo si es una sola categoría).
+                <>
+                  <p className="text-[11px] text-cacao-mute mb-3">{drill ? `${fUnid(drill.totalU)} unid · ${fUSD(drill.total)} · ${drill.items.length} ítems. El % es dentro de esta categoría.` : ""}</p>
+                  {!drill || drill.items.length === 0 ? (
+                    <p className="text-sm text-cacao-soft italic">Sin ítems en el período.</p>
+                  ) : (
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                      <Dona
+                        segmentos={drill.items.map((p, i) => ({ key: p.producto, label: p.producto, value: p.monto, color: colorPorIndice(i) }))}
+                        format={fUSD}
+                        sinLeyenda
+                      />
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="text-cacao-mute uppercase tracking-widest text-left">
+                              <th className="py-1 font-normal">Ítem</th>
+                              <th className="py-1 font-normal text-right">Unid.</th>
+                              <th className="py-1 font-normal text-right">% unid.</th>
+                              <th className="py-1 font-normal text-right">Monto</th>
+                              <th className="py-1 font-normal text-right">% monto</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {drill.items.map((p) => (
+                              <tr key={p.producto} className="border-t border-marfil">
+                                <td className="py-1 text-cacao">{p.producto}</td>
+                                <td className="py-1 text-right tabular-nums text-cacao-soft">{fUnid(p.unidades)}</td>
+                                <td className="py-1 text-right tabular-nums text-cacao-soft">{fPct(drill.totalU > 0 ? (p.unidades / drill.totalU) * 100 : 0)}</td>
+                                <td className="py-1 text-right tabular-nums text-cacao">{fUSD(p.monto)}</td>
+                                <td className="py-1 text-right tabular-nums text-cacao-soft">{fPct(drill.total > 0 ? (p.monto / drill.total) * 100 : 0)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
             </section>
           )}
@@ -1252,7 +1345,7 @@ export function AnalisisVentas() {
                   </thead>
                   <tbody>
                     {categoriasExcluidasResumen.map((c) => (
-                      <tr key={c.key} onClick={() => setCatDrill({ key: c.key, label: c.label })} className="border-t border-marfil cursor-pointer hover:bg-marfil-soft">
+                      <tr key={c.key} onClick={() => abrirCategoria(c.key, c.label)} className="border-t border-marfil cursor-pointer hover:bg-marfil-soft">
                         <td className="py-1 text-cacao"><span className="inline-flex items-center gap-1">{c.label}<span className="text-cacao-mute">›</span></span></td>
                         <td className="py-1 text-right tabular-nums text-cacao-soft">{fUnid(c.unidades)}</td>
                         <td className="py-1 text-right tabular-nums text-cacao">{fUSD(c.monto)}</td>
