@@ -988,56 +988,6 @@ export function AnalisisVentas() {
         )}
       </section>
 
-      {/* ── Conciliación con Administración ─────────────────────── */}
-      {conc && (cocinaTotalRango > 0.005 || conc.setuxNeto > 0.005) && (() => {
-        // La idea simple: Ventas en Cocina − Ingresos = lo vendido a crédito (CXC) + cortesías.
-        // TODO en NETO (sin IVA): Cocina e Ingresos van netos, así que las CXC/RPP
-        // —que se guardan en bruto (lo que el cliente paga)— se restan en su NETO
-        // (monto − IVA). Antes se restaban en bruto y sobraba justo el IVA de CXC+RPP.
-        const diferencia = Math.round((cocinaTotalRango - conc.setuxNeto) * 100) / 100;
-        const creditoYCortesias = Math.round((conc.cxcNeto + conc.rppNeto) * 100) / 100;
-        const sinExplicar = Math.round((diferencia - creditoYCortesias) * 100) / 100;
-        const cuadra = Math.abs(sinExplicar) <= 50; // tolerancia de 50 € (redondeos)
-        const fEUR = (n: number) => `${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
-        return (
-          <section className="rounded-2xl bg-white ring-1 ring-marfil p-4">
-            <div className="flex items-center justify-between gap-2 mb-1">
-              <h3 className="font-cinzel text-base text-cacao">Venta vs Ingresos</h3>
-              <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] uppercase tracking-widest ${cuadra ? "bg-[#F1F4ED] text-[#2F4A1F]" : "bg-[#FBF3E2] text-[#7A5A18]"}`}>
-                <span className={`h-1.5 w-1.5 rounded-full ${cuadra ? "bg-[#4B7A2F]" : "bg-[#C9A24B]"}`} />
-                {cuadra ? "Cuadra" : "Revisar"}
-              </span>
-            </div>
-            <p className="text-[11px] text-cacao-mute mb-3">Del período (todas las ventas, sin filtros), todo en neto (sin IVA). La diferencia es lo que se vendió a crédito y las cortesías: sale en Cocina pero todavía no es dinero.</p>
-            <div className="text-sm max-w-md space-y-1">
-              <Fila label="Ventas registradas" val={fEUR(cocinaTotalRango)} />
-              <Fila label="Ingresos (dinero que entró)" val={fEUR(conc.setuxNeto)} />
-              <div className="border-t border-marfil pt-1"><Fila label="Diferencia" val={fEUR(diferencia)} fuerte /></div>
-            </div>
-            <div className="text-sm max-w-md space-y-1 mt-3 rounded-xl bg-marfil-soft p-3">
-              <p className="text-[11px] uppercase tracking-widest text-cacao-mute mb-1">Esa diferencia debería ser (neto):</p>
-              <Fila label="Ventas a crédito (CXC)" val={fEUR(conc.cxcNeto)} />
-              <Fila label="Cortesías (RPP)" val={fEUR(conc.rppNeto)} />
-              <div className="border-t border-marfil pt-1"><Fila label="Juntas" val={fEUR(creditoYCortesias)} fuerte /></div>
-              <div className="border-t border-marfil pt-1">
-                <Fila label={cuadra ? "Todo explicado ✓" : "Sin explicar"} val={`${sinExplicar < 0 ? "− " : ""}${fEUR(Math.abs(sinExplicar))}`} fuerte />
-              </div>
-            </div>
-            <p className="text-[11px] text-cacao-mute mt-2">CXC y RPP aquí van en neto (sin IVA) para cuadrar con Cocina. En Cuentas por Cobrar el cliente debe el total con IVA (lo que paga al cobrarle).</p>
-            {!cuadra && (
-              <p className="text-[12px] text-cacao-soft mt-2">
-                {sinExplicar > 0
-                  ? <>Cocina muestra más de lo que se explica con crédito y cortesías. Suele ser: falta importar la CXC del período, o se duplicó un día en Cocina. {conc.ivaSetux > 1 && <>Si este resto se parece al IVA ({fEUR(conc.ivaSetux)}), Cocina traía IVA y los ingresos no.</>}</>
-                  : <>El crédito y las cortesías registrados superan la diferencia. Suele ser: faltan días de venta por importar en Cocina, o se cargó CXC de más.</>}
-              </p>
-            )}
-            {conc.cobrosEur > 0.005 && (
-              <p className="text-[11px] text-cacao-mute mt-2">Aparte: {fEUR(conc.cobrosEur)} cobrados de cuentas por cobrar en el período (cobranzas de ventas anteriores, no cuentan aquí).</p>
-            )}
-          </section>
-        );
-      })()}
-
       {loading ? (
         <div className="rounded-2xl bg-white ring-1 ring-marfil p-12 text-center text-cacao-soft">
           Cargando análisis…
@@ -1529,6 +1479,56 @@ export function AnalisisVentas() {
           </section>
         </>
       )}
+
+      {/* ── Venta vs Ingresos (conciliación) · plegable, al final ── */}
+      {conc && (cocinaTotalRango > 0.005 || conc.setuxNeto > 0.005) && (() => {
+        // Ventas en Cocina − Ingresos = lo vendido a crédito (CXC) + cortesías,
+        // todo en NETO (sin IVA). Se muestra plegado al final para consultarlo
+        // cuando hace falta sin ocupar la parte de arriba del análisis.
+        const diferencia = Math.round((cocinaTotalRango - conc.setuxNeto) * 100) / 100;
+        const creditoYCortesias = Math.round((conc.cxcNeto + conc.rppNeto) * 100) / 100;
+        const sinExplicar = Math.round((diferencia - creditoYCortesias) * 100) / 100;
+        const cuadra = Math.abs(sinExplicar) <= 50; // tolerancia de 50 € (redondeos)
+        const fEUR = (n: number) => `${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
+        return (
+          <Plegable titulo="Venta vs Ingresos" sub={cuadra ? "Cuadra" : "Revisar"}>
+            <section className="rounded-2xl bg-white ring-1 ring-marfil p-4">
+              <div className="flex items-center justify-end mb-1">
+                <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] uppercase tracking-widest ${cuadra ? "bg-[#F1F4ED] text-[#2F4A1F]" : "bg-[#FBF3E2] text-[#7A5A18]"}`}>
+                  <span className={`h-1.5 w-1.5 rounded-full ${cuadra ? "bg-[#4B7A2F]" : "bg-[#C9A24B]"}`} />
+                  {cuadra ? "Cuadra" : "Revisar"}
+                </span>
+              </div>
+              <p className="text-[11px] text-cacao-mute mb-3">Del período (todas las ventas, sin filtros), todo en neto (sin IVA). La diferencia es lo que se vendió a crédito y las cortesías: sale en Cocina pero todavía no es dinero.</p>
+              <div className="text-sm max-w-md space-y-1">
+                <Fila label="Ventas registradas" val={fEUR(cocinaTotalRango)} />
+                <Fila label="Ingresos (dinero que entró)" val={fEUR(conc.setuxNeto)} />
+                <div className="border-t border-marfil pt-1"><Fila label="Diferencia" val={fEUR(diferencia)} fuerte /></div>
+              </div>
+              <div className="text-sm max-w-md space-y-1 mt-3 rounded-xl bg-marfil-soft p-3">
+                <p className="text-[11px] uppercase tracking-widest text-cacao-mute mb-1">Esa diferencia debería ser (neto):</p>
+                <Fila label="Ventas a crédito (CXC)" val={fEUR(conc.cxcNeto)} />
+                <Fila label="Cortesías (RPP)" val={fEUR(conc.rppNeto)} />
+                <div className="border-t border-marfil pt-1"><Fila label="Juntas" val={fEUR(creditoYCortesias)} fuerte /></div>
+                <div className="border-t border-marfil pt-1">
+                  <Fila label={cuadra ? "Todo explicado ✓" : "Sin explicar"} val={`${sinExplicar < 0 ? "− " : ""}${fEUR(Math.abs(sinExplicar))}`} fuerte />
+                </div>
+              </div>
+              <p className="text-[11px] text-cacao-mute mt-2">CXC y RPP aquí van en neto (sin IVA) para cuadrar con Cocina. En Cuentas por Cobrar el cliente debe el total con IVA (lo que paga al cobrarle).</p>
+              {!cuadra && (
+                <p className="text-[12px] text-cacao-soft mt-2">
+                  {sinExplicar > 0
+                    ? <>Cocina muestra más de lo que se explica con crédito y cortesías. Suele ser: falta importar la CXC del período, o se duplicó un día en Cocina. {conc.ivaSetux > 1 && <>Si este resto se parece al IVA ({fEUR(conc.ivaSetux)}), Cocina traía IVA y los ingresos no.</>}</>
+                    : <>El crédito y las cortesías registrados superan la diferencia. Suele ser: faltan días de venta por importar en Cocina, o se cargó CXC de más.</>}
+                </p>
+              )}
+              {conc.cobrosEur > 0.005 && (
+                <p className="text-[11px] text-cacao-mute mt-2">Aparte: {fEUR(conc.cobrosEur)} cobrados de cuentas por cobrar en el período (cobranzas de ventas anteriores, no cuentan aquí).</p>
+              )}
+            </section>
+          </Plegable>
+        );
+      })()}
     </div>
   );
 
