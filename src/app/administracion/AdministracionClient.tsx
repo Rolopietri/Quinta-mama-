@@ -1284,8 +1284,22 @@ function EgresosMes() {
   const [reclasificando, setReclasificando] = useState<string | null>(null);
   const [mostrarClasif, setMostrarClasif] = useState(false);
   const [cuentaPagar, setCuentaPagar] = useState<CuentaPagar | null>(null);
+  const [tasaEurUsd, setTasaEurUsd] = useState(1.17); // €→$ para el total del día en euros
   const [tick, setTick] = useState(0);
   const recargar = useCallback(() => setTick((t) => t + 1), []);
+
+  useEffect(() => {
+    let a = true;
+    (async () => {
+      try {
+        const r = await fetch("/api/admin/config", { cache: "no-store" });
+        const d = await r.json();
+        const v = Number(String(d.config?.tasa_eur_usd ?? "").replace(",", "."));
+        if (a && isFinite(v) && v > 0) setTasaEurUsd(v);
+      } catch { /* usa 1.17 por defecto */ }
+    })();
+    return () => { a = false; };
+  }, []);
 
   useEffect(() => {
     let a = true;
@@ -1347,10 +1361,10 @@ function EgresosMes() {
   const esCocina = (e: Egreso) => e.id.startsWith("compra:");
 
   // Egresos agrupados por FECHA (acordeón, como en Ingresos): el encabezado
-  // lleva la fecha y el total del día (por moneda); al abrirlo salen los
-  // egresos que componen ese total.
+  // lleva la fecha y el total del día CONVERTIDO A EUROS (todo en una sola
+  // moneda). Para los Bs se usa la tasa del día (ya guardada en monto_usd) y
+  // luego la tasa €/$; los que no tengan tasa (monto_usd nulo) se cuentan aparte.
   const egresosPorFecha = (() => {
-    const ORDEN = ["EUR", "USD", "Bs"];
     const m = new Map<string, Egreso[]>();
     for (const e of egresosAll) {
       const k = e.fecha ?? "";
@@ -1359,14 +1373,14 @@ function EgresosMes() {
     return [...m.entries()]
       .sort((a2, b2) => b2[0].localeCompare(a2[0])) // más reciente primero
       .map(([fecha, items]) => {
-        const totales: Record<string, number> = {};
+        let eur = 0;
+        let faltaTasa = 0;
         for (const e of items) {
-          const k = e.moneda || "Bs";
-          totales[k] = (totales[k] ?? 0) + (e.monto ?? 0);
+          if ((e.moneda || "Bs") === "EUR") eur += e.monto ?? 0;
+          else if (e.monto_usd != null) eur += e.monto_usd / (tasaEurUsd > 0 ? tasaEurUsd : 1.17);
+          else faltaTasa++;
         }
-        const monedas = ORDEN.filter((k) => (totales[k] ?? 0) > 0.005)
-          .concat(Object.keys(totales).filter((k) => !ORDEN.includes(k) && (totales[k] ?? 0) > 0.005));
-        return { fecha, items, totales, monedas };
+        return { fecha, items, eur: Math.round(eur * 100) / 100, faltaTasa };
       });
   })();
   const nombreInsumo = (id: string) => insumos.find((i) => i.id === id)?.nombre ?? "insumo";
@@ -1593,7 +1607,8 @@ function EgresosMes() {
                   <span className="font-medium text-cacao">{fmtFecha(g.fecha)}</span>
                   <span className="text-xs text-cacao-mute">{g.items.length} {g.items.length === 1 ? "egreso" : "egresos"}</span>
                   <span className="ml-auto text-sm text-cacao font-medium text-right">
-                    {g.monedas.length ? g.monedas.map((k) => fmtMonto(g.totales[k], k)).join(" · ") : "—"}
+                    {fmtMonto(g.eur, "EUR")}
+                    {g.faltaTasa > 0 && <span className="block text-[10px] text-terracotta font-normal">{g.faltaTasa} sin tasa</span>}
                   </span>
                 </button>
                 {abierto && (
