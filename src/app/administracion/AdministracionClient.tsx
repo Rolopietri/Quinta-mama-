@@ -2738,7 +2738,33 @@ function FormIngreso({
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [tasaBcv, setTasaBcv] = useState<TasaBcv | null>(null);
+  const [tasaEditada, setTasaEditada] = useState(false);
   function set<K extends keyof typeof f>(k: K, v: string) { setF((o) => ({ ...o, [k]: v })); }
+
+  // Tasa del día sugerida (mismo procedimiento que Compras): Bs → BCV $ (Bs por
+  // $); EUR → cruce BCV ($ por €); USD sin tasa.
+  const tasaSugIng = (t: TasaBcv | null, moneda: string): number | null => {
+    if (!t) return null;
+    if (moneda === "Bs") return t.usdBs ?? null;
+    if (moneda === "EUR") return t.eurBs != null && t.usdBs ? Math.round((t.eurBs / t.usdBs) * 10000) / 10000 : null;
+    return null;
+  };
+  // Auto-rellena la tasa con el BCV del día de la fecha del ingreso (editable).
+  useEffect(() => {
+    let a = true;
+    getTasaBcvPorFecha(f.fecha)
+      .then((t) => {
+        if (!a) return;
+        setTasaBcv(t);
+        if (!esEdicion && !tasaEditada && f.moneda !== "USD") {
+          const sug = tasaSugIng(t, f.moneda);
+          if (sug != null) setF((o) => ({ ...o, tasa: String(sug) }));
+        }
+      })
+      .catch(() => {});
+    return () => { a = false; };
+  }, [f.fecha]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function guardar() {
     if (parseMonto(f.monto) == null) { setError("Pon un monto."); return; }
@@ -2790,14 +2816,24 @@ function FormIngreso({
       </div>
       <Campo label="Pagador / Inquilino (opcional)"><input value={f.pagador} onChange={(e) => set("pagador", e.target.value)} placeholder="Quién pagó" className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" /></Campo>
       <Campo label="Concepto"><input value={f.concepto} onChange={(e) => set("concepto", e.target.value)} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" /></Campo>
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-3 gap-2">
         <Campo label="Monto"><input inputMode="decimal" value={f.monto} onChange={(e) => set("monto", e.target.value)} placeholder="0,00" className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" /></Campo>
         <Campo label="Moneda">
-          <select value={f.moneda} onChange={(e) => set("moneda", e.target.value)} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
+          <select value={f.moneda} onChange={(e) => { const m = e.target.value; set("moneda", m); if (!esEdicion && !tasaEditada && m !== "USD") { const sug = tasaSugIng(tasaBcv, m); if (sug != null) set("tasa", String(sug)); } }} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
             {MONEDAS.map((m) => <option key={m} value={m}>{m}</option>)}
           </select>
         </Campo>
+        <Campo label="Tasa a USD">
+          <input inputMode="decimal" value={f.tasa} onChange={(e) => { set("tasa", e.target.value); setTasaEditada(true); }} disabled={f.moneda === "USD"} placeholder={f.moneda === "USD" ? "—" : ""} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao disabled:bg-marfil-soft" />
+        </Campo>
       </div>
+      {f.moneda !== "USD" && (
+        <p className="text-[11px] text-cacao-mute -mt-1">
+          {tasaBcv && tasaSugIng(tasaBcv, f.moneda) != null
+            ? `Tasa BCV del ${fmtFecha(tasaBcv.fecha)} puesta automáticamente (${f.moneda === "Bs" ? "Bs por $" : "$ por €"}). Editable.`
+            : "Sin tasa BCV para esta fecha — ponla a mano."}
+        </p>
+      )}
       <div className="grid gap-3 sm:grid-cols-2">
         <Campo label="Método">
           <select value={f.metodo} onChange={(e) => set("metodo", e.target.value)} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
