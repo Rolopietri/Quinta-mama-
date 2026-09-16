@@ -1680,6 +1680,33 @@ function ModalPago({ cuenta, onCerrar, onPagar }: {
   const [tasaStr, setTasaStr] = useState("");
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [tasaBcv, setTasaBcv] = useState<TasaBcv | null>(null);
+  const [tasaEditada, setTasaEditada] = useState(false);
+
+  // Tasa del día sugerida (mismo procedimiento que Compras): Bs → BCV $ (Bs por
+  // $); EUR → cruce BCV ($ por €); USD sin tasa.
+  const sugTasa = (t: TasaBcv | null, mon: string): number | null => {
+    if (!t) return null;
+    if (mon === "Bs") return t.usdBs ?? null;
+    if (mon === "EUR") return t.eurBs != null && t.usdBs ? Math.round((t.eurBs / t.usdBs) * 10000) / 10000 : null;
+    return null;
+  };
+  // Auto-rellena la tasa con el BCV del día de PAGO (editable). No aplica a
+  // compras de Cocina (el monto viene de allá).
+  useEffect(() => {
+    let a = true;
+    getTasaBcvPorFecha(fecha)
+      .then((t) => {
+        if (!a) return;
+        setTasaBcv(t);
+        if (!esCompra && !tasaEditada && moneda !== "USD") {
+          const sug = sugTasa(t, moneda);
+          if (sug != null) setTasaStr(String(sug));
+        }
+      })
+      .catch(() => {});
+    return () => { a = false; };
+  }, [fecha]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function confirmar() {
     setError(null);
@@ -1723,12 +1750,12 @@ function ModalPago({ cuenta, onCerrar, onPagar }: {
           <div className="grid grid-cols-3 gap-2">
             <Campo label="Monto"><input inputMode="decimal" value={montoStr} onChange={(e) => setMontoStr(e.target.value)} placeholder="0,00" className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" /></Campo>
             <Campo label="Moneda">
-              <select value={moneda} onChange={(e) => setMoneda(e.target.value)} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
+              <select value={moneda} onChange={(e) => { const m = e.target.value; setMoneda(m); if (!tasaEditada && m !== "USD") { const sug = sugTasa(tasaBcv, m); if (sug != null) setTasaStr(String(sug)); } }} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
                 {MONEDAS.map((m) => <option key={m} value={m}>{m}</option>)}
               </select>
             </Campo>
             <Campo label="Tasa a USD">
-              <input inputMode="decimal" value={tasaStr} onChange={(e) => setTasaStr(e.target.value)} disabled={moneda === "USD"} placeholder={moneda === "Bs" ? "BCV del día" : moneda === "USD" ? "—" : ""} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao disabled:bg-marfil-soft" />
+              <input inputMode="decimal" value={tasaStr} onChange={(e) => { setTasaStr(e.target.value); setTasaEditada(true); }} disabled={moneda === "USD"} placeholder={moneda === "Bs" ? "BCV del día" : moneda === "USD" ? "—" : ""} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao disabled:bg-marfil-soft" />
             </Campo>
           </div>
         )}
@@ -1780,6 +1807,34 @@ function FormEgreso({
   const [tieneFlete, setTieneFlete] = useState(fleteIni > 0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [tasaBcv, setTasaBcv] = useState<TasaBcv | null>(null);
+  const [tasaEditada, setTasaEditada] = useState(false);
+
+  // Tasa del día sugerida según la moneda (mismo procedimiento que Compras):
+  // Bs → BCV $ (Bs por $); EUR → cruce BCV ($ por €). USD no lleva tasa.
+  const tasaSugEgreso = (t: TasaBcv | null, moneda: string): number | null => {
+    if (!t) return null;
+    if (moneda === "Bs") return t.usdBs ?? null;
+    if (moneda === "EUR") return t.eurBs != null && t.usdBs ? Math.round((t.eurBs / t.usdBs) * 10000) / 10000 : null;
+    return null;
+  };
+
+  // Auto-rellena la tasa con el BCV del día de la fecha del egreso (editable).
+  // En edición se respeta la tasa guardada; si la editas a mano, no se pisa.
+  useEffect(() => {
+    let a = true;
+    getTasaBcvPorFecha(f.fecha)
+      .then((t) => {
+        if (!a) return;
+        setTasaBcv(t);
+        if (!esEdicion && !tasaEditada && f.moneda !== "USD") {
+          const sug = tasaSugEgreso(t, f.moneda);
+          if (sug != null) setF((o) => ({ ...o, tasa: String(sug) }));
+        }
+      })
+      .catch(() => {});
+    return () => { a = false; };
+  }, [f.fecha]); // eslint-disable-line react-hooks/exhaustive-deps
   // Registro de un proveedor NUEVO desde aquí mismo (se guarda en el catálogo).
   const [creandoProv, setCreandoProv] = useState(false);
   const [nprov, setNprov] = useState<Record<string, string>>({ nombre: "", concepto: "", cedula: "", rif: "", numero_cuenta: "", banco: "" });
@@ -1882,14 +1937,21 @@ function FormEgreso({
       <div className="grid grid-cols-3 gap-2">
         <Campo label="Monto"><input inputMode="decimal" value={f.monto} onChange={(e) => set("monto", e.target.value)} placeholder="0,00" className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" /></Campo>
         <Campo label="Moneda">
-          <select value={f.moneda} onChange={(e) => set("moneda", e.target.value)} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
+          <select value={f.moneda} onChange={(e) => { const m = e.target.value; set("moneda", m); if (!esEdicion && !tasaEditada && m !== "USD") { const sug = tasaSugEgreso(tasaBcv, m); if (sug != null) set("tasa", String(sug)); } }} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
             {MONEDAS.map((m) => <option key={m} value={m}>{m}</option>)}
           </select>
         </Campo>
         <Campo label="Tasa a USD">
-          <input inputMode="decimal" value={f.tasa} onChange={(e) => set("tasa", e.target.value)} disabled={f.moneda === "USD"} placeholder={f.moneda === "USD" ? "—" : ""} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao disabled:bg-marfil-soft" />
+          <input inputMode="decimal" value={f.tasa} onChange={(e) => { set("tasa", e.target.value); setTasaEditada(true); }} disabled={f.moneda === "USD"} placeholder={f.moneda === "USD" ? "—" : ""} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao disabled:bg-marfil-soft" />
         </Campo>
       </div>
+      {f.moneda !== "USD" && (
+        <p className="text-[11px] text-cacao-mute -mt-1">
+          {tasaBcv && tasaSugEgreso(tasaBcv, f.moneda) != null
+            ? `Tasa BCV del ${fmtFecha(tasaBcv.fecha)} puesta automáticamente (${f.moneda === "Bs" ? "Bs por $" : "$ por €"}). Editable.`
+            : "Sin tasa BCV para esta fecha — ponla a mano (o, en Bs, déjala vacía: se usa el BCV del día al guardar)."}
+        </p>
+      )}
       {/* Flete (opcional): misma moneda, se SUMA al monto. */}
       <div className="rounded-xl ring-1 ring-marfil p-3 space-y-2">
         <label className="flex items-center gap-2 text-sm text-cacao cursor-pointer">
