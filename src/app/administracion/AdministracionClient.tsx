@@ -3562,6 +3562,23 @@ function ModalCobro({ cliente, tasaGlobal, onCerrar, onListo }: { cliente: Clien
   const [referencia, setReferencia] = useState("");
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [tasaBcv, setTasaBcv] = useState<TasaBcv | null>(null);
+  const [tasaBsEditada, setTasaBsEditada] = useState(false);
+
+  // Tasa del día automática (mismo procedimiento que Cocina → Compras): sigue la
+  // FECHA del cobro y trae el BCV € (Bs por €) de ese día. Auto-rellena pero es
+  // editable; si la editas a mano, no se vuelve a sobrescribir.
+  useEffect(() => {
+    let a = true;
+    getTasaBcvPorFecha(fecha)
+      .then((t) => {
+        if (!a) return;
+        setTasaBcv(t);
+        if (t?.eurBs != null && moneda === "Bs" && !tasaBsEditada) setTasaBsStr(String(t.eurBs));
+      })
+      .catch(() => {});
+    return () => { a = false; };
+  }, [fecha]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const seleccionadas = filas.filter((x) => sel[x.c.id]);
   const selRemEur = Math.round(seleccionadas.reduce((s, x) => s + x.restEur, 0) * 100) / 100;
@@ -3688,7 +3705,7 @@ function ModalCobro({ cliente, tasaGlobal, onCerrar, onListo }: { cliente: Clien
                 <input inputMode="decimal" value={montoStr} onChange={(e) => setMontoStr(e.target.value)} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao text-right" />
               </Campo>
               <Campo label="Moneda del pago">
-                <select value={moneda} onChange={(e) => { const m = e.target.value as "EUR" | "USD" | "Bs"; setMoneda(m); sugerir(selRemEur, m); }} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
+                <select value={moneda} onChange={(e) => { const m = e.target.value as "EUR" | "USD" | "Bs"; setMoneda(m); if (m === "Bs" && tasaBcv?.eurBs != null && !tasaBsEditada) { setTasaBsStr(String(tasaBcv.eurBs)); sugerir(selRemEur, m, tasaBcv.eurBs); } else { sugerir(selRemEur, m); } }} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
                   <option value="EUR">€ Euro</option>
                   <option value="USD">$ Dólar</option>
                   <option value="Bs">Bs Bolívares</option>
@@ -3698,7 +3715,8 @@ function ModalCobro({ cliente, tasaGlobal, onCerrar, onListo }: { cliente: Clien
 
             {moneda === "Bs" && (
               <Campo label="Tasa del día · Bs por €">
-                <input inputMode="decimal" value={tasaBsStr} onChange={(e) => { setTasaBsStr(e.target.value); }} placeholder="ej. 320,00 Bs = 1 €" className="w-52 border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
+                <input inputMode="decimal" value={tasaBsStr} onChange={(e) => { setTasaBsStr(e.target.value); setTasaBsEditada(true); }} placeholder="ej. 320,00" className="w-52 border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
+                <span className="block text-[10px] text-cacao-mute mt-0.5">{tasaBcv?.eurBs != null ? `BCV € del ${fmtFecha(tasaBcv.fecha)}: ${tasaBcv.eurBs} · automático, editable` : "sin tasa BCV para esta fecha — ponla a mano"}</span>
               </Campo>
             )}
             {moneda === "USD" && (
