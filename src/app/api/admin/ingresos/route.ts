@@ -51,6 +51,23 @@ function fila(e: Record<string, unknown>, tasaEurDefecto: number): Record<string
   };
 }
 
+// Ingresos en Bs SIN tasa → se asume la tasa BCV ($) vigente de la fecha del
+// ingreso (mismo criterio que Egresos). Bs→USD = monto / usd_bs.
+async function autoTasaBsBcv(sb: NonNullable<ReturnType<typeof createServiceClient>>, filas: Record<string, unknown>[]): Promise<void> {
+  for (const fl of filas) {
+    if (fl.moneda !== "Bs" || fl.tasa != null || fl.monto == null) continue;
+    const fecha = typeof fl.fecha === "string" && fl.fecha ? fl.fecha : new Date().toISOString().slice(0, 10);
+    const { data: tb } = await sb
+      .from("tasa_bcv").select("usd_bs").lte("fecha", fecha)
+      .order("fecha", { ascending: false }).limit(1).maybeSingle();
+    const usdBs = tb ? Number((tb as { usd_bs: number | null }).usd_bs) : 0;
+    if (usdBs > 0) {
+      fl.tasa = usdBs;
+      fl.monto_usd = Math.round((Number(fl.monto) / usdBs) * 100) / 100;
+    }
+  }
+}
+
 // GET ?mes=YYYY-MM → ingresos de ese mes (o todos si no se pasa mes).
 export async function GET(req: NextRequest) {
   if (!autorizado(req)) return NextResponse.json({ error: "no autorizado" }, { status: 401 });
@@ -83,7 +100,9 @@ export async function POST(req: NextRequest) {
       : [];
   if (lista.length === 0) return NextResponse.json({ error: "No hay ingresos que registrar." }, { status: 400 });
   const tasaEur = await getTasaEurUsd(sb);
-  const { data, error } = await sb.from("admin_ingreso").insert(lista.map((e) => fila(e, tasaEur))).select("*");
+  const filas = lista.map((e) => fila(e, tasaEur));
+  await autoTasaBsBcv(sb, filas);
+  const { data, error } = await sb.from("admin_ingreso").insert(filas).select("*");
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ ingresos: data ?? [] });
 }
@@ -96,7 +115,9 @@ export async function PATCH(req: NextRequest) {
   const id = texto(b.id);
   if (!id) return NextResponse.json({ error: "falta id" }, { status: 400 });
   const tasaEur = await getTasaEurUsd(sb);
-  const { data, error } = await sb.from("admin_ingreso").update(fila(b, tasaEur)).eq("id", id).select("*").single();
+  const fl = fila(b, tasaEur);
+  await autoTasaBsBcv(sb, [fl]);
+  const { data, error } = await sb.from("admin_ingreso").update(fl).eq("id", id).select("*").single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ ingreso: data });
 }

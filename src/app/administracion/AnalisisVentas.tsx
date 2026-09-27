@@ -106,7 +106,7 @@ function categoriaDeVenta(
   catPorInsumo: Map<string, string>,
   catPorNombre: Map<string, string>,
   rubroMap: Map<string, string>,
-): { key: string; label: string } {
+): { key: string; label: string; underKey: string; underLabel: string } {
   let label: string | null = null;
   if (v.recetaId) {
     const cat = catPorReceta.get(v.recetaId);
@@ -129,8 +129,34 @@ function categoriaDeVenta(
   // Rollup administrativo: si la categoría tiene un "rubro" definido, se agrupa
   // bajo ese rubro (p. ej. Smoothies + Bebidas naturales → un solo rubro). En
   // Recetas/Cocina la categoría sigue usándose tal cual; esto es solo la vista.
-  const rubro = rubroMap.get(normCat(canon)) ?? canon;
-  return { key: normCat(rubro), label: rubro };
+  // Además, las dos categorías en consignación se agrupan (fijo) bajo
+  // "Consignación", pudiéndose abrir cada una por separado en el drill.
+  const rubro = rubroMap.get(normCat(canon)) ?? SUBRUBRO_FIJO[normCat(canon)] ?? canon;
+  // Se devuelve TAMBIÉN la categoría subyacente (antes del rollup) para el
+  // tercer nivel del drill: rubro → categoría real → ítems.
+  return { key: normCat(rubro), label: rubro, underKey: normCat(canon), underLabel: canon };
+}
+
+// Sub-rubros fijos (sin depender de la config de la BD): agrupan varias
+// categorías bajo un nombre en el análisis, pero cada una sigue siendo abrible
+// por separado. Las dos consignaciones se juntan como "Consignación".
+const SUBRUBRO_FIJO: Record<string, string> = {
+  "bar of mix (consignacion)": "Consignación",
+  "cocina clandestina (consignacion)": "Consignación",
+  consignacion: "Consignación",
+};
+
+// Grupo de NIVEL SUPERIOR para el gráfico principal de Administración: las 3
+// categorías de alquiler se muestran solas y todo lo demás (café, bebidas,
+// cocina, consignaciones…) se engloba en "Cafetería". Al abrir Cafetería
+// salen sus categorías, y de ahí el detalle por ítem.
+const GRUPOS_ALQUILER = new Set(
+  ["Alquileres fijos", "Eventos & Alquileres por bloque", "Pádel"].map(normCat),
+);
+function grupoDeCategoria(catLabel: string): { key: string; label: string } {
+  const n = normCat(catLabel);
+  if (GRUPOS_ALQUILER.has(n)) return { key: n, label: catLabel };
+  return { key: "cafeteria", label: "Cafetería" };
 }
 
 type OrdenTabla = "monto" | "unidades" | "pct";
@@ -150,11 +176,26 @@ export function AnalisisVentas() {
   const [recetas, setRecetas] = useState<Receta[]>([]);
   const [insumos, setInsumos] = useState<Insumo[]>([]);
   const [loading, setLoading] = useState(true);
-  // Categoría "abierta" para ver el desglose de sus ítems (drill-down).
+  // Drill-down de dos niveles: `catDrill` = grupo abierto del gráfico principal
+  // (Cafetería o un alquiler); `subDrill` = categoría abierta DENTRO de ese
+  // grupo (solo aplica a Cafetería, que agrupa varias categorías).
   const [catDrill, setCatDrill] = useState<{ key: string; label: string } | null>(null);
+  const [subDrill, setSubDrill] = useState<{ key: string; label: string } | null>(null);
+  // Tercer nivel: categoría REAL dentro de una sub-categoría que agrupa varias
+  // (p. ej. Consignación → Bar of Mix / Cocina Clandestina).
+  const [underDrill, setUnderDrill] = useState<{ key: string; label: string } | null>(null);
+  const abrirGrupo = (key: string, label: string) => { setCatDrill({ key, label }); setSubDrill(null); setUnderDrill(null); };
+  // Abre el drill directo en una categoría concreta: entra por su grupo y, si es
+  // de Cafetería, la deja seleccionada como sub-categoría (para ver sus ítems).
+  const abrirCategoria = (catKey: string, catLabel: string) => {
+    const grp = grupoDeCategoria(catLabel);
+    setCatDrill({ key: grp.key, label: grp.label });
+    setSubDrill(grp.key === "cafeteria" ? { key: catKey, label: catLabel } : null);
+    setUnderDrill(null);
+  };
   const [error, setError] = useState<string | null>(null);
   // Conciliación con Administración (componentes del rango, en euros).
-  const [conc, setConc] = useState<{ setuxNeto: number; ivaSetux: number; cxc: number; rpp: number; cxcNeto: number; rppNeto: number; cobrosEur: number; otrosEur: number } | null>(null);
+  const [conc, setConc] = useState<{ setuxNeto: number; ivaSetux: number; cxc: number; rpp: number; cxcNeto: number; rppNeto: number; cobrosEur: number; otrosEur: number; tickets: number } | null>(null);
   // Panel de clasificación de productos (asigna la categoría desde Admin).
   const [mostrarClasif, setMostrarClasif] = useState(false);
   const [mostrarDetalle, setMostrarDetalle] = useState(false);
@@ -305,6 +346,7 @@ export function AnalisisVentas() {
     () =>
       ventas.map((v) => {
         const cat = categoriaDeVenta(v, catPorReceta, catPorInsumo, catNombre, rubroMap);
+        const grp = grupoDeCategoria(cat.label);
         const unidades = v.cantidad || 0;
         let costo: number | null = null;
         if (v.recetaId) {
@@ -319,6 +361,10 @@ export function AnalisisVentas() {
           producto: v.recetaNombre.trim() || "—",
           catKey: cat.key,
           catLabel: cat.label,
+          underKey: cat.underKey,
+          underLabel: cat.underLabel,
+          grpKey: grp.key,
+          grpLabel: grp.label,
           unidades,
           monto: v.totalUsd ?? 0,
           costo,
@@ -370,12 +416,12 @@ export function AnalisisVentas() {
   const porProducto = useMemo(() => {
     const m = new Map<
       string,
-      { producto: string; catKey: string; catLabel: string; unidades: number; monto: number; costo: number; costeado: boolean }
+      { producto: string; catKey: string; catLabel: string; underKey: string; underLabel: string; grpKey: string; grpLabel: string; unidades: number; monto: number; costo: number; costeado: boolean }
     >();
     filtradas.forEach((e) => {
       const cur =
         m.get(e.producto) ??
-        { producto: e.producto, catKey: e.catKey, catLabel: e.catLabel, unidades: 0, monto: 0, costo: 0, costeado: true };
+        { producto: e.producto, catKey: e.catKey, catLabel: e.catLabel, underKey: e.underKey, underLabel: e.underLabel, grpKey: e.grpKey, grpLabel: e.grpLabel, unidades: 0, monto: 0, costo: 0, costeado: true };
       cur.unidades += e.unidades;
       cur.monto += e.monto;
       if (e.costo == null) cur.costeado = false; else cur.costo += e.costo;
@@ -488,30 +534,80 @@ export function AnalisisVentas() {
     return Array.from(m.values()).sort((a, b) => b.monto - a.monto);
   }, [porProducto, catExcluidas]);
 
-  // Drill-down: ítems de la categoría abierta, con % dentro de la categoría.
+  // Sub-categorías del grupo abierto (nivel 1 del drill). Solo tiene sentido en
+  // Cafetería, que agrupa varias categorías; un alquiler es una sola categoría.
+  const subcats = useMemo(() => {
+    if (!catDrill) return [] as { key: string; label: string; unidades: number; monto: number }[];
+    const m = new Map<string, { key: string; label: string; unidades: number; monto: number }>();
+    porProducto.filter((p) => p.grpKey === catDrill.key).forEach((p) => {
+      const cur = m.get(p.catKey) ?? { key: p.catKey, label: p.catLabel, unidades: 0, monto: 0 };
+      cur.unidades += p.unidades; cur.monto += p.monto; m.set(p.catKey, cur);
+    });
+    return Array.from(m.values()).sort((a, b) => b.monto - a.monto);
+  }, [catDrill, porProducto]);
+
+  // Categorías REALES dentro de la sub-categoría abierta (nivel 2 → 3). Solo
+  // tiene sentido cuando la sub-categoría agrupa varias (Consignación, o el
+  // rubro Smoothies+Bebidas); si es una sola, se salta directo a los ítems.
+  const unders = useMemo(() => {
+    if (!subDrill) return [] as { key: string; label: string; unidades: number; monto: number }[];
+    const m = new Map<string, { key: string; label: string; unidades: number; monto: number }>();
+    porProducto.filter((p) => p.catKey === subDrill.key).forEach((p) => {
+      const cur = m.get(p.underKey) ?? { key: p.underKey, label: p.underLabel, unidades: 0, monto: 0 };
+      cur.unidades += p.unidades; cur.monto += p.monto; m.set(p.underKey, cur);
+    });
+    return Array.from(m.values()).sort((a, b) => b.monto - a.monto);
+  }, [subDrill, porProducto]);
+
+  // Ítems del nivel más profundo abierto: categoría real (underDrill) →
+  // sub-categoría (subDrill) → grupo (catDrill).
   const drill = useMemo(() => {
     if (!catDrill) return null;
-    const items = porProducto.filter((p) => p.catKey === catDrill.key);
+    const items = porProducto.filter((p) =>
+      underDrill ? p.underKey === underDrill.key
+        : subDrill ? p.catKey === subDrill.key
+        : p.grpKey === catDrill.key,
+    );
     const total = items.reduce((s, p) => s + p.monto, 0);
     const totalU = items.reduce((s, p) => s + p.unidades, 0);
     return { items: [...items].sort((a, b) => b.monto - a.monto), total, totalU };
-  }, [catDrill, porProducto]);
+  }, [catDrill, subDrill, underDrill, porProducto]);
 
-  const porCategoria = useMemo(() => {
+  // Gráfico principal: los 4 grupos de nivel superior (3 alquileres + Cafetería).
+  const porGrupo = useMemo(() => {
     const m = new Map<
       string,
       { key: string; label: string; unidades: number; monto: number }
     >();
     filtradas.forEach((e) => {
       const cur =
-        m.get(e.catKey) ??
-        { key: e.catKey, label: e.catLabel, unidades: 0, monto: 0 };
+        m.get(e.grpKey) ??
+        { key: e.grpKey, label: e.grpLabel, unidades: 0, monto: 0 };
       cur.unidades += e.unidades;
       cur.monto += e.monto;
-      m.set(e.catKey, cur);
+      m.set(e.grpKey, cur);
     });
     return Array.from(m.values()).sort((a, b) => b.monto - a.monto);
   }, [filtradas]);
+
+  // Ticket promedio de CAFETERÍA (realista): consumo de cafetería (sin
+  // alquileres) ÷ tickets de cafetería. Los tickets totales del período vienen
+  // del reporte por factura; se les restan las transacciones de alquiler (una
+  // por cada línea de alquiler, que es como se factura) para no diluir el
+  // promedio con los pocos-pero-grandes alquileres. Se usa TODO el período
+  // (no depende de los filtros de categoría/producto), igual que los tickets.
+  const ticketCafeteria = useMemo(() => {
+    const consumoNeto = enriquecidas.reduce((s, e) => s + (e.grpKey === "cafeteria" ? e.monto : 0), 0);
+    const lineasAlquiler = enriquecidas.reduce((s, e) => s + (e.grpKey !== "cafeteria" ? 1 : 0), 0);
+    const ticketsTotal = conc?.tickets ?? 0;
+    const ticketsCaf = Math.max(0, ticketsTotal - lineasAlquiler);
+    // Se muestra con IVA (lo que paga el cliente): se sube el neto a bruto con la
+    // proporción REAL de IVA del período (IVA/neto de Setux), que respeta los
+    // métodos sin IVA (Zelle/Dólar). Si no hay datos, se asume 16%.
+    const factorIva = conc && conc.setuxNeto > 0 ? (conc.setuxNeto + conc.ivaSetux) / conc.setuxNeto : 1.16;
+    const consumo = consumoNeto * factorIva;
+    return { consumo, tickets: ticketsCaf, promedio: ticketsCaf > 0 ? consumo / ticketsCaf : null };
+  }, [enriquecidas, conc]);
 
   // Evolución diaria: todos los días del rango, con 0 si no hubo ventas.
   const porDia = useMemo(() => {
@@ -911,56 +1007,6 @@ export function AnalisisVentas() {
         )}
       </section>
 
-      {/* ── Conciliación con Administración ─────────────────────── */}
-      {conc && (cocinaTotalRango > 0.005 || conc.setuxNeto > 0.005) && (() => {
-        // La idea simple: Ventas en Cocina − Ingresos = lo vendido a crédito (CXC) + cortesías.
-        // TODO en NETO (sin IVA): Cocina e Ingresos van netos, así que las CXC/RPP
-        // —que se guardan en bruto (lo que el cliente paga)— se restan en su NETO
-        // (monto − IVA). Antes se restaban en bruto y sobraba justo el IVA de CXC+RPP.
-        const diferencia = Math.round((cocinaTotalRango - conc.setuxNeto) * 100) / 100;
-        const creditoYCortesias = Math.round((conc.cxcNeto + conc.rppNeto) * 100) / 100;
-        const sinExplicar = Math.round((diferencia - creditoYCortesias) * 100) / 100;
-        const cuadra = Math.abs(sinExplicar) <= 50; // tolerancia de 50 € (redondeos)
-        const fEUR = (n: number) => `${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
-        return (
-          <section className="rounded-2xl bg-white ring-1 ring-marfil p-4">
-            <div className="flex items-center justify-between gap-2 mb-1">
-              <h3 className="font-cinzel text-base text-cacao">Venta vs Ingresos</h3>
-              <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] uppercase tracking-widest ${cuadra ? "bg-[#F1F4ED] text-[#2F4A1F]" : "bg-[#FBF3E2] text-[#7A5A18]"}`}>
-                <span className={`h-1.5 w-1.5 rounded-full ${cuadra ? "bg-[#4B7A2F]" : "bg-[#C9A24B]"}`} />
-                {cuadra ? "Cuadra" : "Revisar"}
-              </span>
-            </div>
-            <p className="text-[11px] text-cacao-mute mb-3">Del período (todas las ventas, sin filtros), todo en neto (sin IVA). La diferencia es lo que se vendió a crédito y las cortesías: sale en Cocina pero todavía no es dinero.</p>
-            <div className="text-sm max-w-md space-y-1">
-              <Fila label="Ventas registradas" val={fEUR(cocinaTotalRango)} />
-              <Fila label="Ingresos (dinero que entró)" val={fEUR(conc.setuxNeto)} />
-              <div className="border-t border-marfil pt-1"><Fila label="Diferencia" val={fEUR(diferencia)} fuerte /></div>
-            </div>
-            <div className="text-sm max-w-md space-y-1 mt-3 rounded-xl bg-marfil-soft p-3">
-              <p className="text-[11px] uppercase tracking-widest text-cacao-mute mb-1">Esa diferencia debería ser (neto):</p>
-              <Fila label="Ventas a crédito (CXC)" val={fEUR(conc.cxcNeto)} />
-              <Fila label="Cortesías (RPP)" val={fEUR(conc.rppNeto)} />
-              <div className="border-t border-marfil pt-1"><Fila label="Juntas" val={fEUR(creditoYCortesias)} fuerte /></div>
-              <div className="border-t border-marfil pt-1">
-                <Fila label={cuadra ? "Todo explicado ✓" : "Sin explicar"} val={`${sinExplicar < 0 ? "− " : ""}${fEUR(Math.abs(sinExplicar))}`} fuerte />
-              </div>
-            </div>
-            <p className="text-[11px] text-cacao-mute mt-2">CXC y RPP aquí van en neto (sin IVA) para cuadrar con Cocina. En Cuentas por Cobrar el cliente debe el total con IVA (lo que paga al cobrarle).</p>
-            {!cuadra && (
-              <p className="text-[12px] text-cacao-soft mt-2">
-                {sinExplicar > 0
-                  ? <>Cocina muestra más de lo que se explica con crédito y cortesías. Suele ser: falta importar la CXC del período, o se duplicó un día en Cocina. {conc.ivaSetux > 1 && <>Si este resto se parece al IVA ({fEUR(conc.ivaSetux)}), Cocina traía IVA y los ingresos no.</>}</>
-                  : <>El crédito y las cortesías registrados superan la diferencia. Suele ser: faltan días de venta por importar en Cocina, o se cargó CXC de más.</>}
-              </p>
-            )}
-            {conc.cobrosEur > 0.005 && (
-              <p className="text-[11px] text-cacao-mute mt-2">Aparte: {fEUR(conc.cobrosEur)} cobrados de cuentas por cobrar en el período (cobranzas de ventas anteriores, no cuentan aquí).</p>
-            )}
-          </section>
-        );
-      })()}
-
       {loading ? (
         <div className="rounded-2xl bg-white ring-1 ring-marfil p-12 text-center text-cacao-soft">
           Cargando análisis…
@@ -978,6 +1024,11 @@ export function AnalisisVentas() {
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
             <StatCard titulo="Ventas totales" valor={fUSD(totalMonto)} />
             <StatCard titulo="Unidades vendidas" valor={fUnid(totalUnidades)} />
+            <StatCard
+              titulo="Ticket prom. cafetería"
+              valor={ticketCafeteria.promedio != null ? `${ticketCafeteria.promedio.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €` : "—"}
+              sub={ticketCafeteria.tickets > 0 ? `${fUnid(ticketCafeteria.tickets)} tickets · con IVA` : "faltan tickets del período (importa el reporte por factura)"}
+            />
             <StatCard
               titulo="Productos distintos"
               valor={fUnid(porProducto.length)}
@@ -1039,19 +1090,19 @@ export function AnalisisVentas() {
           {/* ── Categorías ──────────────────────────────────────── */}
           <div className="grid grid-cols-1 gap-4">
             <PanelCard titulo="Ventas por categoría">
-              <p className="text-[11px] text-cacao-mute mb-3">Toca una categoría (en el gráfico o en la lista) para ver su desglose.</p>
+              <p className="text-[11px] text-cacao-mute mb-3">Alquileres y Cafetería. Toca un grupo (en el gráfico o en la lista) para abrirlo; Cafetería se despliega en sus categorías, y de ahí al detalle por ítem.</p>
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
                 <Dona
-                  segmentos={porCategoria.map((c, i) => ({ key: c.key, label: c.label, value: c.monto, color: colorPorIndice(i) }))}
+                  segmentos={porGrupo.map((c, i) => ({ key: c.key, label: c.label, value: c.monto, color: colorPorIndice(i) }))}
                   format={fUSD}
                   sinLeyenda
-                  onSelect={(k) => { const c = porCategoria.find((x) => x.key === k); if (c) setCatDrill({ key: c.key, label: c.label }); }}
+                  onSelect={(k) => { const c = porGrupo.find((x) => x.key === k); if (c) abrirGrupo(c.key, c.label); }}
                 />
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs">
                     <thead>
                       <tr className="text-cacao-mute uppercase tracking-widest text-left">
-                        <th className="py-1 font-normal">Categoría</th>
+                        <th className="py-1 font-normal">Grupo</th>
                         <th className="py-1 font-normal text-right">Unid.</th>
                         <th className="py-1 font-normal text-right">% unid.</th>
                         <th className="py-1 font-normal text-right">Monto</th>
@@ -1059,8 +1110,8 @@ export function AnalisisVentas() {
                       </tr>
                     </thead>
                     <tbody>
-                      {porCategoria.map((c) => (
-                        <tr key={c.key} onClick={() => setCatDrill({ key: c.key, label: c.label })} className={`border-t border-marfil cursor-pointer hover:bg-marfil-soft ${catDrill?.key === c.key ? "bg-marfil-soft" : ""}`}>
+                      {porGrupo.map((c) => (
+                        <tr key={c.key} onClick={() => abrirGrupo(c.key, c.label)} className={`border-t border-marfil cursor-pointer hover:bg-marfil-soft ${catDrill?.key === c.key ? "bg-marfil-soft" : ""}`}>
                           <td className="py-1 text-cacao"><span className="inline-flex items-center gap-1">{c.label}<span className="text-cacao-mute">›</span></span></td>
                           <td className="py-1 text-right tabular-nums text-cacao-soft">{fUnid(c.unidades)}</td>
                           <td className="py-1 text-right tabular-nums text-cacao-soft">{fPct(totalUnidades > 0 ? (c.unidades / totalUnidades) * 100 : 0)}</td>
@@ -1075,48 +1126,140 @@ export function AnalisisVentas() {
             </PanelCard>
           </div>
 
-          {/* ── Desglose de la categoría seleccionada (drill-down) ── */}
-          {catDrill && drill && (
+          {/* ── Desglose del grupo seleccionado (drill de 2 niveles) ── */}
+          {catDrill && (
             <section className="rounded-2xl bg-white ring-1 ring-terracotta/40 p-4">
               <div className="flex items-center justify-between gap-2 mb-1">
-                <h3 className="font-cinzel text-base text-cacao">Desglose: {catDrill.label}</h3>
-                <button type="button" onClick={() => setCatDrill(null)} className="text-xs uppercase tracking-widest text-cacao-soft hover:text-terracotta">✕ Cerrar</button>
-              </div>
-              <p className="text-[11px] text-cacao-mute mb-3">{fUnid(drill.totalU)} unid · {fUSD(drill.total)} · {drill.items.length} ítems. El % es dentro de esta categoría.</p>
-              {drill.items.length === 0 ? (
-                <p className="text-sm text-cacao-soft italic">Sin ítems en esta categoría en el período.</p>
-              ) : (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                  <Dona
-                    segmentos={drill.items.map((p, i) => ({ key: p.producto, label: p.producto, value: p.monto, color: colorPorIndice(i) }))}
-                    format={fUSD}
-                    sinLeyenda
-                  />
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-xs">
-                      <thead>
-                        <tr className="text-cacao-mute uppercase tracking-widest text-left">
-                          <th className="py-1 font-normal">Ítem</th>
-                          <th className="py-1 font-normal text-right">Unid.</th>
-                          <th className="py-1 font-normal text-right">% unid.</th>
-                          <th className="py-1 font-normal text-right">Monto</th>
-                          <th className="py-1 font-normal text-right">% monto</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {drill.items.map((p) => (
-                          <tr key={p.producto} className="border-t border-marfil">
-                            <td className="py-1 text-cacao">{p.producto}</td>
-                            <td className="py-1 text-right tabular-nums text-cacao-soft">{fUnid(p.unidades)}</td>
-                            <td className="py-1 text-right tabular-nums text-cacao-soft">{fPct(drill.totalU > 0 ? (p.unidades / drill.totalU) * 100 : 0)}</td>
-                            <td className="py-1 text-right tabular-nums text-cacao">{fUSD(p.monto)}</td>
-                            <td className="py-1 text-right tabular-nums text-cacao-soft">{fPct(drill.total > 0 ? (p.monto / drill.total) * 100 : 0)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                <h3 className="font-cinzel text-base text-cacao">Desglose: {catDrill.label}{subDrill ? <span className="text-cacao-soft"> › {subDrill.label}</span> : null}{underDrill ? <span className="text-cacao-soft"> › {underDrill.label}</span> : null}</h3>
+                <div className="flex items-center gap-3">
+                  {(subDrill || underDrill) && <button type="button" onClick={() => { if (underDrill) setUnderDrill(null); else setSubDrill(null); }} className="text-xs uppercase tracking-widest text-cacao-soft hover:text-cacao">‹ Volver</button>}
+                  <button type="button" onClick={() => { setCatDrill(null); setSubDrill(null); setUnderDrill(null); }} className="text-xs uppercase tracking-widest text-cacao-soft hover:text-terracotta">✕ Cerrar</button>
                 </div>
+              </div>
+
+              {subcats.length > 1 && !subDrill ? (() => {
+                // Nivel 1: las categorías dentro del grupo (Cafetería).
+                const gTotal = subcats.reduce((s, c) => s + c.monto, 0);
+                const gU = subcats.reduce((s, c) => s + c.unidades, 0);
+                return (
+                  <>
+                    <p className="text-[11px] text-cacao-mute mb-3">{fUnid(gU)} unid · {fUSD(gTotal)} · {subcats.length} categorías. Toca una categoría para ver sus ítems.</p>
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                      <Dona
+                        segmentos={subcats.map((c, i) => ({ key: c.key, label: c.label, value: c.monto, color: colorPorIndice(i) }))}
+                        format={fUSD}
+                        sinLeyenda
+                        onSelect={(k) => { const c = subcats.find((x) => x.key === k); if (c) setSubDrill({ key: c.key, label: c.label }); }}
+                      />
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="text-cacao-mute uppercase tracking-widest text-left">
+                              <th className="py-1 font-normal">Categoría</th>
+                              <th className="py-1 font-normal text-right">Unid.</th>
+                              <th className="py-1 font-normal text-right">% unid.</th>
+                              <th className="py-1 font-normal text-right">Monto</th>
+                              <th className="py-1 font-normal text-right">% monto</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {subcats.map((c) => (
+                              <tr key={c.key} onClick={() => setSubDrill({ key: c.key, label: c.label })} className="border-t border-marfil cursor-pointer hover:bg-marfil-soft">
+                                <td className="py-1 text-cacao"><span className="inline-flex items-center gap-1">{c.label}<span className="text-cacao-mute">›</span></span></td>
+                                <td className="py-1 text-right tabular-nums text-cacao-soft">{fUnid(c.unidades)}</td>
+                                <td className="py-1 text-right tabular-nums text-cacao-soft">{fPct(gU > 0 ? (c.unidades / gU) * 100 : 0)}</td>
+                                <td className="py-1 text-right tabular-nums text-cacao">{fUSD(c.monto)}</td>
+                                <td className="py-1 text-right tabular-nums text-cacao-soft">{fPct(gTotal > 0 ? (c.monto / gTotal) * 100 : 0)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </>
+                );
+              })() : subDrill && unders.length > 1 && !underDrill ? (() => {
+                // Nivel intermedio: las categorías REALES dentro de la sub-categoría
+                // (p. ej. Consignación → Bar of Mix / Cocina Clandestina).
+                const gTotal = unders.reduce((s, c) => s + c.monto, 0);
+                const gU = unders.reduce((s, c) => s + c.unidades, 0);
+                return (
+                  <>
+                    <p className="text-[11px] text-cacao-mute mb-3">{fUnid(gU)} unid · {fUSD(gTotal)} · {unders.length} categorías. Toca una para ver sus ítems.</p>
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                      <Dona
+                        segmentos={unders.map((c, i) => ({ key: c.key, label: c.label, value: c.monto, color: colorPorIndice(i) }))}
+                        format={fUSD}
+                        sinLeyenda
+                        onSelect={(k) => { const c = unders.find((x) => x.key === k); if (c) setUnderDrill({ key: c.key, label: c.label }); }}
+                      />
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="text-cacao-mute uppercase tracking-widest text-left">
+                              <th className="py-1 font-normal">Categoría</th>
+                              <th className="py-1 font-normal text-right">Unid.</th>
+                              <th className="py-1 font-normal text-right">% unid.</th>
+                              <th className="py-1 font-normal text-right">Monto</th>
+                              <th className="py-1 font-normal text-right">% monto</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {unders.map((c) => (
+                              <tr key={c.key} onClick={() => setUnderDrill({ key: c.key, label: c.label })} className="border-t border-marfil cursor-pointer hover:bg-marfil-soft">
+                                <td className="py-1 text-cacao"><span className="inline-flex items-center gap-1">{c.label}<span className="text-cacao-mute">›</span></span></td>
+                                <td className="py-1 text-right tabular-nums text-cacao-soft">{fUnid(c.unidades)}</td>
+                                <td className="py-1 text-right tabular-nums text-cacao-soft">{fPct(gU > 0 ? (c.unidades / gU) * 100 : 0)}</td>
+                                <td className="py-1 text-right tabular-nums text-cacao">{fUSD(c.monto)}</td>
+                                <td className="py-1 text-right tabular-nums text-cacao-soft">{fPct(gTotal > 0 ? (c.monto / gTotal) * 100 : 0)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </>
+                );
+              })() : (
+                // Nivel final: ítems (de la categoría real, de la sub-categoría, o del grupo).
+                <>
+                  <p className="text-[11px] text-cacao-mute mb-3">{drill ? `${fUnid(drill.totalU)} unid · ${fUSD(drill.total)} · ${drill.items.length} ítems. El % es dentro de esta categoría.` : ""}</p>
+                  {!drill || drill.items.length === 0 ? (
+                    <p className="text-sm text-cacao-soft italic">Sin ítems en el período.</p>
+                  ) : (
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                      <Dona
+                        segmentos={drill.items.map((p, i) => ({ key: p.producto, label: p.producto, value: p.monto, color: colorPorIndice(i) }))}
+                        format={fUSD}
+                        sinLeyenda
+                      />
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="text-cacao-mute uppercase tracking-widest text-left">
+                              <th className="py-1 font-normal">Ítem</th>
+                              <th className="py-1 font-normal text-right">Unid.</th>
+                              <th className="py-1 font-normal text-right">% unid.</th>
+                              <th className="py-1 font-normal text-right">Monto</th>
+                              <th className="py-1 font-normal text-right">% monto</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {drill.items.map((p) => (
+                              <tr key={p.producto} className="border-t border-marfil">
+                                <td className="py-1 text-cacao">{p.producto}</td>
+                                <td className="py-1 text-right tabular-nums text-cacao-soft">{fUnid(p.unidades)}</td>
+                                <td className="py-1 text-right tabular-nums text-cacao-soft">{fPct(drill.totalU > 0 ? (p.unidades / drill.totalU) * 100 : 0)}</td>
+                                <td className="py-1 text-right tabular-nums text-cacao">{fUSD(p.monto)}</td>
+                                <td className="py-1 text-right tabular-nums text-cacao-soft">{fPct(drill.total > 0 ? (p.monto / drill.total) * 100 : 0)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
             </section>
           )}
@@ -1252,7 +1395,7 @@ export function AnalisisVentas() {
                   </thead>
                   <tbody>
                     {categoriasExcluidasResumen.map((c) => (
-                      <tr key={c.key} onClick={() => setCatDrill({ key: c.key, label: c.label })} className="border-t border-marfil cursor-pointer hover:bg-marfil-soft">
+                      <tr key={c.key} onClick={() => abrirCategoria(c.key, c.label)} className="border-t border-marfil cursor-pointer hover:bg-marfil-soft">
                         <td className="py-1 text-cacao"><span className="inline-flex items-center gap-1">{c.label}<span className="text-cacao-mute">›</span></span></td>
                         <td className="py-1 text-right tabular-nums text-cacao-soft">{fUnid(c.unidades)}</td>
                         <td className="py-1 text-right tabular-nums text-cacao">{fUSD(c.monto)}</td>
@@ -1360,6 +1503,56 @@ export function AnalisisVentas() {
           </section>
         </>
       )}
+
+      {/* ── Venta vs Ingresos (conciliación) · plegable, al final ── */}
+      {conc && (cocinaTotalRango > 0.005 || conc.setuxNeto > 0.005) && (() => {
+        // Ventas en Cocina − Ingresos = lo vendido a crédito (CXC) + cortesías,
+        // todo en NETO (sin IVA). Se muestra plegado al final para consultarlo
+        // cuando hace falta sin ocupar la parte de arriba del análisis.
+        const diferencia = Math.round((cocinaTotalRango - conc.setuxNeto) * 100) / 100;
+        const creditoYCortesias = Math.round((conc.cxcNeto + conc.rppNeto) * 100) / 100;
+        const sinExplicar = Math.round((diferencia - creditoYCortesias) * 100) / 100;
+        const cuadra = Math.abs(sinExplicar) <= 50; // tolerancia de 50 € (redondeos)
+        const fEUR = (n: number) => `${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
+        return (
+          <Plegable titulo="Venta vs Ingresos" sub={cuadra ? "Cuadra" : "Revisar"}>
+            <section className="rounded-2xl bg-white ring-1 ring-marfil p-4">
+              <div className="flex items-center justify-end mb-1">
+                <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] uppercase tracking-widest ${cuadra ? "bg-[#F1F4ED] text-[#2F4A1F]" : "bg-[#FBF3E2] text-[#7A5A18]"}`}>
+                  <span className={`h-1.5 w-1.5 rounded-full ${cuadra ? "bg-[#4B7A2F]" : "bg-[#C9A24B]"}`} />
+                  {cuadra ? "Cuadra" : "Revisar"}
+                </span>
+              </div>
+              <p className="text-[11px] text-cacao-mute mb-3">Del período (todas las ventas, sin filtros), todo en neto (sin IVA). La diferencia es lo que se vendió a crédito y las cortesías: sale en Cocina pero todavía no es dinero.</p>
+              <div className="text-sm max-w-md space-y-1">
+                <Fila label="Ventas registradas" val={fEUR(cocinaTotalRango)} />
+                <Fila label="Ingresos (dinero que entró)" val={fEUR(conc.setuxNeto)} />
+                <div className="border-t border-marfil pt-1"><Fila label="Diferencia" val={fEUR(diferencia)} fuerte /></div>
+              </div>
+              <div className="text-sm max-w-md space-y-1 mt-3 rounded-xl bg-marfil-soft p-3">
+                <p className="text-[11px] uppercase tracking-widest text-cacao-mute mb-1">Esa diferencia debería ser (neto):</p>
+                <Fila label="Ventas a crédito (CXC)" val={fEUR(conc.cxcNeto)} />
+                <Fila label="Cortesías (RPP)" val={fEUR(conc.rppNeto)} />
+                <div className="border-t border-marfil pt-1"><Fila label="Juntas" val={fEUR(creditoYCortesias)} fuerte /></div>
+                <div className="border-t border-marfil pt-1">
+                  <Fila label={cuadra ? "Todo explicado ✓" : "Sin explicar"} val={`${sinExplicar < 0 ? "− " : ""}${fEUR(Math.abs(sinExplicar))}`} fuerte />
+                </div>
+              </div>
+              <p className="text-[11px] text-cacao-mute mt-2">CXC y RPP aquí van en neto (sin IVA) para cuadrar con Cocina. En Cuentas por Cobrar el cliente debe el total con IVA (lo que paga al cobrarle).</p>
+              {!cuadra && (
+                <p className="text-[12px] text-cacao-soft mt-2">
+                  {sinExplicar > 0
+                    ? <>Cocina muestra más de lo que se explica con crédito y cortesías. Suele ser: falta importar la CXC del período, o se duplicó un día en Cocina. {conc.ivaSetux > 1 && <>Si este resto se parece al IVA ({fEUR(conc.ivaSetux)}), Cocina traía IVA y los ingresos no.</>}</>
+                    : <>El crédito y las cortesías registrados superan la diferencia. Suele ser: faltan días de venta por importar en Cocina, o se cargó CXC de más.</>}
+                </p>
+              )}
+              {conc.cobrosEur > 0.005 && (
+                <p className="text-[11px] text-cacao-mute mt-2">Aparte: {fEUR(conc.cobrosEur)} cobrados de cuentas por cobrar en el período (cobranzas de ventas anteriores, no cuentan aquí).</p>
+              )}
+            </section>
+          </Plegable>
+        );
+      })()}
     </div>
   );
 

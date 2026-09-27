@@ -40,12 +40,17 @@ export async function GET(req: NextRequest) {
     const sin = await sb.from(tabla).select(cols).gte("fecha", desde).lte("fecha", hasta);
     return (sin.data ?? []) as Fila[];
   };
-  const [ingR, egrRows, cxcRows] = await Promise.all([
+  const [ingR, egrRows, cxcRows, tkR] = await Promise.all([
     sb.from("admin_ingreso").select("monto, iva, moneda, fuente").gte("fecha", desde).lte("fecha", hasta),
     selConIva("admin_egreso", "monto, moneda, categoria_nombre"),
     selConIva("admin_cuenta_cobrar", "monto, moneda"),
+    sb.from("admin_ticket_dia").select("tickets").gte("fecha", desde).lte("fecha", hasta),
   ]);
   if (ingR.error) return NextResponse.json({ error: ingR.error.message }, { status: 500 });
+
+  // Tickets (facturas) del período, sumados por día. Si la tabla aún no existe
+  // (migración pendiente), se ignora y quedan en 0.
+  const tickets = (tkR.error ? [] : (tkR.data ?? [])).reduce((s, t) => s + (Number((t as { tickets?: unknown }).tickets) || 0), 0);
 
   const ingresos = ingR.data ?? [];
   // Ventas POS del mes (Setux), netas y en euros — sin cobros ni manuales.
@@ -86,5 +91,6 @@ export async function GET(req: NextRequest) {
     rppNeto: r2(rppNeto),
     cobrosEur: r2(cobrosEur),
     otrosEur: r2(otrosEur),
+    tickets,
   });
 }

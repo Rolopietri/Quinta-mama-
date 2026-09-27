@@ -10,6 +10,7 @@ import { totalesVentasPorMes } from "@/lib/data/ventas";
 import { listTasasBcvRango, listComprasRango, listComprasEgresoMes, listComprasPendientes, listProveedores, listInsumos, marcarCompraPagada, marcarFacturaPagada, getTasaBcvPorFecha } from "@/lib/data/cocina";
 import type { TasaBcv, Compra, Proveedor as ProveedorCocina, Insumo } from "@/lib/types";
 import { AnalisisAdministrativo } from "./AnalisisAdministrativo";
+import { ChevronIcon, CalendarIcon } from "@/components/icons";
 
 type Seccion = "proveedores" | "solicitudes" | "ingresos" | "analisis-ventas" | "cobrar" | "egresos" | "estado" | "historico";
 const SECCIONES: { id: Seccion; label: string; grupo?: string }[] = [
@@ -1279,11 +1280,26 @@ function EgresosMes() {
   const [msg, setMsg] = useState<string | null>(null);
   const [modo, setModo] = useState<"lista" | "form" | "porpagar">("lista");
   const [editando, setEditando] = useState<Egreso | null>(null);
+  const [diasAbiertos, setDiasAbiertos] = useState<Record<string, boolean>>({});
   const [reclasificando, setReclasificando] = useState<string | null>(null);
   const [mostrarClasif, setMostrarClasif] = useState(false);
   const [cuentaPagar, setCuentaPagar] = useState<CuentaPagar | null>(null);
+  const [tasaEurUsd, setTasaEurUsd] = useState(1.17); // €→$ para el total del día en euros
   const [tick, setTick] = useState(0);
   const recargar = useCallback(() => setTick((t) => t + 1), []);
+
+  useEffect(() => {
+    let a = true;
+    (async () => {
+      try {
+        const r = await fetch("/api/admin/config", { cache: "no-store" });
+        const d = await r.json();
+        const v = Number(String(d.config?.tasa_eur_usd ?? "").replace(",", "."));
+        if (a && isFinite(v) && v > 0) setTasaEurUsd(v);
+      } catch { /* usa 1.17 por defecto */ }
+    })();
+    return () => { a = false; };
+  }, []);
 
   useEffect(() => {
     let a = true;
@@ -1343,6 +1359,30 @@ function EgresosMes() {
   const egresosAll: Egreso[] = [...egresosPagados, ...comprasEgreso]
     .sort((a2, b2) => (b2.fecha ?? "").localeCompare(a2.fecha ?? ""));
   const esCocina = (e: Egreso) => e.id.startsWith("compra:");
+
+  // Egresos agrupados por FECHA (acordeón, como en Ingresos): el encabezado
+  // lleva la fecha y el total del día CONVERTIDO A EUROS (todo en una sola
+  // moneda). Para los Bs se usa la tasa del día (ya guardada en monto_usd) y
+  // luego la tasa €/$; los que no tengan tasa (monto_usd nulo) se cuentan aparte.
+  const egresosPorFecha = (() => {
+    const m = new Map<string, Egreso[]>();
+    for (const e of egresosAll) {
+      const k = e.fecha ?? "";
+      (m.get(k) ?? m.set(k, []).get(k)!).push(e);
+    }
+    return [...m.entries()]
+      .sort((a2, b2) => b2[0].localeCompare(a2[0])) // más reciente primero
+      .map(([fecha, items]) => {
+        let eur = 0;
+        let faltaTasa = 0;
+        for (const e of items) {
+          if ((e.moneda || "Bs") === "EUR") eur += e.monto ?? 0;
+          else if (e.monto_usd != null) eur += e.monto_usd / (tasaEurUsd > 0 ? tasaEurUsd : 1.17);
+          else faltaTasa++;
+        }
+        return { fecha, items, eur: Math.round(eur * 100) / 100, faltaTasa };
+      });
+  })();
   const nombreInsumo = (id: string) => insumos.find((i) => i.id === id)?.nombre ?? "insumo";
   const nombreProvCocina = (id?: string) => (id ? provCocina.find((p) => p.id === id)?.nombre : null) ?? null;
 
@@ -1546,45 +1586,68 @@ function EgresosMes() {
         );
       })()}
 
-      <section className="rounded-2xl bg-white ring-1 ring-marfil overflow-hidden">
+      <section className="rounded-2xl bg-white ring-1 ring-marfil overflow-hidden divide-y divide-marfil">
         {cargando ? (
           <p className="p-5 text-cacao-soft italic font-serif">Cargando…</p>
         ) : egresosAll.length === 0 ? (
           <p className="p-8 text-center text-cacao-soft italic font-serif">No hay egresos en {nombreMes(mes)}.</p>
         ) : (
-          <ul className="divide-y divide-marfil">
-            {egresosAll.map((e) => {
-              const cocina = esCocina(e);
-              return (
-              <li key={e.id} className="flex items-start gap-3 p-3.5">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-baseline justify-between gap-3">
-                    <span className="text-cacao font-medium truncate">{e.proveedor_nombre || e.concepto || "(egreso)"}{cocina && <span className="ml-2 align-middle inline-block rounded-full bg-marfil-soft text-cacao-mute text-[9px] uppercase tracking-widest px-2 py-0.5">Cocina</span>}</span>
-                    <span className="text-cacao whitespace-nowrap">{e.monto != null ? fmtMonto(e.monto, e.moneda || "Bs") : "—"}</span>
-                  </div>
-                  <div className="text-[11px] text-cacao-mute mt-1 flex flex-wrap gap-x-2">
-                    <span>{fmtFecha(e.fecha)}</span>
-                    {e.categoria_nombre && <span>· {e.categoria_nombre}</span>}
-                    {e.clasificacion && <span>· {e.clasificacion}</span>}
-                    {e.monto_usd != null && e.moneda !== "USD" && <span>· ≈ {fmtMonto(e.monto_usd, "USD")}</span>}
-                    {e.solicitud_linea_id && <span>· de solicitud</span>}
-                  </div>
-                  {e.concepto && e.proveedor_nombre && <div className="text-xs text-cacao-soft mt-0.5">{e.concepto}</div>}
-                </div>
-                <div className="flex gap-2 shrink-0">
-                  {cocina ? (
-                    <span className="text-cacao-mute text-[10px] uppercase tracking-widest self-center" title="Se gestiona en Cocina → Compras">Cocina ↗</span>
-                  ) : (
-                    <>
-                      <button type="button" onClick={() => { setEditando(e); setModo("form"); }} className="text-cacao-soft hover:text-cacao text-sm" aria-label="Editar">✎</button>
-                      <button type="button" onClick={() => borrar(e.id)} className="text-cacao-soft hover:text-terracotta text-sm" aria-label="Eliminar">✕</button>
-                    </>
-                  )}
-                </div>
-              </li>
-              );
-            })}
-          </ul>
+          egresosPorFecha.map((g, idx) => {
+            const abierto = diasAbiertos[g.fecha] ?? idx === 0;
+            return (
+              <div key={g.fecha}>
+                <button
+                  type="button"
+                  onClick={() => setDiasAbiertos((s) => ({ ...s, [g.fecha]: !abierto }))}
+                  aria-expanded={abierto}
+                  className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-marfil-soft transition-colors"
+                >
+                  <ChevronIcon className={`size-4 text-cacao-mute transition-transform ${abierto ? "rotate-90" : ""}`} />
+                  <CalendarIcon className="size-4 text-cacao-mute" />
+                  <span className="font-medium text-cacao">{fmtFecha(g.fecha)}</span>
+                  <span className="text-xs text-cacao-mute">{g.items.length} {g.items.length === 1 ? "egreso" : "egresos"}</span>
+                  <span className="ml-auto text-sm text-cacao font-medium text-right">
+                    {fmtMonto(g.eur, "EUR")}
+                    {g.faltaTasa > 0 && <span className="block text-[10px] text-terracotta font-normal">{g.faltaTasa} sin tasa</span>}
+                  </span>
+                </button>
+                {abierto && (
+                  <ul className="divide-y divide-marfil border-t border-marfil">
+                    {g.items.map((e) => {
+                      const cocina = esCocina(e);
+                      return (
+                      <li key={e.id} className="flex items-start gap-3 p-3.5 pl-11">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-baseline justify-between gap-3">
+                            <span className="text-cacao font-medium truncate">{e.proveedor_nombre || e.concepto || "(egreso)"}{cocina && <span className="ml-2 align-middle inline-block rounded-full bg-marfil-soft text-cacao-mute text-[9px] uppercase tracking-widest px-2 py-0.5">Cocina</span>}</span>
+                            <span className="text-cacao whitespace-nowrap">{e.monto != null ? fmtMonto(e.monto, e.moneda || "Bs") : "—"}</span>
+                          </div>
+                          <div className="text-[11px] text-cacao-mute mt-1 flex flex-wrap gap-x-2">
+                            {e.categoria_nombre && <span>{e.categoria_nombre}</span>}
+                            {e.clasificacion && <span>· {e.clasificacion}</span>}
+                            {e.monto_usd != null && e.moneda !== "USD" && <span>· ≈ {fmtMonto(e.monto_usd, "USD")}</span>}
+                            {e.solicitud_linea_id && <span>· de solicitud</span>}
+                          </div>
+                          {e.concepto && e.proveedor_nombre && <div className="text-xs text-cacao-soft mt-0.5">{e.concepto}</div>}
+                        </div>
+                        <div className="flex gap-2 shrink-0">
+                          {cocina ? (
+                            <span className="text-cacao-mute text-[10px] uppercase tracking-widest self-center" title="Se gestiona en Cocina → Compras">Cocina ↗</span>
+                          ) : (
+                            <>
+                              <button type="button" onClick={() => { setEditando(e); setModo("form"); }} className="text-cacao-soft hover:text-cacao text-sm" aria-label="Editar">✎</button>
+                              <button type="button" onClick={() => borrar(e.id)} className="text-cacao-soft hover:text-terracotta text-sm" aria-label="Eliminar">✕</button>
+                            </>
+                          )}
+                        </div>
+                      </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+            );
+          })
         )}
       </section>
     </div>
@@ -1617,6 +1680,33 @@ function ModalPago({ cuenta, onCerrar, onPagar }: {
   const [tasaStr, setTasaStr] = useState("");
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [tasaBcv, setTasaBcv] = useState<TasaBcv | null>(null);
+  const [tasaEditada, setTasaEditada] = useState(false);
+
+  // Tasa del día sugerida (mismo procedimiento que Compras): Bs → BCV $ (Bs por
+  // $); EUR → cruce BCV ($ por €); USD sin tasa.
+  const sugTasa = (t: TasaBcv | null, mon: string): number | null => {
+    if (!t) return null;
+    if (mon === "Bs") return t.usdBs ?? null;
+    if (mon === "EUR") return t.eurBs != null && t.usdBs ? Math.round((t.eurBs / t.usdBs) * 10000) / 10000 : null;
+    return null;
+  };
+  // Auto-rellena la tasa con el BCV del día de PAGO (editable). No aplica a
+  // compras de Cocina (el monto viene de allá).
+  useEffect(() => {
+    let a = true;
+    getTasaBcvPorFecha(fecha)
+      .then((t) => {
+        if (!a) return;
+        setTasaBcv(t);
+        if (!esCompra && !tasaEditada && moneda !== "USD") {
+          const sug = sugTasa(t, moneda);
+          if (sug != null) setTasaStr(String(sug));
+        }
+      })
+      .catch(() => {});
+    return () => { a = false; };
+  }, [fecha]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function confirmar() {
     setError(null);
@@ -1660,12 +1750,12 @@ function ModalPago({ cuenta, onCerrar, onPagar }: {
           <div className="grid grid-cols-3 gap-2">
             <Campo label="Monto"><input inputMode="decimal" value={montoStr} onChange={(e) => setMontoStr(e.target.value)} placeholder="0,00" className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" /></Campo>
             <Campo label="Moneda">
-              <select value={moneda} onChange={(e) => setMoneda(e.target.value)} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
+              <select value={moneda} onChange={(e) => { const m = e.target.value; setMoneda(m); if (!tasaEditada && m !== "USD") { const sug = sugTasa(tasaBcv, m); if (sug != null) setTasaStr(String(sug)); } }} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
                 {MONEDAS.map((m) => <option key={m} value={m}>{m}</option>)}
               </select>
             </Campo>
             <Campo label="Tasa a USD">
-              <input inputMode="decimal" value={tasaStr} onChange={(e) => setTasaStr(e.target.value)} disabled={moneda === "USD"} placeholder={moneda === "Bs" ? "BCV del día" : moneda === "USD" ? "—" : ""} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao disabled:bg-marfil-soft" />
+              <input inputMode="decimal" value={tasaStr} onChange={(e) => { setTasaStr(e.target.value); setTasaEditada(true); }} disabled={moneda === "USD"} placeholder={moneda === "Bs" ? "BCV del día" : moneda === "USD" ? "—" : ""} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao disabled:bg-marfil-soft" />
             </Campo>
           </div>
         )}
@@ -1717,6 +1807,34 @@ function FormEgreso({
   const [tieneFlete, setTieneFlete] = useState(fleteIni > 0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [tasaBcv, setTasaBcv] = useState<TasaBcv | null>(null);
+  const [tasaEditada, setTasaEditada] = useState(false);
+
+  // Tasa del día sugerida según la moneda (mismo procedimiento que Compras):
+  // Bs → BCV $ (Bs por $); EUR → cruce BCV ($ por €). USD no lleva tasa.
+  const tasaSugEgreso = (t: TasaBcv | null, moneda: string): number | null => {
+    if (!t) return null;
+    if (moneda === "Bs") return t.usdBs ?? null;
+    if (moneda === "EUR") return t.eurBs != null && t.usdBs ? Math.round((t.eurBs / t.usdBs) * 10000) / 10000 : null;
+    return null;
+  };
+
+  // Auto-rellena la tasa con el BCV del día de la fecha del egreso (editable).
+  // En edición se respeta la tasa guardada; si la editas a mano, no se pisa.
+  useEffect(() => {
+    let a = true;
+    getTasaBcvPorFecha(f.fecha)
+      .then((t) => {
+        if (!a) return;
+        setTasaBcv(t);
+        if (!esEdicion && !tasaEditada && f.moneda !== "USD") {
+          const sug = tasaSugEgreso(t, f.moneda);
+          if (sug != null) setF((o) => ({ ...o, tasa: String(sug) }));
+        }
+      })
+      .catch(() => {});
+    return () => { a = false; };
+  }, [f.fecha]); // eslint-disable-line react-hooks/exhaustive-deps
   // Registro de un proveedor NUEVO desde aquí mismo (se guarda en el catálogo).
   const [creandoProv, setCreandoProv] = useState(false);
   const [nprov, setNprov] = useState<Record<string, string>>({ nombre: "", concepto: "", cedula: "", rif: "", numero_cuenta: "", banco: "" });
@@ -1819,14 +1937,21 @@ function FormEgreso({
       <div className="grid grid-cols-3 gap-2">
         <Campo label="Monto"><input inputMode="decimal" value={f.monto} onChange={(e) => set("monto", e.target.value)} placeholder="0,00" className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" /></Campo>
         <Campo label="Moneda">
-          <select value={f.moneda} onChange={(e) => set("moneda", e.target.value)} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
+          <select value={f.moneda} onChange={(e) => { const m = e.target.value; set("moneda", m); if (!esEdicion && !tasaEditada && m !== "USD") { const sug = tasaSugEgreso(tasaBcv, m); if (sug != null) set("tasa", String(sug)); } }} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
             {MONEDAS.map((m) => <option key={m} value={m}>{m}</option>)}
           </select>
         </Campo>
         <Campo label="Tasa a USD">
-          <input inputMode="decimal" value={f.tasa} onChange={(e) => set("tasa", e.target.value)} disabled={f.moneda === "USD"} placeholder={f.moneda === "USD" ? "—" : ""} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao disabled:bg-marfil-soft" />
+          <input inputMode="decimal" value={f.tasa} onChange={(e) => { set("tasa", e.target.value); setTasaEditada(true); }} disabled={f.moneda === "USD"} placeholder={f.moneda === "USD" ? "—" : ""} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao disabled:bg-marfil-soft" />
         </Campo>
       </div>
+      {f.moneda !== "USD" && (
+        <p className="text-[11px] text-cacao-mute -mt-1">
+          {tasaBcv && tasaSugEgreso(tasaBcv, f.moneda) != null
+            ? `Tasa BCV del ${fmtFecha(tasaBcv.fecha)} puesta automáticamente (${f.moneda === "Bs" ? "Bs por $" : "$ por €"}). Editable.`
+            : "Sin tasa BCV para esta fecha — ponla a mano (o, en Bs, déjala vacía: se usa el BCV del día al guardar)."}
+        </p>
+      )}
       {/* Flete (opcional): misma moneda, se SUMA al monto. */}
       <div className="rounded-xl ring-1 ring-marfil p-3 space-y-2">
         <label className="flex items-center gap-2 text-sm text-cacao cursor-pointer">
@@ -2221,6 +2346,7 @@ function IngresosMes() {
   const [msg, setMsg] = useState<string | null>(null);
   const [modo, setModo] = useState<"lista" | "form">("lista");
   const [editando, setEditando] = useState<Ingreso | null>(null);
+  const [diasAbiertos, setDiasAbiertos] = useState<Record<string, boolean>>({});
   const [ventasMes, setVentasMes] = useState<Record<string, number>>({});
   const [tasaInput, setTasaInput] = useState("1.17");
   const [guardandoTasa, setGuardandoTasa] = useState(false);
@@ -2386,6 +2512,29 @@ function IngresosMes() {
     (a, b) => Object.values(b[1]).reduce((s, v) => s + v, 0) - Object.values(a[1]).reduce((s, v) => s + v, 0),
   );
 
+  // Ingresos agrupados por FECHA (acordeón, como en Cocina): el encabezado
+  // lleva la fecha y el total del día (por moneda); al abrirlo salen los
+  // métodos de pago que componen ese total.
+  const ingresosPorFecha = (() => {
+    const m = new Map<string, Ingreso[]>();
+    for (const e of ingresos) {
+      const k = e.fecha ?? "";
+      (m.get(k) ?? m.set(k, []).get(k)!).push(e);
+    }
+    return [...m.entries()]
+      .sort((a, b) => b[0].localeCompare(a[0])) // más reciente primero
+      .map(([fecha, items]) => {
+        const totales: Record<string, number> = {};
+        for (const e of items) {
+          const k = e.moneda || "EUR";
+          totales[k] = (totales[k] ?? 0) + (e.monto ?? 0);
+        }
+        const monedas = ORDEN_MONEDA.filter((k) => (totales[k] ?? 0) > 0.005)
+          .concat(Object.keys(totales).filter((k) => !ORDEN_MONEDA.includes(k) && (totales[k] ?? 0) > 0.005));
+        return { fecha, items, totales, monedas };
+      });
+  })();
+
   async function borrar(id: string) {
     try {
       await fetch(`/api/admin/ingresos?id=${id}`, { method: "DELETE" });
@@ -2504,35 +2653,57 @@ function IngresosMes() {
         </div>
       </div>
 
-      <section className="rounded-2xl bg-white ring-1 ring-marfil overflow-hidden">
+      <section className="rounded-2xl bg-white ring-1 ring-marfil overflow-hidden divide-y divide-marfil">
         {cargando ? (
           <p className="p-5 text-cacao-soft italic font-serif">Cargando…</p>
         ) : ingresos.length === 0 ? (
           <p className="p-8 text-center text-cacao-soft italic font-serif">No hay ingresos en {nombreMes(mes)}.</p>
         ) : (
-          <ul className="divide-y divide-marfil">
-            {ingresos.map((e) => (
-              <li key={e.id} className="flex items-start gap-3 p-3.5">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-baseline justify-between gap-3">
-                    <span className="text-cacao font-medium truncate">{e.pagador || e.concepto || e.categoria_nombre || "(ingreso)"}</span>
-                    <span className="text-cacao whitespace-nowrap">{e.monto != null ? fmtMonto(e.monto, e.moneda || "Bs") : "—"}</span>
-                  </div>
-                  <div className="text-[11px] text-cacao-mute mt-1 flex flex-wrap gap-x-2">
-                    <span>{fmtFecha(e.fecha)}</span>
-                    {e.categoria_nombre && <span>· {e.categoria_nombre}</span>}
-                    {e.metodo && <span>· {e.metodo}</span>}
-                    {e.monto_usd != null && e.moneda !== "USD" && <span>· ≈ {fmtMonto(e.monto_usd, "USD")}</span>}
-                  </div>
-                  {e.concepto && e.pagador && <div className="text-xs text-cacao-soft mt-0.5">{e.concepto}</div>}
-                </div>
-                <div className="flex gap-2 shrink-0">
-                  <button type="button" onClick={() => { setEditando(e); setModo("form"); }} className="text-cacao-soft hover:text-cacao text-sm" aria-label="Editar">✎</button>
-                  <button type="button" onClick={() => borrar(e.id)} className="text-cacao-soft hover:text-terracotta text-sm" aria-label="Eliminar">✕</button>
-                </div>
-              </li>
-            ))}
-          </ul>
+          ingresosPorFecha.map((g, idx) => {
+            const abierto = diasAbiertos[g.fecha] ?? idx === 0;
+            return (
+              <div key={g.fecha}>
+                <button
+                  type="button"
+                  onClick={() => setDiasAbiertos((s) => ({ ...s, [g.fecha]: !abierto }))}
+                  aria-expanded={abierto}
+                  className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-marfil-soft transition-colors"
+                >
+                  <ChevronIcon className={`size-4 text-cacao-mute transition-transform ${abierto ? "rotate-90" : ""}`} />
+                  <CalendarIcon className="size-4 text-cacao-mute" />
+                  <span className="font-medium text-cacao">{fmtFecha(g.fecha)}</span>
+                  <span className="text-xs text-cacao-mute">{g.items.length} {g.items.length === 1 ? "ingreso" : "ingresos"}</span>
+                  <span className="ml-auto text-sm text-cacao font-medium text-right">
+                    {g.monedas.length ? g.monedas.map((k) => fmtMonto(g.totales[k], k)).join(" · ") : "—"}
+                  </span>
+                </button>
+                {abierto && (
+                  <ul className="divide-y divide-marfil border-t border-marfil">
+                    {g.items.map((e) => (
+                      <li key={e.id} className="flex items-start gap-3 p-3.5 pl-11">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-baseline justify-between gap-3">
+                            <span className="text-cacao font-medium truncate">{e.metodo || e.pagador || e.concepto || e.categoria_nombre || "(ingreso)"}</span>
+                            <span className="text-cacao whitespace-nowrap">{e.monto != null ? fmtMonto(e.monto, e.moneda || "Bs") : "—"}</span>
+                          </div>
+                          <div className="text-[11px] text-cacao-mute mt-1 flex flex-wrap gap-x-2">
+                            {e.categoria_nombre && <span>{e.categoria_nombre}</span>}
+                            {e.pagador && <span>· {e.pagador}</span>}
+                            {e.monto_usd != null && e.moneda !== "USD" && <span>· ≈ {fmtMonto(e.monto_usd, "USD")}</span>}
+                          </div>
+                          {e.concepto && e.pagador && <div className="text-xs text-cacao-soft mt-0.5">{e.concepto}</div>}
+                        </div>
+                        <div className="flex gap-2 shrink-0">
+                          <button type="button" onClick={() => { setEditando(e); setModo("form"); }} className="text-cacao-soft hover:text-cacao text-sm" aria-label="Editar">✎</button>
+                          <button type="button" onClick={() => borrar(e.id)} className="text-cacao-soft hover:text-terracotta text-sm" aria-label="Eliminar">✕</button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            );
+          })
         )}
       </section>
     </div>
@@ -2567,7 +2738,33 @@ function FormIngreso({
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [tasaBcv, setTasaBcv] = useState<TasaBcv | null>(null);
+  const [tasaEditada, setTasaEditada] = useState(false);
   function set<K extends keyof typeof f>(k: K, v: string) { setF((o) => ({ ...o, [k]: v })); }
+
+  // Tasa del día sugerida (mismo procedimiento que Compras): Bs → BCV $ (Bs por
+  // $); EUR → cruce BCV ($ por €); USD sin tasa.
+  const tasaSugIng = (t: TasaBcv | null, moneda: string): number | null => {
+    if (!t) return null;
+    if (moneda === "Bs") return t.usdBs ?? null;
+    if (moneda === "EUR") return t.eurBs != null && t.usdBs ? Math.round((t.eurBs / t.usdBs) * 10000) / 10000 : null;
+    return null;
+  };
+  // Auto-rellena la tasa con el BCV del día de la fecha del ingreso (editable).
+  useEffect(() => {
+    let a = true;
+    getTasaBcvPorFecha(f.fecha)
+      .then((t) => {
+        if (!a) return;
+        setTasaBcv(t);
+        if (!esEdicion && !tasaEditada && f.moneda !== "USD") {
+          const sug = tasaSugIng(t, f.moneda);
+          if (sug != null) setF((o) => ({ ...o, tasa: String(sug) }));
+        }
+      })
+      .catch(() => {});
+    return () => { a = false; };
+  }, [f.fecha]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function guardar() {
     if (parseMonto(f.monto) == null) { setError("Pon un monto."); return; }
@@ -2619,14 +2816,24 @@ function FormIngreso({
       </div>
       <Campo label="Pagador / Inquilino (opcional)"><input value={f.pagador} onChange={(e) => set("pagador", e.target.value)} placeholder="Quién pagó" className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" /></Campo>
       <Campo label="Concepto"><input value={f.concepto} onChange={(e) => set("concepto", e.target.value)} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" /></Campo>
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-3 gap-2">
         <Campo label="Monto"><input inputMode="decimal" value={f.monto} onChange={(e) => set("monto", e.target.value)} placeholder="0,00" className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" /></Campo>
         <Campo label="Moneda">
-          <select value={f.moneda} onChange={(e) => set("moneda", e.target.value)} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
+          <select value={f.moneda} onChange={(e) => { const m = e.target.value; set("moneda", m); if (!esEdicion && !tasaEditada && m !== "USD") { const sug = tasaSugIng(tasaBcv, m); if (sug != null) set("tasa", String(sug)); } }} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
             {MONEDAS.map((m) => <option key={m} value={m}>{m}</option>)}
           </select>
         </Campo>
+        <Campo label="Tasa a USD">
+          <input inputMode="decimal" value={f.tasa} onChange={(e) => { set("tasa", e.target.value); setTasaEditada(true); }} disabled={f.moneda === "USD"} placeholder={f.moneda === "USD" ? "—" : ""} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao disabled:bg-marfil-soft" />
+        </Campo>
       </div>
+      {f.moneda !== "USD" && (
+        <p className="text-[11px] text-cacao-mute -mt-1">
+          {tasaBcv && tasaSugIng(tasaBcv, f.moneda) != null
+            ? `Tasa BCV del ${fmtFecha(tasaBcv.fecha)} puesta automáticamente (${f.moneda === "Bs" ? "Bs por $" : "$ por €"}). Editable.`
+            : "Sin tasa BCV para esta fecha — ponla a mano."}
+        </p>
+      )}
       <div className="grid gap-3 sm:grid-cols-2">
         <Campo label="Método">
           <select value={f.metodo} onChange={(e) => set("metodo", e.target.value)} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
@@ -3318,9 +3525,12 @@ function SeccionCuentasCobrar() {
               return (
                 <li key={c.key} className="text-sm">
                   <div className="grid grid-cols-[1fr_auto_auto_auto] gap-3 px-4 py-3 items-center">
-                    <button type="button" onClick={() => setAbierto(abiertoAqui ? null : c.key)} className="text-left min-w-0">
-                      <span className="text-cacao font-medium truncate block">{c.cliente}</span>
-                      <span className="text-[11px] text-cacao-mute">{c.cuentas.length} cuenta{c.cuentas.length === 1 ? "" : "s"}{c.pagos.length > 0 ? ` · ${c.pagos.length} pago${c.pagos.length === 1 ? "" : "s"}` : ""}</span>
+                    <button type="button" onClick={() => setAbierto(abiertoAqui ? null : c.key)} className="text-left min-w-0 flex items-center gap-2">
+                      <ChevronIcon className={`size-4 shrink-0 text-cacao-mute transition-transform ${abiertoAqui ? "rotate-90" : ""}`} />
+                      <span className="min-w-0">
+                        <span className="text-cacao font-medium truncate block">{c.cliente}</span>
+                        <span className="text-[11px] text-cacao-mute">{c.cuentas.length} cuenta{c.cuentas.length === 1 ? "" : "s"}{c.pagos.length > 0 ? ` · ${c.pagos.length} pago${c.pagos.length === 1 ? "" : "s"}` : ""}</span>
+                      </span>
                     </button>
                     <span className={`text-right tabular-nums font-medium ${enFavor ? "text-[#2F4A1F]" : "text-cacao"}`}>
                       {fmtMonto(eurDe(Math.abs(c.saldo_usd)), "EUR")}{enFavor ? " a favor" : ""}
@@ -3450,6 +3660,23 @@ function ModalCobro({ cliente, tasaGlobal, onCerrar, onListo }: { cliente: Clien
   const [referencia, setReferencia] = useState("");
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [tasaBcv, setTasaBcv] = useState<TasaBcv | null>(null);
+  const [tasaBsEditada, setTasaBsEditada] = useState(false);
+
+  // Tasa del día automática (mismo procedimiento que Cocina → Compras): sigue la
+  // FECHA del cobro y trae el BCV € (Bs por €) de ese día. Auto-rellena pero es
+  // editable; si la editas a mano, no se vuelve a sobrescribir.
+  useEffect(() => {
+    let a = true;
+    getTasaBcvPorFecha(fecha)
+      .then((t) => {
+        if (!a) return;
+        setTasaBcv(t);
+        if (t?.eurBs != null && moneda === "Bs" && !tasaBsEditada) setTasaBsStr(String(t.eurBs));
+      })
+      .catch(() => {});
+    return () => { a = false; };
+  }, [fecha]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const seleccionadas = filas.filter((x) => sel[x.c.id]);
   const selRemEur = Math.round(seleccionadas.reduce((s, x) => s + x.restEur, 0) * 100) / 100;
@@ -3576,7 +3803,7 @@ function ModalCobro({ cliente, tasaGlobal, onCerrar, onListo }: { cliente: Clien
                 <input inputMode="decimal" value={montoStr} onChange={(e) => setMontoStr(e.target.value)} className="w-full border border-marfil rounded-lg px-3 py-2 text-sm text-cacao text-right" />
               </Campo>
               <Campo label="Moneda del pago">
-                <select value={moneda} onChange={(e) => { const m = e.target.value as "EUR" | "USD" | "Bs"; setMoneda(m); sugerir(selRemEur, m); }} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
+                <select value={moneda} onChange={(e) => { const m = e.target.value as "EUR" | "USD" | "Bs"; setMoneda(m); if (m === "Bs" && tasaBcv?.eurBs != null && !tasaBsEditada) { setTasaBsStr(String(tasaBcv.eurBs)); sugerir(selRemEur, m, tasaBcv.eurBs); } else { sugerir(selRemEur, m); } }} className="w-full border border-marfil rounded-lg px-2 py-2 text-sm text-cacao bg-white">
                   <option value="EUR">€ Euro</option>
                   <option value="USD">$ Dólar</option>
                   <option value="Bs">Bs Bolívares</option>
@@ -3586,7 +3813,8 @@ function ModalCobro({ cliente, tasaGlobal, onCerrar, onListo }: { cliente: Clien
 
             {moneda === "Bs" && (
               <Campo label="Tasa del día · Bs por €">
-                <input inputMode="decimal" value={tasaBsStr} onChange={(e) => { setTasaBsStr(e.target.value); }} placeholder="ej. 320,00 Bs = 1 €" className="w-52 border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
+                <input inputMode="decimal" value={tasaBsStr} onChange={(e) => { setTasaBsStr(e.target.value); setTasaBsEditada(true); }} placeholder="ej. 320,00" className="w-52 border border-marfil rounded-lg px-3 py-2 text-sm text-cacao" />
+                <span className="block text-[10px] text-cacao-mute mt-0.5">{tasaBcv?.eurBs != null ? `BCV € del ${fmtFecha(tasaBcv.fecha)}: ${tasaBcv.eurBs} · automático, editable` : "sin tasa BCV para esta fecha — ponla a mano"}</span>
               </Campo>
             )}
             {moneda === "USD" && (
