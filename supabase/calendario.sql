@@ -55,8 +55,19 @@ create policy "calendario_delete_authenticated"
 create index if not exists calendario_items_fecha_idx
   on public.calendario_items (fecha);
 
--- Trigger: mantener updated_at al día. Reusa la función public.set_updated_at()
--- que ya crea schema.sql.
+-- Trigger: mantener updated_at al día. Definimos la función junto al trigger
+-- (create or replace, idempotente) para que este archivo funcione también en
+-- una base nueva desde cero, sin depender del orden con schema.sql.
+create or replace function public.set_updated_at()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$;
+
 drop trigger if exists calendario_items_set_updated_at on public.calendario_items;
 create trigger calendario_items_set_updated_at
   before update on public.calendario_items
