@@ -1,6 +1,7 @@
 import { Header } from "@/components/Header";
 import Link from "next/link";
 import { InsumosClient } from "./InsumosClient";
+import { PasoSiguiente } from "../_PasoSiguiente";
 
 export default function InsumosPage() {
   return (
@@ -27,6 +28,11 @@ export default function InsumosPage() {
           </Link>
         </section>
         <InsumosClient />
+        <PasoSiguiente
+          paso={2}
+          seguirTexto="seguir cargando insumos"
+          siguiente={{ href: "/cocina/recetas", label: "Recetas" }}
+        />
       </main>
     </>
   );
