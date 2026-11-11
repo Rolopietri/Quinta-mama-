@@ -16,6 +16,13 @@ import { createClient } from "@supabase/supabase-js";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// Envío automático de correos DESACTIVADO (nov 2026): la operación de Quinta
+// Mamá dejó de usar estos avisos (cobranza y recordatorios de tareas). Este
+// "seguro" evita que se manden aunque alguien llame la ruta manualmente.
+// Para reactivar: pon ENVIOS_AUTOMATICOS_ACTIVOS = true y vuelve a agregar el
+// cron "/api/cron/notificaciones" en vercel.json.
+const ENVIOS_AUTOMATICOS_ACTIVOS = false;
+
 // Recordatorios de vencimiento: días ANTES de la fecha límite (0 = el día que vence).
 const DIAS_AVISO = [5, 3, 1, 0];
 
@@ -45,6 +52,10 @@ async function enviarResend(key: string, from: string, to: string, subject: stri
 }
 
 export async function GET(request: Request) {
+  if (!ENVIOS_AUTOMATICOS_ACTIVOS) {
+    return NextResponse.json({ skipped: "envíos automáticos desactivados" });
+  }
+
   const secret = process.env.CRON_SECRET;
   if (secret && request.headers.get("authorization") !== `Bearer ${secret}`) {
     return NextResponse.json({ error: "no autorizado" }, { status: 401 });
