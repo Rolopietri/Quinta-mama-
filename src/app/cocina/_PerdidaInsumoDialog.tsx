@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { TIPOS_PERDIDA, type Insumo } from "@/lib/types";
 import { registrarPerdida } from "@/lib/data/stock-movimientos";
+import { updateInsumo } from "@/lib/data/cocina";
 import { displayCantidad } from "@/lib/units";
 import { extractError } from "@/lib/data/error";
 import { hoyISO } from "@/lib/ui";
@@ -77,6 +78,19 @@ export function PerdidaInsumoDialog({
         fecha,
         nota: notaFinal,
       });
+      // Sembrar el ESTÁNDAR de merma la primera vez: si el insumo no tenía merma
+      // definida, esta primera producción fija la referencia (no se auto-promedia
+      // después; solo cambia si el usuario la edita a mano).
+      if (cocido && insumo.mermaCoccionPorc == null) {
+        const pct = Number(mermaPct);
+        if (Number.isFinite(pct) && pct > 0 && pct < 100) {
+          try {
+            await updateInsumo(insumo.id, { mermaCoccionPorc: pct });
+          } catch {
+            /* no bloquear el registro de la pérdida si falla guardar el estándar */
+          }
+        }
+      }
       onRegistered(insumo.id, res.stockTotal);
       onClose();
     } catch (err) {
@@ -172,7 +186,7 @@ export function PerdidaInsumoDialog({
                 <span className="text-[10px] text-cacao-mute block mt-1">
                   {insumo.mermaCoccionPorc != null
                     ? "Sugerido desde la ficha del insumo — editable."
-                    : "% de peso que pierde al cocinarse."}
+                    : "Primera vez: este % se guardará como el estándar de merma de este insumo."}
                 </span>
               </label>
               <div className="rounded-lg bg-marfil-soft p-2 text-sm">
