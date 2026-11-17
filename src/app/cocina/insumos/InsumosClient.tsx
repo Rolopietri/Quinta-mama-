@@ -33,11 +33,12 @@ import {
   displayCantidad,
   unidadesEnUso,
 } from "@/lib/units";
-import { stockLibre } from "@/lib/types";
+import { stockLibre, stockFisicoTotal } from "@/lib/types";
 import { normalizarBusqueda } from "@/lib/text";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { WarningIcon } from "@/components/icons";
 import { PerdidaInsumoDialog } from "../_PerdidaInsumoDialog";
+import { ProcesarInsumoDialog } from "../_ProcesarInsumoDialog";
 import { listMovimientos, deleteMovimiento } from "@/lib/data/stock-movimientos";
 import { hoyISO } from "@/lib/ui";
 import { ErrorBanner } from "@/components/ErrorBanner";
@@ -87,6 +88,7 @@ type FormState = {
   stockUnidad: "base" | "compra";
   stockMinimo: string;
   mermaCoccionPorc: string;
+  seProcesa: boolean;
   proveedorId: string;
   notas: string;
 };
@@ -103,6 +105,7 @@ const emptyForm: FormState = {
   stockUnidad: "base",
   stockMinimo: "",
   mermaCoccionPorc: "",
+  seProcesa: false,
   proveedorId: "",
   notas: "",
 };
@@ -134,6 +137,8 @@ export function InsumosClient() {
   const [showInactivos, setShowInactivos] = useState(false);
   // Insumo al que se le va a registrar una pérdida (abre el modal).
   const [perdidaInsumo, setPerdidaInsumo] = useState<Insumo | null>(null);
+  // Insumo al que se le va a registrar un procesamiento (abre el modal, Fase B).
+  const [procesarInsumo, setProcesarInsumo] = useState<Insumo | null>(null);
   // Movimientos de stock recientes (para la lista de pérdidas con "deshacer").
   const [movs, setMovs] = useState<StockMovimiento[]>([]);
   const [pendienteBorrarMov, setPendienteBorrarMov] = useState<string | null>(
@@ -241,6 +246,7 @@ export function InsumosClient() {
       stockUnidad: "base",
       stockMinimo: ins.stockMinimo?.toString() ?? "",
       mermaCoccionPorc: ins.mermaCoccionPorc?.toString() ?? "",
+      seProcesa: ins.seProcesa,
       proveedorId: ins.proveedorId ?? "",
       notas: ins.notas ?? "",
     });
@@ -312,6 +318,7 @@ export function InsumosClient() {
             (form.stockUnidad === "compra" ? cantPC : 1),
       mermaCoccionPorc:
         form.mermaCoccionPorc === "" ? null : Number(form.mermaCoccionPorc),
+      seProcesa: form.seProcesa,
       proveedorId: form.proveedorId || undefined,
       notas: form.notas.trim() || undefined,
       activo: true,
@@ -958,6 +965,26 @@ export function InsumosClient() {
               </span>
             </label>
           </div>
+          <div className="rounded-lg ring-1 ring-marfil p-3">
+            <label className="flex items-start gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={form.seProcesa}
+                onChange={(e) =>
+                  setForm({ ...form, seProcesa: e.target.checked })
+                }
+                className="h-4 w-4 mt-0.5 accent-cacao"
+              />
+              <span className="text-sm text-cacao">
+                Se procesa (distingue crudo y procesado)
+                <span className="text-[10px] text-cacao-mute block mt-0.5">
+                  Márcalo si el insumo pasa por un proceso antes de venderse
+                  (lomito, aguacate, mango…). Así el stock separa lo crudo de lo
+                  ya listo para vender y puedes registrar “procesé X → obtuve Y”.
+                </span>
+              </span>
+            </label>
+          </div>
           <textarea
             placeholder="Notas (opcional)"
             value={form.notas}
@@ -1078,12 +1105,38 @@ export function InsumosClient() {
                         >
                           {displayCantidad(libre, i.unidadBase)}
                         </div>
-                        <div className="text-xs text-cacao-mute">
-                          {displayCantidad(i.stockTotal, i.unidadBase)} total
-                          {i.stockComprometido > 0 && (
-                            <> · {displayCantidad(i.stockComprometido, i.unidadBase)} comp.</>
-                          )}
-                        </div>
+                        {i.seProcesa ? (
+                          // Ventanilla fantasma: el número total NO crece; al pasar
+                          // el cursor se asoma el desglose crudo/procesado (Fase A).
+                          <div className="relative inline-block group/vent">
+                            <div
+                              tabIndex={0}
+                              className="text-xs text-cacao-mute border-b border-dotted border-cacao-mute/50 cursor-default"
+                            >
+                              {displayCantidad(stockFisicoTotal(i), i.unidadBase)} total
+                              {i.stockComprometido > 0 && (
+                                <> · {displayCantidad(i.stockComprometido, i.unidadBase)} comp.</>
+                              )}
+                            </div>
+                            <div className="pointer-events-none absolute left-0 top-full z-20 mt-1 hidden whitespace-nowrap rounded-lg bg-cacao/95 px-3 py-2 text-[11px] text-marfil-light shadow-lg ring-1 ring-cacao group-hover/vent:block group-focus-within/vent:block">
+                              <div>
+                                Crudo:{" "}
+                                <strong>{displayCantidad(i.stockTotal, i.unidadBase)}</strong>
+                              </div>
+                              <div>
+                                Procesado:{" "}
+                                <strong>{displayCantidad(i.stockProcesado, i.unidadBase)}</strong>
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="text-xs text-cacao-mute">
+                            {displayCantidad(i.stockTotal, i.unidadBase)} total
+                            {i.stockComprometido > 0 && (
+                              <> · {displayCantidad(i.stockComprometido, i.unidadBase)} comp.</>
+                            )}
+                          </div>
+                        )}
                         {i.stockMinimo !== null && i.stockMinimo > 0 && (
                           <div className="text-xs text-cacao-mute">
                             min: {i.stockMinimo}
@@ -1093,6 +1146,15 @@ export function InsumosClient() {
                       <div className="col-span-4 sm:col-span-2 flex sm:justify-end gap-3 text-xs uppercase tracking-widest">
                         {i.activo ? (
                           <>
+                            {i.seProcesa && (
+                              <button
+                                onClick={() => setProcesarInsumo(i)}
+                                className="text-cacao-soft hover:text-cacao"
+                                title="Registrar procesamiento: procesé X crudo → obtuve Y procesado"
+                              >
+                                Procesar
+                              </button>
+                            )}
                             <button
                               onClick={() => setPerdidaInsumo(i)}
                               className="text-cacao-soft hover:text-terracotta"
@@ -1266,6 +1328,27 @@ export function InsumosClient() {
               ),
             );
             // Refrescar la lista de pérdidas recientes con la nueva.
+            listMovimientos({ limit: 60 })
+              .then(setMovs)
+              .catch(() => {});
+          }}
+        />
+      )}
+
+      {procesarInsumo && (
+        <ProcesarInsumoDialog
+          key={procesarInsumo.id}
+          insumo={procesarInsumo}
+          onClose={() => setProcesarInsumo(null)}
+          onRegistered={(insumoId, r) => {
+            setItems((prev) =>
+              prev.map((x) =>
+                x.id === insumoId
+                  ? { ...x, stockTotal: r.stockCrudo, stockProcesado: r.stockProcesado }
+                  : x,
+              ),
+            );
+            // La merma del procesamiento entra al libro: refrescar pérdidas.
             listMovimientos({ limit: 60 })
               .then(setMovs)
               .catch(() => {});
